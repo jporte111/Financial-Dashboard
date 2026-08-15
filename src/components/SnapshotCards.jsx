@@ -24,7 +24,7 @@ export default function SnapshotCards({ period, budgetStatus }) {
       <Card label="YTD Expenses" value={fmtCurrency(period.ytd_expenses)} subtitle={`Expenses through ${period.label.split(' ')[0]}`} />
       <Card
         label="Budget Status"
-        value={`${fmtCurrency(Math.abs(budgetStatus.variance))} ${over ? 'Over' : 'Under'} Budget`}
+        value={fmtCurrency(Math.abs(budgetStatus.variance))}
         subtitle={`${fmtPct(Math.abs(budgetStatus.pct))} ${over ? 'Over' : 'Under'} Budget`}
       >
         <div className="mt-3">
