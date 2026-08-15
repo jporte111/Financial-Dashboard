@@ -1,0 +1,100 @@
+{
+  "name": "Transaction",
+  "type": "object",
+  "properties": {
+    "period_id": {
+      "type": "string"
+    },
+    "qb_transaction_id": {
+      "type": "string"
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "vendor": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "amount": {
+      "type": "number"
+    },
+    "transaction_type": {
+      "type": "string",
+      "enum": [
+        "expense",
+        "income",
+        "transfer",
+        "distribution",
+        "refund"
+      ],
+      "default": "expense"
+    },
+    "qb_account": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
+    "budget_group": {
+      "type": "string",
+      "enum": [
+        "fixed",
+        "variable",
+        "discretionary",
+        "income",
+        "savings"
+      ]
+    },
+    "treatment": {
+      "type": "string",
+      "enum": [
+        "personal",
+        "savings_distribution",
+        "unclassified"
+      ],
+      "default": "personal"
+    },
+    "is_refund": {
+      "type": "boolean",
+      "default": false
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "quickbooks",
+        "manual",
+        "import"
+      ],
+      "default": "manual"
+    },
+    "review_status": {
+      "type": "string",
+      "enum": [
+        "unreviewed",
+        "needs_review",
+        "reviewed"
+      ],
+      "default": "unreviewed"
+    },
+    "review_flags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "reviewed_by": {
+      "type": "string"
+    },
+    "internal_notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "period_id",
+    "date",
+    "amount"
+  ]
+}

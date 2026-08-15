@@ -1,0 +1,128 @@
+{
+  "name": "ReportingPeriod",
+  "type": "object",
+  "properties": {
+    "label": {
+      "type": "string",
+      "description": "e.g. July 2026"
+    },
+    "month": {
+      "type": "number"
+    },
+    "year": {
+      "type": "number"
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "end_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "transactions_posted",
+        "categories_reviewed",
+        "classes_reviewed",
+        "reports_reviewed",
+        "final"
+      ],
+      "default": "draft"
+    },
+    "months_elapsed": {
+      "type": "number",
+      "default": 1
+    },
+    "published": {
+      "type": "boolean",
+      "default": false
+    },
+    "publication_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "reviewed_by": {
+      "type": "string"
+    },
+    "last_updated": {
+      "type": "string",
+      "format": "date"
+    },
+    "total_cash": {
+      "type": "number",
+      "default": 0
+    },
+    "ytd_income": {
+      "type": "number",
+      "default": 0
+    },
+    "ytd_expenses": {
+      "type": "number",
+      "default": 0
+    },
+    "month_income": {
+      "type": "number",
+      "default": 0
+    },
+    "month_expenses": {
+      "type": "number",
+      "default": 0
+    },
+    "distributions_ytd": {
+      "type": "number",
+      "default": 0
+    },
+    "savings_in_ytd": {
+      "type": "number",
+      "default": 0
+    },
+    "savings_spend_ytd": {
+      "type": "number",
+      "default": 0
+    },
+    "checklist": {
+      "type": "object",
+      "properties": {
+        "categories_reviewed": {
+          "type": "boolean",
+          "default": false
+        },
+        "classes_reviewed": {
+          "type": "boolean",
+          "default": false
+        },
+        "refunds_reviewed": {
+          "type": "boolean",
+          "default": false
+        },
+        "income_reviewed": {
+          "type": "boolean",
+          "default": false
+        },
+        "cash_confirmed": {
+          "type": "boolean",
+          "default": false
+        },
+        "distributions_confirmed": {
+          "type": "boolean",
+          "default": false
+        },
+        "budget_report_reviewed": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "internal_notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "label",
+    "month",
+    "year"
+  ]
+}

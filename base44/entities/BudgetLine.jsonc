@@ -1,0 +1,61 @@
+{
+  "name": "BudgetLine",
+  "type": "object",
+  "properties": {
+    "period_id": {
+      "type": "string"
+    },
+    "qb_code": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
+    "budget_group": {
+      "type": "string",
+      "enum": [
+        "fixed",
+        "variable",
+        "discretionary",
+        "income",
+        "savings"
+      ],
+      "default": "variable"
+    },
+    "month_actual": {
+      "type": "number",
+      "default": 0
+    },
+    "ytd_actual": {
+      "type": "number",
+      "default": 0
+    },
+    "annual_budget": {
+      "type": "number",
+      "default": 0
+    },
+    "pace_method": {
+      "type": "string",
+      "enum": [
+        "even",
+        "custom",
+        "none"
+      ],
+      "default": "even"
+    },
+    "expected_ytd_override": {
+      "type": "number"
+    },
+    "drilldown_enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "internal_notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "period_id",
+    "category"
+  ]
+}
