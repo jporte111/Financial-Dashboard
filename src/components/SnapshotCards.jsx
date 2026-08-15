@@ -7,7 +7,7 @@ function Card({ label, value, subtitle, children }) {
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-6 transition hover:shadow-[0_2px_24px_rgba(0,0,0,0.05)]">
       <p className="text-xs uppercase tracking-[0.14em] text-stone-500">{label}</p>
-      <p className="mt-3 font-display text-2xl md:text-[28px] leading-tight tracking-tight">{value}</p>
+      <p className="mt-3 font-body text-2xl md:text-[28px] leading-tight tracking-tight tabular-nums">{value}</p>
       {subtitle && <p className="mt-2 text-sm text-stone-500">{subtitle}</p>}
       {children}
     </div>
