@@ -47,7 +47,7 @@ export const STATUS_TEXT = { under: 'Under Budget', near: 'Near Budget', over: '
 export const STATUS_STYLES = {
   under: { text: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', bar: 'bg-emerald-500', dot: 'bg-emerald-500' },
   near: { text: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200', bar: 'bg-amber-500', dot: 'bg-amber-500' },
-  over: { text: 'text-rose-700', bg: 'bg-rose-50', border: 'border-rose-200', bar: 'bg-rose-500', dot: 'bg-rose-500' },
+  over: { text: 'text-rose-800', bg: 'bg-rose-50', border: 'border-rose-300', bar: 'bg-rose-500', dot: 'bg-rose-800' },
 };
 
 export function aggregateGroup(lines, monthsElapsed) {
