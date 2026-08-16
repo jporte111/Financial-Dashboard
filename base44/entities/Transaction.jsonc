@@ -35,6 +35,13 @@
     "qb_account": {
       "type": "string"
     },
+    "account_id": {
+      "type": "string",
+      "description": "Linked Account id in the chart of accounts (for budget roll-up)"
+    },
+    "full_account_path": {
+      "type": "string"
+    },
     "category": {
       "type": "string"
     },
@@ -52,7 +59,7 @@
       "type": "string",
       "enum": [
         "personal",
-        "savings_distribution",
+        "snvs",
         "unclassified"
       ],
       "default": "personal"
