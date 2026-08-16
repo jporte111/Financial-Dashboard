@@ -37,6 +37,11 @@ export default function Layout() {
                 )}
               </div>
               <div className="flex items-center gap-3">
+                {ctx.period && (
+                  <span className="hidden sm:inline-flex items-center rounded-full bg-stone-100 px-3 py-2 text-xs font-medium uppercase tracking-[0.14em] text-stone-500">
+                    Year to Date
+                  </span>
+                )}
                 <PeriodSelector periods={ctx.periods} periodId={ctx.periodId} onChange={ctx.setPeriodId} />
                 <button
                   onClick={() => base44.auth.logout('/login')}
