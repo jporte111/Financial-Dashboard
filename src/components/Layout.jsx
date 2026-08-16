@@ -38,9 +38,17 @@ export default function Layout() {
               </div>
               <div className="flex items-center gap-3">
                 {ctx.period && (
-                  <span className="hidden sm:inline-flex items-center rounded-full bg-stone-100 px-3 py-2 text-xs font-medium uppercase tracking-[0.14em] text-stone-500">
+                  <button
+                    onClick={() => ctx.periods[0] && ctx.setPeriodId(ctx.periods[0].id)}
+                    className={`hidden sm:inline-flex items-center rounded-full border px-3 py-2 text-xs font-medium uppercase tracking-[0.14em] transition ${
+                      ctx.periodId === ctx.periods[0]?.id
+                        ? 'border-stone-900 bg-stone-900 text-white'
+                        : 'border-stone-200 bg-white text-stone-500 hover:bg-stone-100'
+                    }`}
+                    title="Show year-to-date through the latest month"
+                  >
                     Year to Date
-                  </span>
+                  </button>
                 )}
                 <PeriodSelector periods={ctx.periods} periodId={ctx.periodId} onChange={ctx.setPeriodId} />
                 <button
