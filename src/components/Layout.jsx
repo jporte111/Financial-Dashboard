@@ -39,15 +39,15 @@ export default function Layout() {
               <div className="flex items-center gap-3">
                 {ctx.period && (
                   <button
-                    onClick={() => ctx.periods[0] && ctx.setPeriodId(ctx.periods[0].id)}
+                    onClick={() => ctx.setYtdMode(!ctx.ytdMode)}
                     className={`hidden sm:inline-flex items-center rounded-full border px-3 py-2 text-xs font-medium uppercase tracking-[0.14em] transition ${
-                      ctx.periodId === ctx.periods[0]?.id
+                      ctx.ytdMode
                         ? 'border-stone-900 bg-stone-900 text-white'
                         : 'border-stone-200 bg-white text-stone-500 hover:bg-stone-100'
                     }`}
-                    title="Show year-to-date through the latest month"
+                    title={ctx.ytdMode ? 'Showing year-to-date (Jan 1 through selected month)' : 'Showing selected month only — click for year-to-date'}
                   >
-                    Year to Date
+                    {ctx.ytdMode ? 'Year to Date' : 'This Month'}
                   </button>
                 )}
                 <PeriodSelector periods={ctx.periods} periodId={ctx.periodId} onChange={ctx.setPeriodId} />

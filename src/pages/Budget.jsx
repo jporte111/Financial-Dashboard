@@ -10,19 +10,20 @@ import StatusPill from '@/components/StatusPill';
 const GROUPS = ['fixed', 'variable', 'discretionary'];
 
 export default function Budget() {
-  const { period, periodId } = usePeriodContext();
+  const { period, periodId, ytdMode } = usePeriodContext();
   const { items: lines } = useEntityByPeriod('BudgetLine', periodId);
   const me = period.months_elapsed || 12;
+  const useMonth = !ytdMode;
   const all = lines || [];
   const expenseLines = all.filter((l) => GROUPS.includes(l.budget_group));
   const incomeLines = all.filter((l) => l.budget_group === 'income');
   const savingsLines = all.filter((l) => l.budget_group === 'savings');
-  const groups = GROUPS.map((key) => ({ key, totals: aggregateGroup(expenseLines.filter((l) => l.budget_group === key), me) }));
+  const groups = GROUPS.map((key) => ({ key, totals: aggregateGroup(expenseLines.filter((l) => l.budget_group === key), me, useMonth) }));
 
   return (
     <div className="space-y-14">
       <section>
-        <SectionHeading title="Budget Overview" subtitle={period.label} />
+        <SectionHeading title="Budget Overview" subtitle={`${period.label} · ${ytdMode ? 'Year to Date' : 'This Month'}`} />
         <GroupOverview groups={groups} />
       </section>
 
@@ -30,7 +31,7 @@ export default function Budget() {
         <SectionHeading title="Budget Progress by Category" />
         <div className="space-y-3">
           {expenseLines.map((l) => {
-            const c = computeLine(l, me);
+            const c = computeLine(l, me, useMonth);
             return (
               <div key={l.id} className="rounded-2xl border border-stone-200 bg-white p-6">
                 <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -48,7 +49,7 @@ export default function Budget() {
                 <div className="mt-3 grid grid-cols-2 gap-y-2 text-sm md:grid-cols-4">
                   <p className="text-stone-500">Remaining <span className="ml-1 tabular-nums text-stone-900">{fmtCurrency(c.remaining)}</span></p>
                   <p className="text-stone-500">Used <span className="ml-1 tabular-nums text-stone-900">{fmtPct(c.pctUsed)}</span></p>
-                  <p className="text-stone-500">Expected YTD <span className="ml-1 tabular-nums text-stone-900">{fmtCurrency(c.expected)}</span></p>
+                  <p className="text-stone-500">{ytdMode ? 'Expected YTD' : 'Expected'} <span className="ml-1 tabular-nums text-stone-900">{fmtCurrency(c.expected)}</span></p>
                   <p className="text-stone-500">
                     Pace <span className="ml-1 tabular-nums text-stone-900">{fmtCurrency(Math.abs(c.variance))} {c.variance >= 0 ? 'under' : 'over'}</span>
                   </p>

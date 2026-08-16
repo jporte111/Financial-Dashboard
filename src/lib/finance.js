@@ -19,19 +19,21 @@ export const GROUP_LABELS = {
 };
 
 // Core budget math for a single line
-export function computeLine(line, monthsElapsed = 12) {
+export function computeLine(line, monthsElapsed = 12, useMonth = false) {
   const annual = Number(line.annual_budget || 0);
-  const ytd = Number(line.ytd_actual || 0);
-  const remaining = annual - ytd;
-  const pctUsed = annual ? (ytd / annual) * 100 : 0;
+  const actual = useMonth ? Number(line.month_actual || 0) : Number(line.ytd_actual || 0);
+  const months = useMonth ? 1 : monthsElapsed;
+  const remaining = annual - actual;
+  const pctUsed = annual ? (actual / annual) * 100 : 0;
   let expected;
-  if (line.pace_method === 'none') expected = annual;
+  if (useMonth) expected = annual / 12;
+  else if (line.pace_method === 'none') expected = annual;
   else if (line.pace_method === 'custom' && line.expected_ytd_override != null)
     expected = Number(line.expected_ytd_override);
   else expected = (annual * monthsElapsed) / 12;
-  const variance = expected - ytd; // positive = under pace
+  const variance = expected - actual; // positive = under pace
   const pctVariance = expected ? (variance / expected) * -100 : 0;
-  return { annual, ytd, remaining, pctUsed, expected, variance, pctVariance, status: statusOf(variance, expected) };
+  return { annual, ytd: actual, remaining, pctUsed, expected, variance, pctVariance, status: statusOf(variance, expected) };
 }
 
 export function statusOf(variance, expected) {
@@ -50,10 +52,10 @@ export const STATUS_STYLES = {
   over: { text: 'text-rose-800', bg: 'bg-rose-50', border: 'border-rose-300', bar: 'bg-rose-500', dot: 'bg-rose-800' },
 };
 
-export function aggregateGroup(lines, monthsElapsed) {
+export function aggregateGroup(lines, monthsElapsed, useMonth = false) {
   const totals = lines.reduce(
     (acc, l) => {
-      const c = computeLine(l, monthsElapsed);
+      const c = computeLine(l, monthsElapsed, useMonth);
       acc.month += Number(l.month_actual || 0);
       acc.ytd += c.ytd;
       acc.annual += c.annual;

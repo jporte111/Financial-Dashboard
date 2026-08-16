@@ -9,6 +9,7 @@ export function usePeriodData() {
   const [user, setUser] = useState(null);
   const [periods, setPeriods] = useState([]);
   const [periodId, setPeriodId] = useState(null);
+  const [ytdMode, setYtdMode] = useState(true);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
@@ -27,5 +28,5 @@ export function usePeriodData() {
   useEffect(() => { load(); }, []);
 
   const period = periods.find((p) => p.id === periodId) || null;
-  return { user, isAdmin: user?.role === 'admin', periods, period, periodId, setPeriodId, loading, reload: load };
+  return { user, isAdmin: user?.role === 'admin', periods, period, periodId, setPeriodId, ytdMode, setYtdMode, loading, reload: load };
 }
