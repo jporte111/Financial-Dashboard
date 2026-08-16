@@ -10,6 +10,7 @@ import ReviewQueue from '@/components/admin/ReviewQueue';
 import PeriodsManager from '@/components/admin/PeriodsManager';
 import TransactionsEditor from '@/components/admin/TransactionsEditor';
 import AccountHierarchyManager from '@/components/admin/AccountHierarchyManager';
+import ImportCenter from '@/components/admin/ImportCenter';
 
 export default function Admin() {
   const { user, isAdmin, period, periodId, periods, setPeriodId, reload } = usePeriodContext();
@@ -28,6 +29,7 @@ export default function Admin() {
         <TabsTrigger value="data" className="rounded-full">Monthly Data</TabsTrigger>
         <TabsTrigger value="transactions" className="rounded-full">Transactions</TabsTrigger>
         <TabsTrigger value="accounts" className="rounded-full">Accounts</TabsTrigger>
+        <TabsTrigger value="import" className="rounded-full">Import</TabsTrigger>
         <TabsTrigger value="review" className="rounded-full">Review & Publish</TabsTrigger>
         <TabsTrigger value="periods" className="rounded-full">Periods</TabsTrigger>
       </TabsList>
@@ -97,6 +99,10 @@ export default function Admin() {
 
       <TabsContent value="accounts">
         <AccountHierarchyManager />
+      </TabsContent>
+
+      <TabsContent value="import">
+        <ImportCenter />
       </TabsContent>
 
       <TabsContent value="review" className="space-y-5">
