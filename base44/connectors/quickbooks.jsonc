@@ -1,0 +1,9 @@
+{
+  "type": "quickbooks",
+  "scopes": [
+    "com.intuit.quickbooks.accounting",
+    "openid",
+    "email",
+    "profile"
+  ]
+}
