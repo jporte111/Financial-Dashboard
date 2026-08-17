@@ -15,15 +15,16 @@ import StatusPill from '@/components/StatusPill';
 const GROUPS = ['fixed', 'variable', 'discretionary'];
 
 export default function Dashboard() {
-  const { period, periodId } = usePeriodContext();
+  const { period, periodId, ytdMode } = usePeriodContext();
   const { items: lines } = useEntityByPeriod('BudgetLine', periodId);
   const { items: accounts } = useEntityByPeriod('CashAccount', periodId, 'sort_order');
   const { items: transfers } = useEntityByPeriod('RecurringTransfer', periodId);
   const [selected, setSelected] = useState(null);
 
+  const useMonth = !ytdMode;
   const me = period.months_elapsed || 12;
   const expenseLines = (lines || []).filter((l) => GROUPS.includes(l.budget_group));
-  const groups = GROUPS.map((key) => ({ key, totals: aggregateGroup(expenseLines.filter((l) => l.budget_group === key), me) }));
+  const groups = GROUPS.map((key) => ({ key, totals: aggregateGroup(expenseLines.filter((l) => l.budget_group === key), me, useMonth) }));
   const disc = groups.find((g) => g.key === 'discretionary').totals;
   const budgetStatus = {
     variance: disc.variance,
@@ -32,7 +33,7 @@ export default function Dashboard() {
   };
 
   const attention = expenseLines
-    .map((l) => ({ l, c: computeLine(l, me) }))
+    .map((l) => ({ l, c: computeLine(l, me, useMonth) }))
     .filter((x) => x.c.variance < 0)
     .sort((a, b) => a.c.variance - b.c.variance)
     .slice(0, 6);
