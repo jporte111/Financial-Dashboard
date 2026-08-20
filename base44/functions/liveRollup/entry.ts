@@ -1,8 +1,13 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { buildIndexes, rollUp, resolveBudgetAccount, norm } from '../../shared/rollupHelpers.ts';
+import { buildIndexes, rollUpByAccount } from '../../shared/rollupHelpers.ts';
 
-// Compute live monthly + YTD actuals per category, merged with the stored
-// BudgetLine snapshots so Spending Detail can show both side by side.
+// Two outputs from the live (QuickBooks) layer:
+//   rows         — Spending Detail: one row per BudgetLine (Excel report of
+//                  record), with the live QBO column = sum of every QBO account
+//                  whose account_code equals the line's qb_code.
+//   liveAccounts — Live QuickBooks page: one row per QBO account that received
+//                  transactions, with live YTD/month totals.
+// Pairing is by code at display time; the import hierarchy is not involved.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -22,9 +27,10 @@ export default async function(req) {
     const ytdPeriodIds = yearPeriods.filter((p) => p.month <= period.month).map((p) => p.id);
 
     const accounts = await base44.asServiceRole.entities.Account.filter({});
-    const { byId, byCode, byNormName } = buildIndexes(accounts);
+    const { byCode } = buildIndexes(accounts);
+    const qboIdSet = new Set(accounts.filter((a) => a.source === 'quickbooks').map((a) => a.id));
 
-    // Load all YTD transactions (across every period Jan..current month).
+    // All YTD transactions (across every period Jan..current month).
     let ytdTxns = [];
     if (ytdPeriodIds.length) {
       const batches = await Promise.all(
@@ -41,83 +47,31 @@ export default async function(req) {
       return d && d >= start && d <= end;
     });
 
-    const ytdTotals = rollUp(ytdTxns, byId, byCode, byNormName);
-    const monthTotals = rollUp(monthTxns, byId, byCode, byNormName);
+    const ytdTotals = rollUpByAccount(ytdTxns, qboIdSet);
+    const monthTotals = rollUpByAccount(monthTxns, qboIdSet);
 
-    // Stored Excel/BudgetLine snapshots for the selected period.
     const budgetLines = await base44.asServiceRole.entities.BudgetLine.filter({ period_id: periodId });
 
-    const rows = {};
-    const makeRow = (acc) => ({
-      account_id: acc.id,
-      category: acc.account_name,
-      budget_group: acc.top_level_group,
-      qb_code: acc.account_code || '',
-      annual_budget: Number(acc.annual_budget || 0),
-      pace_method: 'even',
-      expected_ytd_override: null,
-      drilldown_enabled: true,
-      snapshot_month: 0,
-      snapshot_ytd: 0,
-      has_snapshot: false,
-      live_ytd: 0,
-      live_month_value: 0,
-      has_live: false,
-    });
-
-    // Rows for every account that received rolled-up transactions (budget parent
-    // when configured, otherwise the account itself).
-    for (const id of new Set([...Object.keys(ytdTotals), ...Object.keys(monthTotals)])) {
-      const acc = byId[id];
-      if (!acc) continue;
-      const row = makeRow(acc);
-      row.live_ytd = ytdTotals[id]?.actual || 0;
-      row.live_month_value = monthTotals[id]?.actual || 0;
-      row.has_live = (ytdTotals[id]?.count || 0) > 0;
-      rows[id] = row;
-    }
-
-    // Merge BudgetLine snapshots into the account that carries that category's
-    // live totals: match by normalized name, then resolve up the hierarchy (or
-    // use the account itself when it isn't configured to roll up). When several
-    // accounts share a name (duplicate accounts from mixed imports), prefer the
-    // one that actually received rolled-up transactions so the snapshot pairs
-    // with the live row.
-    const matchedLineIds = new Set();
-    const accountsByNorm = {};
-    for (const a of accounts) {
-      const k = norm(a.account_name);
-      (accountsByNorm[k] = accountsByNorm[k] || []).push(a);
-    }
-    for (const l of budgetLines) {
-      const key = norm(l.category);
-      const cands = accountsByNorm[key];
-      if (!cands || !cands.length) continue; // no account by that name -> snapshot-only row below
-      const acc = cands.find((c) => rows[c.id] && rows[c.id].has_live) || cands.find((c) => c.has_own_budget) || cands[0];
-      const target = resolveBudgetAccount(acc, byId) || acc;
-      if (!rows[target.id]) rows[target.id] = makeRow(target);
-      const row = rows[target.id];
-      if (row.has_snapshot) continue; // one snapshot per category
-      matchedLineIds.add(l.id);
-      row.has_snapshot = true;
-      row.snapshot_month = Number(l.month_actual || 0);
-      row.snapshot_ytd = Number(l.ytd_actual || 0);
-      row.annual_budget = Number(l.annual_budget || 0);
-      row.pace_method = l.pace_method || 'even';
-      row.expected_ytd_override = l.expected_ytd_override ?? null;
-      row.drilldown_enabled = l.drilldown_enabled !== false;
-      row.qb_code = l.qb_code || row.qb_code;
-    }
-
-    // Budget lines that don't map to any budget account — snapshot-only rows.
-    const unmatchedRows = [];
-    for (const l of budgetLines) {
-      if (matchedLineIds.has(l.id)) continue;
-      unmatchedRows.push({
+    // Spending Detail rows — one per BudgetLine (the Excel report of record).
+    // The live column sums every QBO account whose account_code == qb_code.
+    const rows = budgetLines.map((l) => {
+      const code = l.qb_code || '';
+      const matching = code ? (byCode[code] || []) : [];
+      let liveYtd = 0;
+      let liveMonth = 0;
+      let hasLive = false;
+      for (const a of matching) {
+        const y = ytdTotals[a.id];
+        const m = monthTotals[a.id];
+        if (y) { liveYtd += y.actual; if (y.count) hasLive = true; }
+        if (m) liveMonth += m.actual;
+      }
+      return {
         account_id: null,
+        account_ids: matching.map((a) => a.id),
         category: l.category,
         budget_group: l.budget_group,
-        qb_code: l.qb_code || '',
+        qb_code: code,
         annual_budget: Number(l.annual_budget || 0),
         pace_method: l.pace_method || 'even',
         expected_ytd_override: l.expected_ytd_override ?? null,
@@ -125,13 +79,27 @@ export default async function(req) {
         snapshot_month: Number(l.month_actual || 0),
         snapshot_ytd: Number(l.ytd_actual || 0),
         has_snapshot: true,
-        live_ytd: 0,
-        live_month_value: 0,
-        has_live: false,
-      });
-    }
+        live_ytd: liveYtd,
+        live_month_value: liveMonth,
+        has_live: hasLive,
+      };
+    });
 
-    const allRows = [...Object.values(rows), ...unmatchedRows];
+    // Live QuickBooks rows — one per QBO account that received transactions.
+    const liveAccounts = accounts
+      .filter((a) => a.source === 'quickbooks' && (ytdTotals[a.id] || monthTotals[a.id]))
+      .map((a) => ({
+        account_id: a.id,
+        account_name: a.account_name,
+        qb_code: a.account_code || '',
+        budget_group: a.top_level_group,
+        full_account_path: a.full_account_path || '',
+        account_type: a.account_type,
+        live_ytd: ytdTotals[a.id]?.actual || 0,
+        live_month_value: monthTotals[a.id]?.actual || 0,
+        count: ytdTotals[a.id]?.count || 0,
+      }))
+      .sort((a, b) => b.live_ytd - a.live_ytd);
 
     // Warn when YTD is requested but no prior-month transactions exist.
     let notice = null;
@@ -148,9 +116,10 @@ export default async function(req) {
     return Response.json({
       period_id: periodId,
       period_label: period.label,
-      rows: allRows,
+      rows,
+      liveAccounts,
       notice,
-      counts: { ytd_transactions: ytdTxns.length, month_transactions: monthTxns.length, accounts: accounts.length },
+      counts: { ytd_transactions: ytdTxns.length, month_transactions: monthTxns.length, qbo_accounts: qboIdSet.size },
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

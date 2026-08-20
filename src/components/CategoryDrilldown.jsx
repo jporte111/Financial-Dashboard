@@ -25,6 +25,7 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
       .invoke('categoryTransactions', {
         period_id: periodId,
         account_id: line.account_id || null,
+        qb_code: line.qb_code || null,
         category: line.category,
       })
       .then((res) => {
@@ -36,7 +37,8 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
     return () => { cancelled = true; };
   }, [line, periodId]);
 
-  const c = line ? computeLine(line, monthsElapsed) : null;
+  const hasBudgetContext = line && (line.has_snapshot || (line.annual_budget && Number(line.annual_budget) > 0));
+  const c = hasBudgetContext ? computeLine(line, monthsElapsed) : null;
 
   return (
     <Sheet open={!!line} onOpenChange={(o) => !o && onClose()}>
@@ -44,22 +46,27 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
         {line && (
           <>
             <SheetHeader>
-              <SheetTitle className="font-display text-2xl tracking-tight">{line.category}</SheetTitle>
+              <SheetTitle className="font-display text-2xl tracking-tight">{line.category || line.account_name}</SheetTitle>
             </SheetHeader>
-            <div className="mt-4">
-              <StatusPill status={c.status} />
-            </div>
-            <div className="mt-5 grid grid-cols-2 gap-3">
-              <Stat label="Annual Budget" value={fmtCurrency(c.annual)} />
-              <Stat label="YTD Actual" value={fmtCurrency(c.ytd)} />
-              <Stat label="Budget Remaining" value={fmtCurrency(c.remaining)} />
-              <Stat label="Budget Used" value={fmtPct(c.pctUsed)} />
-              <Stat
-                label="Budget Pace Variance"
-                value={`${fmtCurrency(Math.abs(c.variance))} ${c.variance >= 0 ? 'Under' : 'Over'}`}
-              />
-              <Stat label="Current Month" value={fmtCurrency(line.month_actual)} />
-            </div>
+
+            {hasBudgetContext && (
+              <>
+                <div className="mt-4">
+                  <StatusPill status={c.status} />
+                </div>
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  <Stat label="Annual Budget" value={fmtCurrency(c.annual)} />
+                  <Stat label="YTD Actual" value={fmtCurrency(c.ytd)} />
+                  <Stat label="Budget Remaining" value={fmtCurrency(c.remaining)} />
+                  <Stat label="Budget Used" value={fmtPct(c.pctUsed)} />
+                  <Stat
+                    label="Budget Pace Variance"
+                    value={`${fmtCurrency(Math.abs(c.variance))} ${c.variance >= 0 ? 'Under' : 'Over'}`}
+                  />
+                  <Stat label="Current Month" value={fmtCurrency(line.month_actual)} />
+                </div>
+              </>
+            )}
 
             <div className="mt-8 flex items-center justify-between">
               <h4 className="text-xs uppercase tracking-[0.14em] text-stone-500">Transactions</h4>

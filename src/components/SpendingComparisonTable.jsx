@@ -5,8 +5,9 @@ import StatusPill from '@/components/StatusPill';
 import { ChevronRight } from 'lucide-react';
 
 // Side-by-side comparison table: live QuickBooks-rolled-up totals beside the
-// stored Excel (BudgetLine) snapshots, with bars/pills/variance from the live
-// figures and a per-row diff between the two sources.
+// stored Excel (BudgetLine) snapshots. Each row is a BudgetLine (the report of
+// record); the live column sums every QBO account whose account_code equals
+// the line's qb_code.
 export default function SpendingComparisonTable({ rows, monthsElapsed, useMonth = false, onSelect }) {
   if (!rows || !rows.length)
     return <p className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-sm text-stone-500">No categories for this period.</p>;
@@ -35,7 +36,7 @@ export default function SpendingComparisonTable({ rows, monthsElapsed, useMonth 
         const line = { ...r, ytd_actual: r.live_ytd, month_actual: r.live_month_value };
         return (
           <div
-            key={r.account_id || r.category}
+            key={r.qb_code || r.category}
             onClick={() => clickable && onSelect(line)}
             className={`grid grid-cols-1 gap-4 px-6 py-5 md:grid-cols-12 md:items-center ${i ? 'border-t border-stone-100' : ''} ${
               clickable ? 'cursor-pointer transition hover:bg-stone-50' : ''

@@ -18,8 +18,6 @@ function mapType(classification) {
 }
 
 // Infer our budget group from the QuickBooks Classification + the top-most ancestor's label.
-// Revenue accounts are always 'income'; expense accounts fall into fixed/variable/discretionary
-// by their numbered section ancestor, defaulting to discretionary.
 function groupFromChain(chain, classification) {
   const top = chain[0]?.Name?.toLowerCase() || '';
   if (top.includes('saving') || top.includes('snvs') || top.includes('distribution')) return 'savings';
@@ -76,36 +74,39 @@ export default async function(req) {
         .map((x) => `${x.AcctNum} - ${cleanName(x.Name)}`)
         .join(':');
 
-    // Index QuickBooks accounts by their account number for matching.
-    const qbByCode = new Map();
-    for (const a of pAndL) {
-      if (a.AcctNum) qbByCode.set(String(a.AcctNum), a);
-    }
-
-    // Load all existing app Accounts (service role — admin operation).
+    // Load existing app Accounts. The QBO chart of accounts is maintained by
+    // quickbooks_account_id — create once, update on later runs. Import-source
+    // accounts are never matched or touched here (they're a separate layer).
     const existing = await base44.asServiceRole.entities.Account.filter({});
-    const byCode = new Map(existing.filter((a) => a.account_code).map((a) => [String(a.account_code), a]));
+    const byQbId = new Map(
+      existing.filter((a) => a.quickbooks_account_id && a.source === 'quickbooks').map((a) => [String(a.quickbooks_account_id), a])
+    );
 
-    let matched = 0;
+    // Update existing QBO accounts (re-classify so fixes to the inference propagate).
     const updates = [];
-    for (const [code, qb] of qbByCode) {
-      const app = byCode.get(code);
+    let matched = 0;
+    for (const qb of pAndL) {
+      if (!qb.AcctNum) continue;
+      const app = byQbId.get(String(qb.Id));
       if (!app) continue;
-      const patch = { quickbooks_account_id: String(qb.Id), account_type: mapType(qb.Classification), active: qb.Active !== false, source: 'quickbooks' };
-      // Re-classify auto-created accounts so fixes to the inference propagate; leave manually-created groups alone.
-      if (app.source === 'quickbooks') patch.top_level_group = groupFromChain(chainOf(qb), qb.Classification);
-      updates.push(base44.asServiceRole.entities.Account.update(app.id, patch));
+      updates.push(
+        base44.asServiceRole.entities.Account.update(app.id, {
+          account_name: cleanName(qb.Name),
+          full_account_path: pathOf(qb),
+          account_type: mapType(qb.Classification),
+          top_level_group: groupFromChain(chainOf(qb), qb.Classification),
+          active: qb.Active !== false,
+        })
+      );
       matched++;
     }
     if (updates.length) await Promise.all(updates);
 
-    // Create QuickBooks accounts that have no matching app record (section headers without codes are skipped).
-    const existingIds = new Set(existing.map((a) => a.quickbooks_account_id).filter(Boolean));
+    // Create QBO accounts not yet tracked (by quickbooks_account_id).
     const toCreate = [];
     for (const qb of pAndL) {
       if (!qb.AcctNum) continue;
-      if (existingIds.has(String(qb.Id))) continue;
-      if (byCode.has(String(qb.AcctNum))) continue;
+      if (byQbId.has(String(qb.Id))) continue;
       toCreate.push({
         account_code: String(qb.AcctNum),
         account_name: cleanName(qb.Name),

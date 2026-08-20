@@ -1,8 +1,11 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { buildIndexes, lineAccountFor, norm } from '../../shared/rollupHelpers.ts';
+import { norm } from '../../shared/rollupHelpers.ts';
 
-// Return the YTD transactions that roll up to a given account, so the Spending
-// Detail drill-down can show the exact ledger behind a category's live total.
+// Return the YTD transactions behind a category or live account, for drill-down.
+// Resolution order:
+//   qb_code    — Spending Detail: all QBO accounts sharing that account_code.
+//   account_id — Live QuickBooks page: a single QBO account.
+//   category   — Snapshot-only fallback (legacy/import rows with no code).
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -11,9 +14,10 @@ export default async function(req) {
 
     let body = {};
     try { body = await req.json(); } catch { body = {}; }
-    const { period_id, account_id, category } = body;
+    const { period_id, account_id, qb_code, category } = body;
     if (!period_id) return Response.json({ error: 'period_id required' }, { status: 400 });
-    if (!account_id && !category) return Response.json({ error: 'account_id or category required' }, { status: 400 });
+    if (!account_id && !qb_code && !category)
+      return Response.json({ error: 'account_id, qb_code, or category required' }, { status: 400 });
 
     const period = await base44.asServiceRole.entities.ReportingPeriod.get(period_id);
     if (!period) return Response.json({ error: 'Period not found' }, { status: 404 });
@@ -21,9 +25,6 @@ export default async function(req) {
     // YTD = every period this year up to and including the selected month.
     const yearPeriods = await base44.asServiceRole.entities.ReportingPeriod.filter({ year: period.year }, 'month');
     const ytdPeriodIds = yearPeriods.filter((p) => p.month <= period.month).map((p) => p.id);
-
-    const accounts = await base44.asServiceRole.entities.Account.filter({});
-    const { byId, byCode, byNormName } = buildIndexes(accounts);
 
     let ytdTxns = [];
     if (ytdPeriodIds.length) {
@@ -40,15 +41,19 @@ export default async function(req) {
       return d && d >= start && d <= end;
     };
 
-    let matched = ytdTxns;
-    if (account_id) {
-      // Transactions whose roll-up target is exactly this account.
-      matched = ytdTxns.filter((t) => {
-        const acc = lineAccountFor(t, byId, byCode, byNormName);
-        return acc && acc.id === account_id;
-      });
+    let matched;
+    if (qb_code) {
+      // Spending Detail drilldown: every QBO account sharing this code.
+      const accounts = await base44.asServiceRole.entities.Account.filter({});
+      const ids = new Set(
+        accounts.filter((a) => a.source === 'quickbooks' && a.account_code === qb_code).map((a) => a.id)
+      );
+      matched = ytdTxns.filter((t) => t.account_id && ids.has(t.account_id));
+    } else if (account_id) {
+      // Live QuickBooks page drilldown: a single QBO account.
+      matched = ytdTxns.filter((t) => t.account_id === account_id);
     } else {
-      // Snapshot-only rows (no linked account): fall back to category name match.
+      // Snapshot-only fallback: match by normalized category name.
       const key = norm(category);
       matched = ytdTxns.filter((t) => {
         if (t.category && norm(t.category) === key) return true;
@@ -72,6 +77,7 @@ export default async function(req) {
     return Response.json({
       period_id,
       account_id: account_id || null,
+      qb_code: qb_code || null,
       category: category || null,
       total: rows.length,
       ytd_amount: rows.reduce((s, r) => s + r.amount, 0),

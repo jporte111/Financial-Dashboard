@@ -13,12 +13,13 @@ const NAV = [
   { to: '/savings', label: 'Savings & Distributions' },
   { to: '/cash', label: 'Cash' },
   { to: '/reports', label: 'Reports' },
+  { to: '/live-quickbooks', label: 'Live QuickBooks' },
 ];
 
 export default function Layout() {
   const ctx = usePeriodData();
   const { pathname } = useLocation();
-  const nav = ctx.isAdmin ? [...NAV, { to: '/admin', label: 'Admin' }] : NAV;
+  const nav = ctx.isAdmin ? [...NAV, { to: '/admin', label: 'Admin' }, { to: '/import-accounts', label: 'Import Accounts' }] : NAV;
 
   return (
     <PeriodProvider value={ctx}>

@@ -20,6 +20,8 @@ import SavingsDistributions from '@/pages/SavingsDistributions';
 import Cash from '@/pages/Cash';
 import Reports from '@/pages/Reports';
 import Admin from '@/pages/Admin';
+import LiveQuickbooks from '@/pages/LiveQuickbooks';
+import ImportAccounts from '@/pages/ImportAccounts';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -60,6 +62,8 @@ const AuthenticatedApp = () => {
           <Route path="/cash" element={<Cash />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/live-quickbooks" element={<LiveQuickbooks />} />
+          <Route path="/import-accounts" element={<ImportAccounts />} />
         </Route>
       </Route>
       <Route path="*" element={<PageNotFound />} />
