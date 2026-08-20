@@ -1,64 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-
-// ---- Roll-up helpers (mirror src/lib/rollup.js; backend can't import src/) ----
-function indexById(accounts) {
-  return Object.fromEntries(accounts.map((a) => [a.id, a]));
-}
-
-function resolveBudgetAccount(account, byId, seen = new Set()) {
-  if (!account || seen.has(account.id)) return null;
-  if (account.has_own_budget) return account;
-  if (!account.budget_parent_id) return null;
-  seen.add(account.id);
-  return resolveBudgetAccount(byId[account.budget_parent_id], byId, seen);
-}
-
-// Normalize a name for matching Excel categories to QBO accounts:
-// lowercase, strip everything but alphanumerics ("Beauty / Fitness" -> "beautyfitness").
-function norm(s) {
-  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-// Resolve a transaction to the account whose budget it should count toward:
-// walk up the budget_parent_id chain to a budget account; if none, use the
-// transaction's own account so unconfigured accounts still surface their spend.
-function lineAccountFor(t, byId, byCode, byNormName) {
-  let acc = t.account_id ? byId[t.account_id] : null;
-
-  // Fallback for legacy/imported transactions that have no account_id: parse
-  // the account code (or name) out of the colon-delimited full_account_path.
-  if (!acc) {
-    const path = t.full_account_path || '';
-    const leaf = path.split(':').pop().trim();
-    if (leaf) {
-      const m = leaf.match(/^(\d+)/);
-      if (m && byCode[m[1]]) acc = byCode[m[1]];
-      else {
-        const namePart = leaf.replace(/^\d+\s*[-:]?\s*/, '').trim();
-        const cand = namePart ? byNormName[norm(namePart)] : null;
-        if (cand) acc = cand;
-      }
-    }
-    if (!acc && t.category) {
-      const cand = byNormName[norm(t.category)];
-      if (cand) acc = cand;
-    }
-  }
-  if (!acc) return null;
-  return resolveBudgetAccount(acc, byId) || acc;
-}
-
-function rollUp(txns, byId, byCode, byNormName) {
-  const totals = {};
-  for (const t of txns) {
-    const acc = lineAccountFor(t, byId, byCode, byNormName);
-    if (!acc) continue;
-    if (!totals[acc.id]) totals[acc.id] = { actual: 0, count: 0 };
-    totals[acc.id].actual += Number(t.amount || 0);
-    totals[acc.id].count += 1;
-  }
-  return totals;
-}
+import { buildIndexes, rollUp, resolveBudgetAccount, norm } from '../../shared/rollupHelpers.ts';
 
 // Compute live monthly + YTD actuals per category, merged with the stored
 // BudgetLine snapshots so Spending Detail can show both side by side.
@@ -81,22 +22,7 @@ export default async function(req) {
     const ytdPeriodIds = yearPeriods.filter((p) => p.month <= period.month).map((p) => p.id);
 
     const accounts = await base44.asServiceRole.entities.Account.filter({});
-    const byId = indexById(accounts);
-    const byCode = {};
-    for (const a of accounts) {
-      if (a.account_code && !byCode[a.account_code]) byCode[a.account_code] = a;
-    }
-    // Normalized name -> account. Prefer budget accounts so name collisions
-    // resolve to the account that actually carries a budget.
-    const byNormName = {};
-    for (const a of accounts) {
-      if (!a.has_own_budget) continue;
-      byNormName[norm(a.account_name)] = a;
-    }
-    for (const a of accounts) {
-      const key = norm(a.account_name);
-      if (!byNormName[key]) byNormName[key] = a;
-    }
+    const { byId, byCode, byNormName } = buildIndexes(accounts);
 
     // Load all YTD transactions (across every period Jan..current month).
     let ytdTxns = [];

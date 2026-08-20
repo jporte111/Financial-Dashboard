@@ -19,8 +19,21 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
 
   useEffect(() => {
     if (!line) return;
+    let cancelled = false;
     setTxns(null);
-    base44.entities.Transaction.filter({ period_id: periodId, category: line.category }, '-date').then(setTxns);
+    base44.functions
+      .invoke('categoryTransactions', {
+        period_id: periodId,
+        account_id: line.account_id || null,
+        category: line.category,
+      })
+      .then((res) => {
+        if (cancelled) return;
+        const data = res.data || res;
+        setTxns(data.transactions || []);
+      })
+      .catch(() => !cancelled && setTxns([]));
+    return () => { cancelled = true; };
   }, [line, periodId]);
 
   const c = line ? computeLine(line, monthsElapsed) : null;
@@ -48,24 +61,32 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
               <Stat label="Current Month" value={fmtCurrency(line.month_actual)} />
             </div>
 
-            <h4 className="mt-8 text-xs uppercase tracking-[0.14em] text-stone-500">Transactions</h4>
+            <div className="mt-8 flex items-center justify-between">
+              <h4 className="text-xs uppercase tracking-[0.14em] text-stone-500">Transactions</h4>
+              {txns && txns.length > 0 && (
+                <span className="text-xs text-stone-500 tabular-nums">{txns.length} · {fmtCurrency(txns.reduce((s, t) => s + t.amount, 0))} YTD</span>
+              )}
+            </div>
             {txns === null ? (
               <p className="py-8 text-sm text-stone-400">Loading…</p>
             ) : txns.length === 0 ? (
-              <p className="py-8 text-sm text-stone-500">No transaction detail available for this category yet.</p>
+              <p className="py-8 text-sm text-stone-500">No transactions have been synced for this category yet.</p>
             ) : (
-              <div className="mt-3 overflow-hidden rounded-xl border border-stone-200">
-                {txns.map((t, i) => (
-                  <div key={t.id} className={`flex items-start justify-between gap-4 px-4 py-3 ${i ? 'border-t border-stone-100' : ''}`}>
-                    <div>
-                      <p className="text-sm font-medium">{t.vendor || '—'}</p>
-                      <p className="text-xs text-stone-500">
-                        {t.date ? format(new Date(t.date), 'MMM d, yyyy') : ''}{t.description ? ` · ${t.description}` : ''}
-                      </p>
+              <div className="mt-3 max-h-[40vh] overflow-y-auto rounded-xl border border-stone-200">
+                {txns.map((t, i) => {
+                  const sub = t.full_account_path ? t.full_account_path.split(':').pop().replace(/^\d+\s*[-:]?\s*/, '').trim() : '';
+                  return (
+                    <div key={t.id} className={`flex items-start justify-between gap-4 px-4 py-3 ${i ? 'border-t border-stone-100' : ''}`}>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{t.vendor || t.description || '—'}</p>
+                        <p className="text-xs text-stone-500 truncate">
+                          {t.date ? format(new Date(t.date), 'MMM d, yyyy') : ''}{t.description && t.vendor ? ` · ${t.description}` : ''}{sub ? ` · ${sub}` : ''}
+                        </p>
+                      </div>
+                      <p className={`shrink-0 text-sm tabular-nums ${t.amount < 0 ? 'text-emerald-700' : ''}`}>{fmtCurrency(t.amount)}</p>
                     </div>
-                    <p className={`shrink-0 text-sm tabular-nums ${t.amount < 0 ? 'text-emerald-700' : ''}`}>{fmtCurrency(t.amount)}</p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </>
