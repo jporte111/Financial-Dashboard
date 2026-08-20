@@ -42,6 +42,22 @@ function txnTypeFor(account, isIncomeAccount) {
   return 'expense';
 }
 
+// Fuzzy de-duplication helpers — match an incoming QuickBooks line against an
+// existing imported transaction that carries no qb_transaction_id, so re-syncing
+// after an Excel import doesn't create a duplicate record for the same payment.
+function normVendor(v) {
+  return (v || '').toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+function codeFromPath(path) {
+  if (!path) return '';
+  const leaf = path.split(':').pop().trim();
+  const m = leaf.match(/^(\d+)/);
+  return m ? m[1] : '';
+}
+function fuzzyKey(date, vendor, amount, code) {
+  return `${(date || '').slice(0, 10)}|${normVendor(vendor)}|${Number(amount || 0)}|${code || ''}`;
+}
+
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -87,8 +103,39 @@ export default async function(req) {
     const existing = existingBatches.flat();
     const seenTxn = new Set(existing.filter((t) => t.qb_transaction_id).map((t) => t.qb_transaction_id));
 
+    // Index existing non-QuickBooks records (imports / manual) by fuzzy key so an
+    // incoming QBO line can recognize an already-imported payment and convert it
+    // instead of creating a duplicate.
+    const fuzzyIndex = new Map();
+    for (const t of existing) {
+      if (t.source === 'quickbooks' || t.qb_transaction_id) continue;
+      const code = codeFromPath(t.full_account_path);
+      fuzzyIndex.set(fuzzyKey(t.date, t.vendor, t.amount, code), t);
+    }
+
+    // One-time cleanup: existing imports that already have a QuickBooks twin
+    // (same date + vendor + amount + account code) are duplicates from a prior
+    // sync that ran before fuzzy matching existed. Delete the import copy and
+    // keep the QuickBooks-linked record. Idempotent — nothing to do once clean.
+    const byKey = new Map();
+    for (const t of existing) {
+      const code = codeFromPath(t.full_account_path);
+      const k = fuzzyKey(t.date, t.vendor, t.amount, code);
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(t);
+    }
+    const cleanupDeleteIds = [];
+    for (const group of byKey.values()) {
+      const hasQb = group.some((t) => t.source === 'quickbooks' || t.qb_transaction_id);
+      if (!hasQb) continue;
+      for (const t of group) {
+        if (t.source !== 'quickbooks' && !t.qb_transaction_id) cleanupDeleteIds.push(t.id);
+      }
+    }
+
     const entities = ['Purchase', 'Deposit', 'JournalEntry', 'Bill'];
     const collected = [];
+    const conversions = [];
     let pulled = 0;
 
     for (const entity of entities) {
@@ -110,6 +157,25 @@ export default async function(req) {
           const isIncome = account.account_type === 'income';
           const amount = Number(line.Amount || 0);
           if (amount === 0) continue;
+          // Fuzzy match: if an imported record already represents this payment,
+          // convert it to a QuickBooks-linked record instead of creating a dup.
+          const fkey = fuzzyKey(date, vendor, amount, account.account_code || '');
+          const fuzzyHit = fuzzyIndex.get(fkey);
+          if (fuzzyHit) {
+            conversions.push({
+              id: fuzzyHit.id,
+              qb_transaction_id: lineKey,
+              source: 'quickbooks',
+              account_id: account.id,
+              full_account_path: account.full_account_path || account.account_name,
+              category: account.account_name,
+              budget_group: account.top_level_group,
+              treatment: account.top_level_group === 'savings' ? 'snvs' : 'personal',
+            });
+            fuzzyIndex.delete(fkey);
+            seenTxn.add(lineKey);
+            continue;
+          }
           collected.push({
             period_id: targetPeriodId,
             qb_transaction_id: lineKey,
@@ -141,6 +207,21 @@ export default async function(req) {
       }
     }
 
+    let converted = 0;
+    if (conversions.length) {
+      for (let i = 0; i < conversions.length; i += 500) {
+        const batch = conversions.slice(i, i + 500);
+        await base44.asServiceRole.entities.Transaction.bulkUpdate(batch);
+        converted += batch.length;
+      }
+    }
+
+    let cleaned = 0;
+    if (cleanupDeleteIds.length) {
+      await base44.asServiceRole.entities.Transaction.deleteMany({ id: { $in: cleanupDeleteIds } });
+      cleaned = cleanupDeleteIds.length;
+    }
+
     return Response.json({
       status: 'ok',
       period_id: periodId,
@@ -149,6 +230,8 @@ export default async function(req) {
       rangeEnd,
       quickbooksTransactions: pulled,
       importedLines: created,
+      convertedImports: converted,
+      duplicatesRemoved: cleaned,
       existingBeforeSync: existing.length,
     });
   } catch (error) {
