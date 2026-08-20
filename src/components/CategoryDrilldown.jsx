@@ -14,7 +14,7 @@ function Stat({ label, value }) {
   );
 }
 
-export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClose }) {
+export default function CategoryDrilldown({ line, periodId, monthsElapsed, sourceFilter, onClose }) {
   const [txns, setTxns] = useState(null);
 
   useEffect(() => {
@@ -27,6 +27,7 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
         account_id: line.account_id || null,
         category: line.category,
         qb_account_names: line.qb_account_names || [],
+        source_filter: sourceFilter || null,
       })
       .then((res) => {
         if (cancelled) return;

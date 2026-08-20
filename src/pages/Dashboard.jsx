@@ -76,7 +76,7 @@ export default function Dashboard() {
         <SectionHeading
           title="Spending Detail"
           subtitle="Select a category to view underlying transactions"
-          right={<Link to="/spending" className="text-sm text-stone-500 underline-offset-4 hover:underline">View all</Link>}
+          right={<Link to="/budget" className="text-sm text-stone-500 underline-offset-4 hover:underline">View all</Link>}
         />
         <CategoryTable lines={expenseLines.slice(0, 6)} monthsElapsed={me} onSelect={setSelected} />
       </section>
@@ -110,7 +110,7 @@ export default function Dashboard() {
         <RecurringTransfersCard transfers={(transfers || []).filter((t) => t.visible_to_client !== false)} />
       </section>
 
-      <CategoryDrilldown line={selected} periodId={periodId} monthsElapsed={me} onClose={() => setSelected(null)} />
+      <CategoryDrilldown line={selected} periodId={periodId} monthsElapsed={me} sourceFilter="excel" onClose={() => setSelected(null)} />
     </div>
   );
 }

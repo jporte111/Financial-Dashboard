@@ -8,18 +8,17 @@ import { format } from 'date-fns';
 
 const NAV = [
   { to: '/', label: 'Dashboard' },
-  { to: '/budget', label: 'Budget' },
-  { to: '/spending', label: 'Spending Detail' },
+  { to: '/budget', label: 'Budget (Excel)' },
+  { to: '/live-quickbooks', label: 'Live (QuickBooks)' },
   { to: '/savings', label: 'Savings & Distributions' },
   { to: '/cash', label: 'Cash' },
   { to: '/reports', label: 'Reports' },
-  { to: '/live-quickbooks', label: 'Live QuickBooks' },
 ];
 
 export default function Layout() {
   const ctx = usePeriodData();
   const { pathname } = useLocation();
-  const nav = ctx.isAdmin ? [...NAV, { to: '/admin', label: 'Admin' }, { to: '/import-accounts', label: 'Import Accounts' }] : NAV;
+  const nav = ctx.isAdmin ? [...NAV, { to: '/admin', label: 'Admin' }] : NAV;
 
   return (
     <PeriodProvider value={ctx}>

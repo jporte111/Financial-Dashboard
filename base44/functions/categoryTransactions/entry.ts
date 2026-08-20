@@ -14,7 +14,7 @@ export default async function(req) {
 
     let body = {};
     try { body = await req.json(); } catch { body = {}; }
-    const { period_id, account_id, category, qb_account_names } = body;
+    const { period_id, account_id, category, qb_account_names, source_filter } = body;
     if (!period_id) return Response.json({ error: 'period_id required' }, { status: 400 });
     if (!account_id && !category)
       return Response.json({ error: 'account_id or category required' }, { status: 400 });
@@ -54,13 +54,21 @@ export default async function(req) {
       matched = ytdTxns.filter((t) => t.account_id && ids.has(t.account_id));
     }
 
-    const rows = matched.map((t) => ({
+    // Source isolation: the Excel tab sees only manual/import records, the
+    // QuickBooks tab sees only QBO-synced records, the Admin reconciliation
+    // view (no filter) sees both.
+    let filtered = matched;
+    if (source_filter === 'excel') filtered = matched.filter((t) => t.source !== 'quickbooks');
+    else if (source_filter === 'quickbooks') filtered = matched.filter((t) => t.source === 'quickbooks');
+
+    const rows = filtered.map((t) => ({
       id: t.id,
       date: (t.date || '').slice(0, 10),
       vendor: t.vendor || '',
       description: t.description || '',
       amount: Number(t.amount || 0),
       full_account_path: t.full_account_path || '',
+      source: t.source || '',
       in_month: inMonth(t),
     }));
 
@@ -68,6 +76,7 @@ export default async function(req) {
       period_id,
       account_id: account_id || null,
       category: category || null,
+      source_filter: source_filter || null,
       total: rows.length,
       ytd_amount: rows.reduce((s, r) => s + r.amount, 0),
       month_amount: rows.filter((r) => r.in_month).reduce((s, r) => s + r.amount, 0),

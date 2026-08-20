@@ -11,6 +11,7 @@ import PeriodsManager from '@/components/admin/PeriodsManager';
 import TransactionsEditor from '@/components/admin/TransactionsEditor';
 import AccountHierarchyManager from '@/components/admin/AccountHierarchyManager';
 import ImportCenter from '@/components/admin/ImportCenter';
+import Reconciliation from '@/components/admin/Reconciliation';
 
 export default function Admin() {
   const { user, isAdmin, period, periodId, periods, setPeriodId, reload } = usePeriodContext();
@@ -31,6 +32,7 @@ export default function Admin() {
         <TabsTrigger value="accounts" className="rounded-full">Accounts</TabsTrigger>
         <TabsTrigger value="import" className="rounded-full">Import</TabsTrigger>
         <TabsTrigger value="review" className="rounded-full">Review & Publish</TabsTrigger>
+        <TabsTrigger value="reconciliation" className="rounded-full">Reconciliation</TabsTrigger>
         <TabsTrigger value="periods" className="rounded-full">Periods</TabsTrigger>
       </TabsList>
 
@@ -112,6 +114,10 @@ export default function Admin() {
 
       <TabsContent value="periods">
         <PeriodsManager periods={periods} reload={reload} onSelect={setPeriodId} />
+      </TabsContent>
+
+      <TabsContent value="reconciliation">
+        <Reconciliation />
       </TabsContent>
     </Tabs>
   );

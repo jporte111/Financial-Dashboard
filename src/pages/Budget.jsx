@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { usePeriodContext } from '@/lib/usePeriod';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
 import { aggregateGroup, computeLine, fmtCurrency, fmtPct } from '@/lib/finance';
@@ -6,12 +6,18 @@ import SectionHeading from '@/components/SectionHeading';
 import GroupOverview from '@/components/GroupOverview';
 import BudgetBar from '@/components/BudgetBar';
 import StatusPill from '@/components/StatusPill';
+import CategoryDrilldown from '@/components/CategoryDrilldown';
+import ImportedAccountsSection from '@/components/ImportedAccountsSection';
+import { ChevronRight } from 'lucide-react';
 
 const GROUPS = ['fixed', 'variable', 'discretionary'];
 
+// Budget (Excel) tab — every number here comes from the uploaded Excel
+// workbook (BudgetLine snapshots). No QuickBooks data is read on this tab.
 export default function Budget() {
   const { period, periodId, ytdMode } = usePeriodContext();
   const { items: lines } = useEntityByPeriod('BudgetLine', periodId);
+  const [selected, setSelected] = useState(null);
   const me = period.months_elapsed || 12;
   const useMonth = !ytdMode;
   const all = lines || [];
@@ -23,19 +29,27 @@ export default function Budget() {
   return (
     <div className="space-y-14">
       <section>
-        <SectionHeading title="Budget Overview" subtitle={`${period.label} · ${ytdMode ? 'Year to Date' : 'This Month'}`} />
+        <SectionHeading title="Budget Overview" subtitle={`${period.label} · ${ytdMode ? 'Year to Date' : 'This Month'} · Excel snapshot`} />
         <GroupOverview groups={groups} />
       </section>
 
       <section>
-        <SectionHeading title="Budget Progress by Category" />
+        <SectionHeading title="Budget Progress by Category" subtitle="From the Excel snapshot — click a category for its transactions" />
         <div className="space-y-3">
           {expenseLines.map((l) => {
             const c = computeLine(l, me, useMonth);
+            const clickable = l.drilldown_enabled !== false;
             return (
-              <div key={l.id} className="rounded-2xl border border-stone-200 bg-white p-6">
+              <button
+                key={l.id}
+                onClick={() => clickable && setSelected(l)}
+                className={`w-full rounded-2xl border border-stone-200 bg-white p-6 text-left transition ${clickable ? 'cursor-pointer hover:border-stone-300 hover:bg-stone-50/50' : ''}`}
+              >
                 <div className="flex flex-wrap items-baseline justify-between gap-3">
-                  <p className="font-medium">{l.category}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium">{l.category}</p>
+                    {clickable && <ChevronRight className="h-4 w-4 text-stone-300" />}
+                  </div>
                   <div className="flex items-center gap-3">
                     <span className="text-sm tabular-nums text-stone-600">
                       {fmtCurrency(c.ytd)} / {fmtCurrency(c.annual)}
@@ -54,14 +68,14 @@ export default function Budget() {
                     Pace <span className="ml-1 tabular-nums text-stone-900">{fmtCurrency(Math.abs(c.variance))} {c.variance >= 0 ? 'under' : 'over'}</span>
                   </p>
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
       </section>
 
       <section>
-        <SectionHeading title="Income" subtitle="Received against expected income" />
+        <SectionHeading title="Income" subtitle="Received against expected income · Excel snapshot" />
         <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
           <div className="hidden grid-cols-6 gap-4 border-b border-stone-100 px-6 py-3 text-xs uppercase tracking-[0.12em] text-stone-500 md:grid">
             <span className="col-span-2">Source</span><span className="text-right">Current Month</span><span className="text-right">YTD</span><span className="text-right">Expected</span><span className="text-right">% Received</span>
@@ -106,6 +120,16 @@ export default function Budget() {
           </div>
         </section>
       )}
+
+      <ImportedAccountsSection />
+
+      <CategoryDrilldown
+        line={selected}
+        periodId={periodId}
+        monthsElapsed={me}
+        sourceFilter="excel"
+        onClose={() => setSelected(null)}
+      />
     </div>
   );
 }

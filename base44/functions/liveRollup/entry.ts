@@ -96,6 +96,7 @@ export default async function(req) {
         budget_group: a.top_level_group,
         full_account_path: a.full_account_path || '',
         account_type: a.account_type,
+        annual_budget: Number(a.annual_budget || 0),
         live_ytd: ytdTotals[a.id]?.actual || 0,
         live_month_value: monthTotals[a.id]?.actual || 0,
         count: ytdTotals[a.id]?.count || 0,
