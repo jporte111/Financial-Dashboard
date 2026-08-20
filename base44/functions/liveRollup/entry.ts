@@ -52,6 +52,17 @@ export default async function(req) {
 
     const budgetLines = await base44.asServiceRole.entities.BudgetLine.filter({ period_id: periodId });
 
+    // Reverse index: QBO account id -> its matching BudgetLine annual budget
+    // (read-only lookup so the Live page can show the Excel budget next to live
+    // QBO spend, without writing anything back to either dataset).
+    const budgetByAccountId = {};
+    for (const l of budgetLines) {
+      const matching = accountsForNames(l.category, l.qb_account_names, byName);
+      for (const a of matching) {
+        if (budgetByAccountId[a.id] === undefined) budgetByAccountId[a.id] = Number(l.annual_budget || 0);
+      }
+    }
+
     // Spending Detail rows — one per BudgetLine (the Excel report of record).
     // The live column sums every QBO account whose name matches the line's
     // category or any name in its qb_account_names.
@@ -96,7 +107,7 @@ export default async function(req) {
         budget_group: a.top_level_group,
         full_account_path: a.full_account_path || '',
         account_type: a.account_type,
-        annual_budget: Number(a.annual_budget || 0),
+        annual_budget: Number(a.annual_budget || 0) || budgetByAccountId[a.id] || 0,
         live_ytd: ytdTotals[a.id]?.actual || 0,
         live_month_value: monthTotals[a.id]?.actual || 0,
         count: ytdTotals[a.id]?.count || 0,
