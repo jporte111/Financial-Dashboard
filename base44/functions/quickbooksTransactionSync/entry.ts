@@ -27,7 +27,6 @@ async function pullEntity(accessToken, realmId, entity, startDate, endDate) {
   return all;
 }
 
-// Extract posting lines (those with an AccountRef) from a QB transaction object.
 function linesOf(txn) {
   return Array.isArray(txn.Line) ? txn.Line : [];
 }
@@ -56,20 +55,36 @@ export default async function(req) {
     if (!periodId) return Response.json({ error: 'period_id required' }, { status: 400 });
 
     const period = await base44.asServiceRole.entities.ReportingPeriod.get(periodId);
-    if (!period || !period.start_date || !period.end_date) {
-      return Response.json({ error: 'Reporting period missing start/end date' }, { status: 400 });
-    }
+    if (!period || !period.year) return Response.json({ error: 'Reporting period missing year' }, { status: 400 });
+
+    // Pull the full year-to-date range (Jan 1 → selected period end) so YTD
+    // figures are complete, not just the selected month.
+    const rangeStart = `${period.year}-01-01`;
+    const rangeEnd = period.end_date || `${period.year}-12-31`;
 
     const { accessToken, connectionConfig } = await base44.asServiceRole.connectors.getConnection('quickbooks');
     const realmId = connectionConfig?.realmId;
     if (!realmId) return Response.json({ error: 'QuickBooks realm id missing' }, { status: 500 });
 
-    // Index our accounts by quickbooks_account_id for linking.
+    // All reporting periods for the year — used to route each transaction into
+    // the period whose date range contains its TxnDate.
+    const yearPeriods = await base44.asServiceRole.entities.ReportingPeriod.filter({ year: period.year }, 'month');
+    const periodForDate = (dateStr) => {
+      for (const p of yearPeriods) {
+        if (p.start_date && p.end_date && dateStr >= p.start_date && dateStr <= p.end_date) return p.id;
+      }
+      return periodId; // fallback if no matching period exists yet
+    };
+
     const accounts = await base44.asServiceRole.entities.Account.filter({});
     const byQbId = new Map(accounts.filter((a) => a.quickbooks_account_id).map((a) => [String(a.quickbooks_account_id), a]));
 
-    // Existing transactions for the period — dedup by qb_transaction_id.
-    const existing = await base44.asServiceRole.entities.Transaction.filter({ period_id: periodId }, '-date', 5000);
+    // Existing transactions across the whole YTD range — dedup by qb_transaction_id.
+    const ytdPeriodIds = yearPeriods.filter((p) => p.month <= period.month).map((p) => p.id);
+    const existingBatches = ytdPeriodIds.length
+      ? await Promise.all(ytdPeriodIds.map((pid) => base44.asServiceRole.entities.Transaction.filter({ period_id: pid }, '-date', 5000)))
+      : [];
+    const existing = existingBatches.flat();
     const seenTxn = new Set(existing.filter((t) => t.qb_transaction_id).map((t) => t.qb_transaction_id));
 
     const entities = ['Purchase', 'Deposit', 'JournalEntry', 'Bill'];
@@ -77,27 +92,27 @@ export default async function(req) {
     let pulled = 0;
 
     for (const entity of entities) {
-      const txns = await pullEntity(accessToken, realmId, entity, period.start_date, period.end_date);
+      const txns = await pullEntity(accessToken, realmId, entity, rangeStart, rangeEnd);
       pulled += txns.length;
       for (const txn of txns) {
         const txnId = String(txn.Id);
-        // If we already have ANY line from this QB txn, skip the whole txn.
-        if (seenTxn.has(`${txnId}`)) continue;
         const vendor = txn.EntityRef?.name || '';
         const date = (txn.TxnDate || '').slice(0, 10);
         const doc = txn.DocNumber || '';
+        const targetPeriodId = periodForDate(date);
         for (const line of linesOf(txn)) {
           const acctId = accountRefValue(line);
           if (!acctId) continue;
           const account = byQbId.get(acctId);
-          // Only post P&L lines (accounts we track). Skip balance-sheet splits.
-          if (!account) continue;
+          if (!account) continue; // only post P&L lines we track
+          const lineKey = `${txnId}#${line.Id || ''}`;
+          if (seenTxn.has(lineKey)) continue; // idempotent across re-runs
           const isIncome = account.account_type === 'income';
           const amount = Number(line.Amount || 0);
           if (amount === 0) continue;
           collected.push({
-            period_id: periodId,
-            qb_transaction_id: `${txnId}#${line.Id || ''}`,
+            period_id: targetPeriodId,
+            qb_transaction_id: lineKey,
             date,
             vendor,
             description: line.Description || doc || '',
@@ -112,14 +127,13 @@ export default async function(req) {
             review_status: 'unreviewed',
             review_flags: [],
           });
+          seenTxn.add(lineKey);
         }
-        seenTxn.add(`${txnId}`);
       }
     }
 
     let created = 0;
     if (collected.length) {
-      // Bulk create in batches of 500.
       for (let i = 0; i < collected.length; i += 500) {
         const batch = collected.slice(i, i + 500);
         await base44.asServiceRole.entities.Transaction.bulkCreate(batch);
@@ -131,6 +145,8 @@ export default async function(req) {
       status: 'ok',
       period_id: periodId,
       period: period.label,
+      rangeStart,
+      rangeEnd,
       quickbooksTransactions: pulled,
       importedLines: created,
       existingBeforeSync: existing.length,
