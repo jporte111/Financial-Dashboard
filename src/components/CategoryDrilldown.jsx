@@ -68,7 +68,7 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
               )}
             </div>
             {txns === null ? (
-              <p className="py-8 text-sm text-stone-400">Loading…</p>
+              <p className="py-8 text-sm text-stone-400">Loading transactions…</p>
             ) : txns.length === 0 ? (
               <p className="py-8 text-sm text-stone-500">No transactions have been synced for this category yet.</p>
             ) : (
