@@ -1,13 +1,13 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { buildIndexes, rollUpByAccount } from '../../shared/rollupHelpers.ts';
+import { buildIndexes, rollUpByAccount, accountsForNames } from '../../shared/rollupHelpers.ts';
 
 // Two outputs from the live (QuickBooks) layer:
 //   rows         — Spending Detail: one row per BudgetLine (Excel report of
 //                  record), with the live QBO column = sum of every QBO account
-//                  whose account_code equals the line's qb_code.
+//                  whose name matches the line's category OR its qb_account_names.
 //   liveAccounts — Live QuickBooks page: one row per QBO account that received
 //                  transactions, with live YTD/month totals.
-// Pairing is by code at display time; the import hierarchy is not involved.
+// Pairing is by normalized account NAME at display time (not account code).
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -27,7 +27,7 @@ export default async function(req) {
     const ytdPeriodIds = yearPeriods.filter((p) => p.month <= period.month).map((p) => p.id);
 
     const accounts = await base44.asServiceRole.entities.Account.filter({});
-    const { byCode } = buildIndexes(accounts);
+    const { byName } = buildIndexes(accounts);
     const qboIdSet = new Set(accounts.filter((a) => a.source === 'quickbooks').map((a) => a.id));
 
     // All YTD transactions (across every period Jan..current month).
@@ -53,10 +53,10 @@ export default async function(req) {
     const budgetLines = await base44.asServiceRole.entities.BudgetLine.filter({ period_id: periodId });
 
     // Spending Detail rows — one per BudgetLine (the Excel report of record).
-    // The live column sums every QBO account whose account_code == qb_code.
+    // The live column sums every QBO account whose name matches the line's
+    // category or any name in its qb_account_names.
     const rows = budgetLines.map((l) => {
-      const code = l.qb_code || '';
-      const matching = code ? (byCode[code] || []) : [];
+      const matching = accountsForNames(l.category, l.qb_account_names, byName);
       let liveYtd = 0;
       let liveMonth = 0;
       let hasLive = false;
@@ -71,7 +71,8 @@ export default async function(req) {
         account_ids: matching.map((a) => a.id),
         category: l.category,
         budget_group: l.budget_group,
-        qb_code: code,
+        qb_code: l.qb_code || '',
+        qb_account_names: Array.isArray(l.qb_account_names) ? l.qb_account_names : [],
         annual_budget: Number(l.annual_budget || 0),
         pace_method: l.pace_method || 'even',
         expected_ytd_override: l.expected_ytd_override ?? null,

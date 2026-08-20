@@ -25,8 +25,8 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
       .invoke('categoryTransactions', {
         period_id: periodId,
         account_id: line.account_id || null,
-        qb_code: line.qb_code || null,
         category: line.category,
+        qb_account_names: line.qb_account_names || [],
       })
       .then((res) => {
         if (cancelled) return;
