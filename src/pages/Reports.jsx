@@ -24,7 +24,7 @@ export default function Reports() {
           {visible.map((r) => (
             <Link
               key={r.id}
-              to={r.report_type === 'category_detail' ? '/spending' : r.report_type === 'cash' ? '/cash' : r.report_type === 'budget_summary' ? '/budget' : '/savings'}
+              to={r.report_type === 'category_detail' ? '/' : r.report_type === 'cash' ? '/cash' : r.report_type === 'budget_summary' ? '/budget' : '/savings'}
               className="flex items-start gap-4 rounded-2xl border border-stone-200 bg-white p-6 transition hover:shadow-[0_2px_24px_rgba(0,0,0,0.05)]"
             >
               <FileText className="mt-0.5 h-5 w-5 shrink-0 text-stone-400" />

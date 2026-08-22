@@ -78,7 +78,7 @@ export default function Dashboard() {
           subtitle="Select a category to view underlying transactions"
           right={<Link to="/budget" className="text-sm text-stone-500 underline-offset-4 hover:underline">View all</Link>}
         />
-        <CategoryTable lines={expenseLines.slice(0, 6)} monthsElapsed={me} onSelect={setSelected} />
+        <CategoryTable lines={expenseLines.slice(0, 6)} monthsElapsed={me} useMonth={useMonth} onSelect={setSelected} />
       </section>
 
       <section>

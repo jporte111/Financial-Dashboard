@@ -4,14 +4,14 @@ import BudgetBar from '@/components/BudgetBar';
 import StatusPill from '@/components/StatusPill';
 import { ChevronRight } from 'lucide-react';
 
-export default function CategoryTable({ lines, monthsElapsed, onSelect }) {
+export default function CategoryTable({ lines, monthsElapsed, useMonth = false, onSelect }) {
   if (!lines || !lines.length)
     return <p className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-sm text-stone-500">No categories for this period.</p>;
 
   return (
     <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
       {lines.map((l, i) => {
-        const c = computeLine(l, monthsElapsed);
+        const c = computeLine(l, monthsElapsed, useMonth);
         const clickable = l.drilldown_enabled !== false;
         return (
           <div
