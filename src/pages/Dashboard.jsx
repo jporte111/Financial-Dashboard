@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { usePeriodContext } from '@/lib/usePeriod';
-import { useEntityByPeriod } from '@/lib/usePeriodEntities';
-import { aggregateGroup, computeLine, fmtCurrency } from '@/lib/finance';
+import { useBvaDashboard } from '@/lib/useBvaDashboard';
+import { fmtCurrency, fmtPct, fmtVariance, fmtSignedPct, FLAG_TEXT } from '@/lib/finance';
+import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import SnapshotCards from '@/components/SnapshotCards';
 import GroupOverview from '@/components/GroupOverview';
 import SectionHeading from '@/components/SectionHeading';
@@ -11,61 +11,121 @@ import CategoryDrilldown from '@/components/CategoryDrilldown';
 import CashCard from '@/components/CashCard';
 import RecurringTransfersCard from '@/components/RecurringTransfersCard';
 import StatusPill from '@/components/StatusPill';
+import { AlertTriangle } from 'lucide-react';
 
-const GROUPS = ['fixed', 'variable', 'discretionary'];
+const DETAIL_FILTERS = [
+  ['all', 'All'],
+  ['fixed', 'Fixed'],
+  ['variable', 'Variable'],
+  ['discretionary', 'Discretionary'],
+  ['unassigned', 'Unassigned'],
+  ['attention', 'Needs Attention'],
+];
+
+function StateNote({ state, className = '' }) {
+  if (!state || state === SECTION_STATE.OK) return null;
+  const isDiscrepancy = state === SECTION_STATE.DISCREPANCY;
+  return (
+    <div
+      className={`flex items-start gap-2 rounded-xl border p-4 text-sm ${
+        isDiscrepancy ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-amber-200 bg-amber-50 text-amber-800'
+      } ${className}`}
+    >
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <p>{SECTION_STATE_TEXT[state]}</p>
+    </div>
+  );
+}
 
 export default function Dashboard() {
-  const { period, periodId, ytdMode } = usePeriodContext();
-  const { items: lines } = useEntityByPeriod('BudgetLine', periodId);
-  const { items: accounts } = useEntityByPeriod('CashAccount', periodId, 'sort_order');
-  const { items: transfers } = useEntityByPeriod('RecurringTransfer', periodId);
+  const { vm, loading, periodId } = useBvaDashboard();
   const [selected, setSelected] = useState(null);
+  const [detailFilter, setDetailFilter] = useState('all');
 
-  const useMonth = !ytdMode;
-  const me = period.months_elapsed || 12;
-  const expenseLines = (lines || []).filter((l) => GROUPS.includes(l.budget_group));
-  const groups = GROUPS.map((key) => ({ key, totals: aggregateGroup(expenseLines.filter((l) => l.budget_group === key), me, useMonth) }));
-  const disc = groups.find((g) => g.key === 'discretionary').totals;
-  const budgetStatus = {
-    variance: disc.variance,
-    pct: disc.annual ? (Math.abs(disc.variance) / disc.annual) * 100 : 0,
-    status: disc.status,
-  };
+  const detailRows = useMemo(() => {
+    if (!vm) return [];
+    if (detailFilter === 'attention') return vm.attention;
+    if (detailFilter === 'all') return vm.detail;
+    // Fixed/Variable/Discretionary filters exclude unassigned rows; the
+    // Unassigned filter shows only rows with no confirmed group.
+    return vm.detail.filter((d) => d.group === detailFilter);
+  }, [vm, detailFilter]);
 
-  const attention = expenseLines
-    .map((l) => ({ l, c: computeLine(l, me, useMonth) }))
-    .filter((x) => x.c.variance < 0)
-    .sort((a, b) => a.c.variance - b.c.variance)
-    .slice(0, 6);
+  if (loading) return <div className="py-24 text-center text-sm text-stone-400">Loading…</div>;
+
+  const monthMode = vm.monthMode;
 
   return (
     <div className="space-y-14">
+      {vm.provenance.label && (
+        <div
+          className={`flex items-start gap-2 rounded-xl border p-4 text-sm ${
+            vm.provenance.isLegacy ? 'border-stone-300 bg-stone-100 text-stone-700' : 'border-amber-300 bg-amber-50 text-amber-900'
+          }`}
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            {vm.provenance.label}. Figures below are shown from this period's stored values and have not passed the BVA
+            import validation.
+          </p>
+        </div>
+      )}
+
+      {vm.hasUnresolvedWarnings && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            This period has {vm.warnings.unresolved.length} unresolved validation warning
+            {vm.warnings.unresolved.length === 1 ? '' : 's'}. Figures shown are the independently calculated values.
+          </p>
+        </div>
+      )}
+
       <section>
-        <SectionHeading title="Financial Snapshot" subtitle={period.label} />
-        <SnapshotCards period={period} budgetStatus={budgetStatus} />
+        <SectionHeading
+          title="Financial Snapshot"
+          subtitle={`${vm.labels.displayMonth}${vm.labels.reportingCutoffDate ? ` · through ${vm.labels.reportingCutoffDate}` : ''} · ${
+            vm.provenance.isBvaValidated ? 'BVA-validated' : vm.provenance.isLegacy ? 'Legacy — not BVA-validated' : 'Draft BVA import'
+          }`}
+        />
+        <SnapshotCards vm={vm} />
       </section>
 
       <section>
-        <SectionHeading title="Budget Overview" subtitle="Performance by budget group against annual plan" />
-        <GroupOverview groups={groups} />
+        <SectionHeading
+          title="Budget Overview"
+          subtitle={monthMode ? 'Current month against expected monthly allocation' : 'Year-to-date performance against expected pace'}
+        />
+        <StateNote state={vm.states.groups} className="mb-4" />
+        {vm.states.groups !== SECTION_STATE.NOT_IMPORTED && (
+          <GroupOverview groups={vm.groups} monthMode={monthMode} expectedPacePct={vm.pacePct} />
+        )}
       </section>
 
-      {attention.length > 0 && (
+      {!monthMode && vm.attention.length > 0 && (
         <section>
-          <SectionHeading title="Categories Needing Attention" subtitle="Above expected pace for this point in the year" />
+          <SectionHeading title="Categories Needing Attention" subtitle="Flagged from validated BVA detail · largest unfavorable variance first" />
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {attention.map(({ l, c }) => (
+            {vm.attention.map((d) => (
               <button
-                key={l.id}
-                onClick={() => setSelected(l)}
+                key={d.id || d.code}
+                onClick={() => setSelected(d)}
                 className="rounded-2xl border border-stone-200 bg-white p-5 text-left transition hover:shadow-[0_2px_24px_rgba(0,0,0,0.05)]"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <p className="font-medium">{l.category}</p>
-                  <StatusPill status={c.status} />
+                  <div>
+                    <p className="font-medium">{d.category}</p>
+                    {d.code && <p className="text-xs uppercase tracking-[0.12em] text-stone-400">{d.code}</p>}
+                  </div>
+                  <StatusPill status={d.ytd.status} />
                 </div>
-                <p className="mt-3 font-display text-xl tabular-nums">{fmtCurrency(Math.abs(c.variance))}</p>
-                <p className="text-sm text-stone-500">over expected pace</p>
+                <p className="mt-3 font-display text-xl tabular-nums">{fmtVariance(d.ytd.varianceToPace, { cents: false })}</p>
+                <p className="text-sm text-stone-500">
+                  {fmtCurrency(d.ytd.actual)} of {fmtCurrency(d.ytd.annual)} · {fmtPct(d.ytd.percentUsed * 100)} used · {fmtSignedPct(d.ytd.variancePct)}
+                </p>
+                <p className="mt-2 text-xs text-stone-400">
+                  {d.reasons.map((r) => FLAG_TEXT[r]).filter(Boolean).join(' · ')}
+                </p>
               </button>
             ))}
           </div>
@@ -75,24 +135,44 @@ export default function Dashboard() {
       <section>
         <SectionHeading
           title="Spending Detail"
-          subtitle="Select a category to view underlying transactions"
+          subtitle="Monitored categories from the validated BVA report"
           right={<Link to="/budget" className="text-sm text-stone-500 underline-offset-4 hover:underline">View all</Link>}
         />
-        <CategoryTable lines={expenseLines.slice(0, 6)} monthsElapsed={me} onSelect={setSelected} />
+        <div className="mb-4 flex flex-wrap gap-1">
+          {DETAIL_FILTERS.map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setDetailFilter(k)}
+              className={`rounded-full px-3 py-1.5 text-sm transition ${
+                detailFilter === k ? 'bg-stone-900 text-white' : 'text-stone-600 hover:bg-stone-100'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <StateNote state={vm.states.detail} className="mb-4" />
+        <CategoryTable rows={detailRows} monthMode={monthMode} onSelect={setSelected} />
       </section>
 
       <section>
         <SectionHeading title="Savings & Distributions" />
+        {vm.distributions.reconciles === false && (
+          <StateNote state={SECTION_STATE.DISCREPANCY} className="mb-4" />
+        )}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ['Distributions YTD', period.distributions_ytd],
-            ['Savings / Distributions In', period.savings_in_ytd],
-            ['Expenses Paid From Savings', period.savings_spend_ytd],
-            ['Net Savings', Number(period.savings_in_ytd || 0) - Number(period.savings_spend_ytd || 0)],
-          ].map(([label, value]) => (
+            ['Distributions YTD', vm.savingsDistributions.distributionsYtd, 'Business-reported'],
+            ['Savings / Distributions In', vm.savingsDistributions.savingsIn, 'Mapping unverified — Admin review'],
+            ['Expenses Paid From Savings', vm.savingsDistributions.savingsSpend, 'Mapping unverified — Admin review'],
+            ['Net Savings', vm.savingsDistributions.netSavings, 'Savings In − Expenses From Savings'],
+          ].map(([label, value, note]) => (
             <div key={label} className="rounded-2xl border border-stone-200 bg-white p-6">
               <p className="text-xs uppercase tracking-[0.14em] text-stone-500">{label}</p>
-              <p className="mt-3 font-display text-2xl tracking-tight tabular-nums">{fmtCurrency(value)}</p>
+              <p className="mt-3 font-display text-2xl tracking-tight tabular-nums">
+                {value == null ? SECTION_STATE_TEXT[SECTION_STATE.MISSING] : fmtCurrency(value)}
+              </p>
+              {note && <p className="mt-2 text-xs text-stone-400">{note}</p>}
             </div>
           ))}
         </div>
@@ -102,15 +182,21 @@ export default function Dashboard() {
       </section>
 
       <section>
-        <SectionHeading title="Cash" />
-        <CashCard total={period.total_cash} accounts={accounts} />
+        <SectionHeading title="Cash" subtitle={vm.labels.cashAsOf} />
+        <StateNote state={vm.states.cash} className="mb-4" />
+        <CashCard
+          total={vm.cash.total}
+          rows={vm.cash.accounts}
+          reconciles={vm.cash.reconciles}
+          reportedTotal={vm.cash.reportedTotal}
+        />
       </section>
 
       <section>
-        <RecurringTransfersCard transfers={(transfers || []).filter((t) => t.visible_to_client !== false)} />
+        <RecurringTransfersCard transfers={vm.transfers.items} />
       </section>
 
-      <CategoryDrilldown line={selected} periodId={periodId} monthsElapsed={me} sourceFilter="excel" onClose={() => setSelected(null)} />
+      <CategoryDrilldown line={selected} periodId={periodId} monthsElapsed={vm.elapsedMonths} sourceFilter="excel" onClose={() => setSelected(null)} />
     </div>
   );
 }

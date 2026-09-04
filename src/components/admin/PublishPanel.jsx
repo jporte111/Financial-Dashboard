@@ -25,9 +25,17 @@ const STAGES = [
 ];
 
 export default function PublishPanel({ period, user, reload }) {
-  const [checklist, setChecklist] = useState(period.checklist || {});
+  const [checklist, setChecklist] = useState(period?.checklist || {});
   const { toast } = useToast();
   const complete = ITEMS.every(([k]) => checklist[k]);
+
+  if (!period) {
+    return (
+      <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 p-6 text-sm text-stone-500">
+        No reporting period selected. Import a BVA workbook or create a period first.
+      </div>
+    );
+  }
 
   const toggle = async (k, v) => {
     const next = { ...checklist, [k]: v };

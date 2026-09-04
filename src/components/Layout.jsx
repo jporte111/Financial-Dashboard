@@ -19,6 +19,10 @@ export default function Layout() {
   const ctx = usePeriodData();
   const { pathname } = useLocation();
   const nav = ctx.isAdmin ? [...NAV, { to: '/admin', label: 'Admin' }] : NAV;
+  // Admin (and the BVA Import workflow inside it) must stay reachable even
+  // before any reporting period exists — that is where the first period gets
+  // created. Every other page still needs a period to show anything useful.
+  const bypassNoPeriod = ctx.isAdmin && pathname.startsWith('/admin');
 
   return (
     <PeriodProvider value={ctx}>
@@ -81,7 +85,7 @@ export default function Layout() {
         <main className="mx-auto max-w-6xl px-6 py-10">
           {ctx.loading ? (
             <div className="py-32 text-center text-sm text-stone-400">Loading…</div>
-          ) : !ctx.period ? (
+          ) : !ctx.period && !bypassNoPeriod ? (
             <div className="rounded-2xl border border-stone-200 bg-white p-16 text-center">
               <p className="font-display text-xl">No published reporting period yet</p>
               <p className="mt-2 text-sm text-stone-500">Your monthly report will appear here once it has been finalized.</p>

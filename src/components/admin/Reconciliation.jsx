@@ -17,7 +17,7 @@ export default function Reconciliation() {
   const { rows, notice, loading } = useLiveRollup(periodId);
   const [filter, setFilter] = useState('all');
   const [selected, setSelected] = useState(null);
-  const me = period.months_elapsed || 12;
+  const me = period?.months_elapsed || 12;
 
   const shown = (rows || [])
     .filter((r) => GROUPS.includes(r.budget_group))

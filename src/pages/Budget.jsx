@@ -1,101 +1,85 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { usePeriodContext } from '@/lib/usePeriod';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
-import { aggregateGroup, computeLine, fmtCurrency, fmtPct } from '@/lib/finance';
+import { useBvaDashboard } from '@/lib/useBvaDashboard';
+import { bvaComputeYtd, fmtCurrency, fmtPct } from '@/lib/finance';
+import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import SectionHeading from '@/components/SectionHeading';
 import GroupOverview from '@/components/GroupOverview';
 import BudgetBar from '@/components/BudgetBar';
-import StatusPill from '@/components/StatusPill';
+import CategoryTable from '@/components/CategoryTable';
 import CategoryDrilldown from '@/components/CategoryDrilldown';
 import ImportedAccountsSection from '@/components/ImportedAccountsSection';
-import { ChevronRight } from 'lucide-react';
 
-const GROUPS = ['fixed', 'variable', 'discretionary'];
-
-// Budget (Excel) tab — every number here comes from the uploaded Excel
-// workbook (BudgetLine snapshots). No QuickBooks data is read on this tab.
+// Budget (Excel) tab — every number comes from the validated BVA workbook
+// snapshot (BudgetLine / ReportingPeriod). No QuickBooks data is read here.
 export default function Budget() {
-  const { period, periodId, ytdMode } = usePeriodContext();
+  const { periodId } = usePeriodContext();
+  const { vm, loading } = useBvaDashboard();
   const { items: lines } = useEntityByPeriod('BudgetLine', periodId);
   const [selected, setSelected] = useState(null);
-  const me = period.months_elapsed || 12;
-  const useMonth = !ytdMode;
-  const all = lines || [];
-  const expenseLines = all.filter((l) => GROUPS.includes(l.budget_group));
-  const incomeLines = all.filter((l) => l.budget_group === 'income');
-  const savingsLines = all.filter((l) => l.budget_group === 'savings');
-  const groups = GROUPS.map((key) => ({ key, totals: aggregateGroup(expenseLines.filter((l) => l.budget_group === key), me, useMonth) }));
+
+  const savingsLines = useMemo(() => (lines || []).filter((l) => l.budget_group === 'savings'), [lines]);
+
+  if (loading) return <div className="py-24 text-center text-sm text-stone-400">Loading…</div>;
+
+  const monthMode = vm.monthMode;
+  const incomeUsed = vm.snapshot.annualBudgetedIncome ? vm.snapshot.ytdIncome / vm.snapshot.annualBudgetedIncome : 0;
 
   return (
     <div className="space-y-14">
       <section>
-        <SectionHeading title="Budget Overview" subtitle={`${period.label} · ${ytdMode ? 'Year to Date' : 'This Month'} · Excel snapshot`} />
-        <GroupOverview groups={groups} />
+        <SectionHeading
+          title="Budget Overview"
+          subtitle={`${vm.labels.displayMonth} · ${monthMode ? 'This Month' : 'Year to Date'} · BVA snapshot`}
+        />
+        {vm.states.groups === SECTION_STATE.NOT_IMPORTED ? (
+          <p className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+            {SECTION_STATE_TEXT[SECTION_STATE.NOT_IMPORTED]}
+          </p>
+        ) : (
+          <GroupOverview groups={vm.groups} monthMode={monthMode} expectedPacePct={vm.pacePct} />
+        )}
       </section>
 
       <section>
-        <SectionHeading title="Budget Progress by Category" subtitle="From the Excel snapshot — click a category for its transactions" />
-        <div className="space-y-3">
-          {expenseLines.map((l) => {
-            const c = computeLine(l, me, useMonth);
-            const clickable = l.drilldown_enabled !== false;
-            return (
-              <button
-                key={l.id}
-                onClick={() => clickable && setSelected(l)}
-                className={`w-full rounded-2xl border border-stone-200 bg-white p-6 text-left transition ${clickable ? 'cursor-pointer hover:border-stone-300 hover:bg-stone-50/50' : ''}`}
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium">{l.category}</p>
-                    {clickable && <ChevronRight className="h-4 w-4 text-stone-300" />}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm tabular-nums text-stone-600">
-                      {fmtCurrency(c.ytd)} / {fmtCurrency(c.annual)}
-                    </span>
-                    <StatusPill status={c.status} />
-                  </div>
-                </div>
-                <div className="mt-4">
-                  <BudgetBar pct={c.pctUsed} status={c.status} />
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-y-2 text-sm md:grid-cols-4">
-                  <p className="text-stone-500">Remaining <span className="ml-1 tabular-nums text-stone-900">{fmtCurrency(c.remaining)}</span></p>
-                  <p className="text-stone-500">Used <span className="ml-1 tabular-nums text-stone-900">{fmtPct(c.pctUsed)}</span></p>
-                  <p className="text-stone-500">{ytdMode ? 'Expected YTD' : 'Expected'} <span className="ml-1 tabular-nums text-stone-900">{fmtCurrency(c.expected)}</span></p>
-                  <p className="text-stone-500">
-                    Pace <span className="ml-1 tabular-nums text-stone-900">{fmtCurrency(Math.abs(c.variance))} {c.variance >= 0 ? 'under' : 'over'}</span>
-                  </p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+        <SectionHeading title="Budget Progress by Category" subtitle="Monitored BVA categories — click a category for detail" />
+        <CategoryTable rows={vm.detail} monthMode={monthMode} onSelect={setSelected} />
       </section>
 
       <section>
-        <SectionHeading title="Income" subtitle="Received against expected income · Excel snapshot" />
+        <SectionHeading title="Income" subtitle="Received against annual budgeted income · BVA snapshot" />
         <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
           <div className="hidden grid-cols-6 gap-4 border-b border-stone-100 px-6 py-3 text-xs uppercase tracking-[0.12em] text-stone-500 md:grid">
-            <span className="col-span-2">Source</span><span className="text-right">Current Month</span><span className="text-right">YTD</span><span className="text-right">Expected</span><span className="text-right">% Received</span>
+            <span className="col-span-2">Account / Category</span>
+            <span className="text-right">Current Month</span>
+            <span className="text-right">Actual YTD</span>
+            <span className="text-right">Annual Budget</span>
+            <span className="text-right">Remaining · % Received</span>
           </div>
-          {incomeLines.map((l) => (
+          {vm.incomeRows.map((l) => (
             <div key={l.id} className="grid gap-2 border-b border-stone-100 px-6 py-4 text-sm last:border-0 md:grid-cols-6 md:gap-4">
-              <span className="col-span-2 font-medium">{l.category}</span>
-              <span className="tabular-nums md:text-right">{fmtCurrency(l.month_actual)}</span>
-              <span className="tabular-nums md:text-right">{fmtCurrency(l.ytd_actual)}</span>
-              <span className="tabular-nums md:text-right">{fmtCurrency(l.annual_budget)}</span>
-              <span className="tabular-nums md:text-right">{fmtPct(l.annual_budget ? (l.ytd_actual / l.annual_budget) * 100 : 0)}</span>
+              <span className="col-span-2 font-medium">{l.code ? `${l.code} · ` : ''}{l.category}</span>
+              <span className="tabular-nums md:text-right">{fmtCurrency(l.monthActual)}</span>
+              <span className="tabular-nums md:text-right">{fmtCurrency(l.actualYtd)}</span>
+              <span className="tabular-nums md:text-right">{fmtCurrency(l.annualBudget)}</span>
+              <span className="tabular-nums md:text-right">{fmtCurrency(l.remaining)} · {fmtPct(l.percentUsed * 100)}</span>
             </div>
           ))}
           <div className="grid gap-2 bg-stone-50 px-6 py-4 text-sm font-medium md:grid-cols-6 md:gap-4">
             <span className="col-span-2">Total Income</span>
-            <span className="tabular-nums md:text-right">{fmtCurrency(period.month_income)}</span>
-            <span className="tabular-nums md:text-right">{fmtCurrency(period.ytd_income)}</span>
-            <span className="md:col-span-2" />
+            <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.monthIncome)}</span>
+            <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.ytdIncome)}</span>
+            <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.annualBudgetedIncome)}</span>
+            <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.remainingIncomeBudget)} · {fmtPct(incomeUsed * 100)}</span>
           </div>
         </div>
+        {vm.snapshot.incomeWorkbookBudget != null && (
+          <p className="mt-2 text-xs text-stone-400">
+            Workbook displayed an annual income budget of {fmtCurrency(vm.snapshot.incomeWorkbookBudget)}; the independently calculated
+            total {fmtCurrency(vm.snapshot.annualBudgetedIncome)} is used.
+          </p>
+        )}
       </section>
 
       {savingsLines.length > 0 && (
@@ -103,16 +87,16 @@ export default function Budget() {
           <SectionHeading title="Planned Monthly Savings" subtitle="Separate from savings-funded spending and entity distributions" />
           <div className="grid gap-4 sm:grid-cols-2">
             {savingsLines.map((l) => {
-              const c = computeLine(l, me);
+              const c = bvaComputeYtd({ actualYtd: l.ytd_actual, annualBudget: l.annual_budget }, vm.elapsedMonths);
               return (
                 <div key={l.id} className="rounded-2xl border border-stone-200 bg-white p-6">
                   <p className="font-medium">{l.category}</p>
-                  <p className="mt-3 font-display text-2xl tabular-nums">{fmtCurrency(c.ytd)}</p>
+                  <p className="mt-3 font-display text-2xl tabular-nums">{fmtCurrency(c.actual)}</p>
                   <p className="text-sm text-stone-500">of {fmtCurrency(c.annual)} annual target</p>
-                  <div className="mt-4"><BudgetBar pct={c.pctUsed} status="under" /></div>
+                  <div className="mt-4"><BudgetBar pct={c.percentUsed * 100} status="under" /></div>
                   <div className="mt-3 flex justify-between text-sm text-stone-500">
                     <span>Current month {fmtCurrency(l.month_actual)}</span>
-                    <span>{fmtPct(c.pctUsed)} of goal</span>
+                    <span>{fmtPct(c.percentUsed * 100)} of goal</span>
                   </div>
                 </div>
               );
@@ -123,13 +107,7 @@ export default function Budget() {
 
       <ImportedAccountsSection />
 
-      <CategoryDrilldown
-        line={selected}
-        periodId={periodId}
-        monthsElapsed={me}
-        sourceFilter="excel"
-        onClose={() => setSelected(null)}
-      />
+      <CategoryDrilldown line={selected} periodId={periodId} monthsElapsed={vm.elapsedMonths} sourceFilter="excel" onClose={() => setSelected(null)} />
     </div>
   );
 }

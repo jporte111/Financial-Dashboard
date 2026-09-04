@@ -10,7 +10,7 @@ import ReviewQueue from '@/components/admin/ReviewQueue';
 import PeriodsManager from '@/components/admin/PeriodsManager';
 import TransactionsEditor from '@/components/admin/TransactionsEditor';
 import AccountHierarchyManager from '@/components/admin/AccountHierarchyManager';
-import ImportCenter from '@/components/admin/ImportCenter';
+import ImportHub from '@/components/admin/ImportHub';
 import Reconciliation from '@/components/admin/Reconciliation';
 
 export default function Admin() {
@@ -25,8 +25,14 @@ export default function Admin() {
     return <p className="rounded-2xl border border-stone-200 bg-white p-12 text-center text-sm text-stone-500">This area is restricted to the internal team.</p>;
 
   return (
-    <Tabs defaultValue="data" className="space-y-6">
-      <TabsList className="rounded-full">
+    <Tabs defaultValue={period ? 'data' : 'import'} className="space-y-6">
+      {!period && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          No reporting period exists yet. Use <strong>Import</strong> to import a BVA workbook — it creates the
+          period for you — or use <strong>Periods</strong> to create one manually.
+        </div>
+      )}
+      <TabsList className="flex h-auto flex-wrap justify-start gap-1 rounded-2xl">
         <TabsTrigger value="data" className="rounded-full">Monthly Data</TabsTrigger>
         <TabsTrigger value="transactions" className="rounded-full">Transactions</TabsTrigger>
         <TabsTrigger value="accounts" className="rounded-full">Accounts</TabsTrigger>
@@ -104,7 +110,7 @@ export default function Admin() {
       </TabsContent>
 
       <TabsContent value="import">
-        <ImportCenter />
+        <ImportHub />
       </TabsContent>
 
       <TabsContent value="review" className="space-y-5">

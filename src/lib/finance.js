@@ -10,6 +10,45 @@ export const fmtCurrency = (n, opts = {}) => {
 
 export const fmtPct = (n) => `${Number(n || 0).toFixed(2)}%`;
 
+// --- BVA calculation core -------------------------------------------------
+// The BVA dashboard uses these directly; the QuickBooks pages keep the
+// budget-consumption helpers below unchanged.
+export {
+  computeYtd as bvaComputeYtd,
+  computeMonth as bvaComputeMonth,
+  computeLine as bvaComputeLine,
+  aggregateYtd as bvaAggregateYtd,
+  expectedPacePct,
+  elapsedMonthsFromCutoff,
+  paceStatus,
+  isFavorable,
+  isUnfavorable,
+  round2,
+  STATUS as PACE_STATUS,
+  STATUS_TEXT as PACE_STATUS_TEXT,
+  STATUS_STYLES as PACE_STATUS_STYLES,
+  STATUS_TOOLTIP as PACE_VARIANCE_TOOLTIP,
+  flagsForCategory,
+  FLAG,
+  FLAG_TEXT,
+} from './bva.js';
+
+// "$1,234.56 favorable" / "$1,234.56 unfavorable" / "On pace"
+export function fmtVariance(amount, { cents = true } = {}) {
+  const v = Number(amount || 0);
+  const rounded = Math.round(v * 100) / 100;
+  if (rounded === 0) return 'On pace';
+  const label = rounded > 0 ? 'favorable' : 'unfavorable';
+  return `${fmtCurrency(Math.abs(rounded), { cents })} ${label}`;
+}
+
+// "+2.91%" / "-0.65%" with an explicit sign
+export const fmtSignedPct = (n) => {
+  const v = Number(n || 0) * 100;
+  const sign = v > 0 ? '+' : v < 0 ? '-' : '';
+  return `${sign}${Math.abs(v).toFixed(2)}%`;
+};
+
 export const GROUP_LABELS = {
   fixed: 'Fixed',
   variable: 'Variable',

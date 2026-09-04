@@ -18,9 +18,17 @@ const FIELDS = [
 ];
 
 export default function PeriodTotalsForm({ period, reload }) {
-  const [form, setForm] = useState(period);
+  const [form, setForm] = useState(period || {});
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
+
+  if (!period) {
+    return (
+      <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 p-6 text-sm text-stone-500">
+        No reporting period selected. Import a BVA workbook or create a period first.
+      </div>
+    );
+  }
 
   const save = async () => {
     setSaving(true);

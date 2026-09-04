@@ -181,7 +181,7 @@ export default function ImportCenter() {
           <UploadCard
             icon={<FileSpreadsheet className="h-5 w-5" />}
             title="Budget Overview CSV"
-            hint="Soni_BudgetOverview_BVA2026__Report.csv"
+            hint="e.g. BudgetOverview_BVA.csv"
             file={budgetFile}
             onFile={onBudget}
             preview={budgetPreview && (
@@ -193,7 +193,7 @@ export default function ImportCenter() {
           <UploadCard
             icon={<FileUp className="h-5 w-5" />}
             title="Transaction Report XLSX"
-            hint="Soni_TransactionReport.xlsx"
+            hint="e.g. TransactionReport.xlsx"
             file={txFile}
             onFile={onTx}
             preview={txPreview && (
