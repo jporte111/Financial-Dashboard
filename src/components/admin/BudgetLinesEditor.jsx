@@ -7,14 +7,6 @@ import { Trash2, Plus } from 'lucide-react';
 
 const GROUPS = ['fixed', 'variable', 'discretionary', 'income', 'savings', 'unassigned'];
 
-// Parse a comma/newline-separated textarea value into a clean string array.
-function parseNames(v) {
-  return String(v || '')
-    .split(/[\n,]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
 export default function BudgetLinesEditor({ periodId, lines, reload }) {
   const [busy, setBusy] = useState(false);
 
@@ -48,7 +40,7 @@ export default function BudgetLinesEditor({ periodId, lines, reload }) {
         {(lines || []).map((l) => (
           <div key={l.id} className="rounded-xl border border-stone-100 bg-stone-50/50 p-3">
             <div className="grid items-center gap-2 md:grid-cols-12">
-              <Input className="md:col-span-2 bg-white" defaultValue={l.qb_code || ''} placeholder="QB code (ref)" onBlur={(e) => patch(l.id, { qb_code: e.target.value })} />
+              <Input className="md:col-span-2 bg-white" defaultValue={l.qb_code || ''} placeholder="Account code (ref)" onBlur={(e) => patch(l.id, { qb_code: e.target.value })} />
               <Input className="md:col-span-3 bg-white" defaultValue={l.category} onBlur={(e) => patch(l.id, { category: e.target.value })} />
               <div className="md:col-span-2">
                 <Select value={l.budget_group} onValueChange={(v) => setGroup(l, v)}>
@@ -66,23 +58,11 @@ export default function BudgetLinesEditor({ periodId, lines, reload }) {
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>
-            <div className="mt-2">
-              <label className="mb-1 block text-[11px] uppercase tracking-[0.12em] text-stone-400">
-                QuickBooks account names to roll up (comma or newline)
-              </label>
-              <textarea
-                className="w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700 focus:outline-none focus:ring-1 focus:ring-stone-400"
-                rows={2}
-                defaultValue={(l.qb_account_names || []).join('\n')}
-                placeholder={l.category ? `e.g. ${l.category}` : 'Comma or newline separated QuickBooks account names'}
-                onBlur={(e) => patch(l.id, { qb_account_names: parseNames(e.target.value) })}
-              />
-            </div>
           </div>
         ))}
         {!lines?.length && <p className="text-sm text-stone-500">No categories yet.</p>}
       </div>
-      <p className="mt-4 text-xs text-stone-400">The live QuickBooks column pairs each line by its category name plus any extra QBO account names listed below it. QB code is reference only. Changes save when you leave a field.</p>
+      <p className="mt-4 text-xs text-stone-400">Figures come from the BVA workbook import. Account code is reference only. Changes save when you leave a field.</p>
     </div>
   );
 }

@@ -1,11 +1,14 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { norm, buildIndexes, accountsForNames } from '../../shared/rollupHelpers.ts';
+import { buildIndexes, accountsForNames } from '../../shared/rollupHelpers.ts';
 
-// Return the YTD transactions behind a category or live account, for drill-down.
-// Resolution order:
-//   account_id     — Live QuickBooks page: a single QBO account.
-//   category + qb_account_names — Spending Detail: every QBO account whose
-//                    name matches the category or any name in the list.
+// Return the YTD transactions behind a BVA-reported category, for the
+// Spending Detail drill-down. This reads only Transaction records already
+// stored in the database — it never calls QuickBooks or any other external
+// API — and it always excludes any transaction whose source is
+// 'quickbooks', so historical QuickBooks-synced records can never surface as
+// if they were live data. The BVA workbook is the only financial-data source
+// for the dashboard; this endpoint only ever supplements it with underlying
+// transaction detail when such records already exist locally.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
@@ -14,10 +17,9 @@ export default async function(req) {
 
     let body = {};
     try { body = await req.json(); } catch { body = {}; }
-    const { period_id, account_id, category, qb_account_names, source_filter } = body;
+    const { period_id, category, qb_account_names } = body;
     if (!period_id) return Response.json({ error: 'period_id required' }, { status: 400 });
-    if (!account_id && !category)
-      return Response.json({ error: 'account_id or category required' }, { status: 400 });
+    if (!category) return Response.json({ error: 'category required' }, { status: 400 });
 
     const period = await base44.asServiceRole.entities.ReportingPeriod.get(period_id);
     if (!period) return Response.json({ error: 'Period not found' }, { status: 404 });
@@ -41,25 +43,16 @@ export default async function(req) {
       return d && d >= start && d <= end;
     };
 
-    let matched;
-    if (account_id) {
-      // Live QuickBooks page drilldown: a single QBO account.
-      matched = ytdTxns.filter((t) => t.account_id === account_id);
-    } else {
-      // Spending Detail drilldown: QBO accounts matching the category name
-      // or any extra name in qb_account_names.
-      const accounts = await base44.asServiceRole.entities.Account.filter({});
-      const { byName } = buildIndexes(accounts);
-      const ids = new Set(accountsForNames(category, qb_account_names, byName).map((a) => a.id));
-      matched = ytdTxns.filter((t) => t.account_id && ids.has(t.account_id));
-    }
+    // Match by category name (plus any extra names on the line) against
+    // whatever Account records already exist — a local lookup, not a live call.
+    const accounts = await base44.asServiceRole.entities.Account.filter({});
+    const { byName } = buildIndexes(accounts);
+    const ids = new Set(accountsForNames(category, qb_account_names, byName).map((a) => a.id));
+    const matched = ytdTxns.filter((t) => t.account_id && ids.has(t.account_id));
 
-    // Source isolation: the Excel tab sees only manual/import records, the
-    // QuickBooks tab sees only QBO-synced records, the Admin reconciliation
-    // view (no filter) sees both.
-    let filtered = matched;
-    if (source_filter === 'excel') filtered = matched.filter((t) => t.source !== 'quickbooks');
-    else if (source_filter === 'quickbooks') filtered = matched.filter((t) => t.source === 'quickbooks');
+    // BVA-only guarantee: never return a QuickBooks-sourced transaction, even
+    // if one exists historically for a matched account.
+    const filtered = matched.filter((t) => t.source !== 'quickbooks');
 
     const rows = filtered.map((t) => ({
       id: t.id,
@@ -74,9 +67,7 @@ export default async function(req) {
 
     return Response.json({
       period_id,
-      account_id: account_id || null,
-      category: category || null,
-      source_filter: source_filter || null,
+      category,
       total: rows.length,
       ytd_amount: rows.reduce((s, r) => s + r.amount, 0),
       month_amount: rows.filter((r) => r.in_month).reduce((s, r) => s + r.amount, 0),

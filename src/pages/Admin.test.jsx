@@ -83,10 +83,10 @@ describe('Admin bootstrap with no reporting period (bootstrap bug fix)', () => {
     });
   });
 
-  it('clicking into Reconciliation does not throw with no period selected', async () => {
+  it('there is no Reconciliation tab and no QuickBooks tab (removed with the QuickBooks disconnect)', () => {
     renderAdmin();
-    expect(() => fireEvent.mouseDown(screen.getByRole('tab', { name: /Reconciliation/i }))).not.toThrow();
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Reconciliation/i }).getAttribute('data-state')).toBe('active'));
+    expect(screen.queryByRole('tab', { name: /Reconciliation/i })).toBeNull();
+    expect(screen.queryByRole('tab', { name: /quickbooks/i })).toBeNull();
   });
 });
 

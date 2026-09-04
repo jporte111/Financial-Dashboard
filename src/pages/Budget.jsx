@@ -107,7 +107,7 @@ export default function Budget() {
 
       <ImportedAccountsSection />
 
-      <CategoryDrilldown line={selected} periodId={periodId} monthsElapsed={vm.elapsedMonths} sourceFilter="excel" onClose={() => setSelected(null)} />
+      <CategoryDrilldown line={selected} periodId={periodId} monthsElapsed={vm.elapsedMonths} onClose={() => setSelected(null)} />
     </div>
   );
 }

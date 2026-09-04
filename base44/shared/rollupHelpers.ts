@@ -1,8 +1,11 @@
-// Shared helpers for the live (QuickBooks) layer.
-// The live layer sums transactions directly by their linked QBO account_id.
-// Excel (BudgetLine) is the report of record; QBO Account + Transaction are a
-// standalone live layer paired to it by normalized account NAME (not account
-// code — the Excel codes and QBO codes are different schemes that collide).
+// Shared helpers for resolving a BudgetLine/category to its underlying
+// Account records by normalized name, used only by the BVA Spending Detail
+// transaction drill-down (categoryTransactions). There is no live QuickBooks
+// layer any more — the QuickBooks connector, OAuth connection, and the
+// liveRollup / quickbooksSync / quickbooksTransactionSync functions that
+// used to populate and read "live" data have been removed. This module only
+// reads whatever Account/Transaction records already exist locally; it never
+// calls out to QuickBooks or any other external API.
 
 export function indexById(accounts) {
   return Object.fromEntries(accounts.map((a) => [a.id, a]));
@@ -13,25 +16,13 @@ export function norm(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-// Sum transactions per linked QBO account_id. Only transactions whose
-// account_id points to a tracked QBO account are counted — import/legacy
-// transactions with no account_id belong to the Excel snapshot, not the
-// live layer, and are ignored here.
-export function rollUpByAccount(txns, qboIdSet) {
-  const totals = {};
-  for (const t of txns) {
-    const id = t.account_id;
-    if (!id || !qboIdSet.has(id)) continue;
-    if (!totals[id]) totals[id] = { actual: 0, count: 0 };
-    totals[id].actual += Number(t.amount || 0);
-    totals[id].count += 1;
-  }
-  return totals;
-}
-
 // Build lookup indexes from a flat account list.
 //   byId   — every account by id
-//   byName — QBO accounts (source=quickbooks) grouped by normalized account_name
+//   byName — accounts (of any source) grouped by normalized account_name,
+//            restricted to source='quickbooks' for backward compatibility
+//            with historical account records. This performs no live lookup —
+//            it only reads whatever Account rows already exist in the
+//            database, which stop changing once QuickBooks is disconnected.
 export function buildIndexes(accounts) {
   const byId = indexById(accounts);
   const byName = {};
@@ -44,7 +35,7 @@ export function buildIndexes(accounts) {
   return { byId, byName };
 }
 
-// Resolve the QBO accounts a BudgetLine rolls up: its category name plus any
+// Resolve the accounts a BudgetLine rolls up: its category name plus any
 // extra names in qb_account_names, matched by normalized account_name.
 // Returns a de-duplicated list (by id).
 export function accountsForNames(category, extraNames, byName) {

@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Trash2, Plus, RefreshCw } from 'lucide-react';
+import { Trash2, Plus } from 'lucide-react';
 import { fmtCurrency } from '@/lib/finance';
 
 const TREATMENTS = [
@@ -14,24 +14,8 @@ const TREATMENTS = [
 
 export default function TransactionsEditor({ periodId, lines }) {
   const [txns, setTxns] = useState([]);
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState(null);
   const load = () => base44.entities.Transaction.filter({ period_id: periodId }, '-date').then(setTxns);
   useEffect(() => { if (periodId) load(); }, [periodId]);
-
-  const syncQuickbooks = async () => {
-    setSyncing(true);
-    setSyncResult(null);
-    try {
-      const res = await base44.functions.invoke('quickbooksTransactionSync', { period_id: periodId });
-      setSyncResult(res.data);
-      load();
-    } catch (e) {
-      setSyncResult({ error: e.message || 'Sync failed' });
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const patch = async (id, data) => { await base44.entities.Transaction.update(id, data); load(); };
   const add = async () => {
@@ -59,19 +43,9 @@ export default function TransactionsEditor({ periodId, lines }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="rounded-full" onClick={syncQuickbooks} disabled={syncing}>
-            {syncing ? 'Syncing…' : <><RefreshCw className="mr-1 h-4 w-4" /> Sync from QuickBooks</>}
-          </Button>
           <Button variant="outline" className="rounded-full" onClick={add}><Plus className="mr-1 h-4 w-4" /> Add Transaction</Button>
         </div>
       </div>
-      {syncResult && (
-        <div className={`mt-3 rounded-xl border p-3 text-xs ${syncResult.error ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-          {syncResult.error
-            ? `Sync failed: ${syncResult.error}`
-            : `QuickBooks sync for ${syncResult.period || ''} — pulled ${syncResult.quickbooksTransactions} transactions, imported ${syncResult.importedLines} line${syncResult.importedLines === 1 ? '' : 's'} into this period (${syncResult.existingBeforeSync || 0} already existed).`}
-        </div>
-      )}
       <div className="mt-5 space-y-3">
         {txns.map((t) => (
           <div key={t.id} className="grid items-center gap-2 rounded-xl border border-stone-100 bg-stone-50/50 p-3 md:grid-cols-12">

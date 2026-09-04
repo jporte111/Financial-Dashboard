@@ -63,61 +63,62 @@ function makeBvaFile() {
   return file;
 }
 
-describe('Admin Import hub — both importers reachable, neither replaced', () => {
-  it('defaults to the BVA Import subtab and shows the BVA workbook control', () => {
+describe('Admin Import hub — BVA is the only financial-data source; QuickBooks is fully removed', () => {
+  it('has exactly two subtabs: BVA Import and BVA Review — no QuickBooks Import', () => {
     renderHub();
     expect(screen.getByRole('tab', { name: /^BVA Import$/i })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: /QuickBooks Import/i })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: /BVA Review/i })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /^BVA Review$/i })).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: /quickbooks/i })).toBeNull();
+    expect(screen.getAllByRole('tab')).toHaveLength(2);
+  });
 
-    const panel = screen.getByRole('tabpanel');
-    expect(within(panel).getByText(/Monthly BVA Workbook/i)).toBeTruthy();
-    const fileInput = panel.querySelector('input[type="file"]');
+  it('defaults to the BVA Import subtab and shows the BVA workbook control', () => {
+    const { container } = renderHub();
+    expect(within(container).getByText(/Monthly BVA Workbook/i)).toBeTruthy();
+    const fileInput = container.querySelector('input[type="file"]');
     expect(fileInput).toBeTruthy();
     expect(fileInput.getAttribute('accept')).toMatch(/\.xlsx/);
-    // legacy QuickBooks controls are NOT in the BVA panel
-    expect(within(panel).queryByText(/Budget Overview CSV/i)).toBeNull();
+    // no QuickBooks controls, buttons, or instructional text anywhere in the hub
+    expect(within(container).queryByText(/Budget Overview CSV/i)).toBeNull();
+    expect(within(container).queryByText(/Transaction Report XLSX/i)).toBeNull();
+    expect(within(container).queryByText(/quickbooks/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /commit to database/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /sync from quickbooks/i })).toBeNull();
   });
 
   it('uploading a workbook on the BVA Import subtab reveals the reporting-period confirmation fields', async () => {
-    renderHub();
-    const fileInput = screen.getByRole('tabpanel').querySelector('input[type="file"]');
+    const { container } = renderHub();
+    const fileInput = container.querySelector('input[type="file"]');
     fireEvent.change(fileInput, { target: { files: [makeBvaFile()] } });
 
     await waitFor(() => {
-      const p = screen.getByRole('tabpanel');
-      // exact-text labels (avoids matching the instruction sentence)
-      expect(within(p).getByText('Reporting month')).toBeTruthy();
-      expect(within(p).getByText('Reporting year')).toBeTruthy();
-      expect(within(p).getByText('Reporting cutoff date')).toBeTruthy();
-      expect(within(p).getByRole('button', { name: /Apply import \(Draft\)/i })).toBeTruthy();
+      expect(within(container).getByText('Reporting month')).toBeTruthy();
+      expect(within(container).getByText('Reporting year')).toBeTruthy();
+      expect(within(container).getByText('Reporting cutoff date')).toBeTruthy();
+      expect(within(container).getByRole('button', { name: /Apply import \(Draft\)/i })).toBeTruthy();
     });
     // cutoff pre-fills from the workbook cell, not the filename
-    const dateInput = screen.getByRole('tabpanel').querySelector('input[type="date"]');
+    const dateInput = container.querySelector('input[type="date"]');
     expect(dateInput.value).toBe('2026-07-31');
+    // still no QuickBooks anywhere after interacting with the form
+    expect(within(container).queryByText(/quickbooks/i)).toBeNull();
   });
 
-  it('selecting QuickBooks Import renders the two legacy QuickBooks upload controls', async () => {
-    renderHub();
-    fireEvent.mouseDown(screen.getByRole('tab', { name: /QuickBooks Import/i }));
-
-    await waitFor(() => {
-      const panel = screen.getByRole('tabpanel');
-      expect(within(panel).getByText('Budget Overview CSV')).toBeTruthy();
-      expect(within(panel).getByText('Transaction Report XLSX')).toBeTruthy();
-      expect(within(panel).getByRole('button', { name: /Commit to database/i })).toBeTruthy();
-    });
-    expect(within(screen.getByRole('tabpanel')).queryByText(/Monthly BVA Workbook/i)).toBeNull();
+  it('selecting BVA Review shows no QuickBooks content either', async () => {
+    const { container } = renderHub();
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /^BVA Review$/i }));
+    await waitFor(() => expect(screen.getByRole('tab', { name: /^BVA Review$/i }).getAttribute('data-state')).toBe('active'));
+    expect(within(container).queryByText(/quickbooks/i)).toBeNull();
   });
 
-  it('switching subtabs is reflected in the URL query (?import=...)', async () => {
+  it('switching subtabs is reflected in the URL query as bva / bva-review only', async () => {
     let search = '';
     renderHub(<LocationProbe onChange={(s) => { search = s; }} />);
 
-    fireEvent.mouseDown(screen.getByRole('tab', { name: /QuickBooks Import/i }));
-    await waitFor(() => expect(search).toMatch(/import=quickbooks/));
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /^BVA Review$/i }));
+    await waitFor(() => expect(search).toMatch(/import=bva-review/));
 
     fireEvent.mouseDown(screen.getByRole('tab', { name: /^BVA Import$/i }));
-    await waitFor(() => expect(search).toMatch(/import=bva/));
+    await waitFor(() => expect(search).toMatch(/import=bva(?!-review)/));
   });
 });

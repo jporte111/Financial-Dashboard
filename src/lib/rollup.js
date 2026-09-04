@@ -1,4 +1,4 @@
-// Budget roll-up engine for the QuickBooks account hierarchy.
+// Budget roll-up engine for the chart-of-accounts hierarchy (Admin > Accounts).
 // A transaction belongs to one account. An account either has its own budget
 // (has_own_budget = true) or rolls up into a budget parent. A budget account's
 // Actual YTD = sum of all transactions on accounts whose budget resolution

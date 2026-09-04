@@ -6,7 +6,8 @@
       "type": "string"
     },
     "qb_transaction_id": {
-      "type": "string"
+      "type": "string",
+      "description": "Historical QuickBooks transaction id, set only on records created while the QuickBooks connector was active. The QuickBooks connector and sync functions have been removed; this field is retained solely so existing historical records keep their identity, and nothing writes to it any more."
     },
     "date": {
       "type": "string",
