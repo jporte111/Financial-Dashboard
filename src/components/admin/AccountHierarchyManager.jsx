@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Trash2, Plus, ChevronRight, ChevronDown, RefreshCw } from 'lucide-react';
 import { buildTree } from '@/lib/rollup';
-import { fmtCurrency } from '@/lib/finance';
 
 const GROUPS = ['fixed', 'variable', 'discretionary', 'income', 'savings'];
 

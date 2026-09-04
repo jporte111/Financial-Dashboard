@@ -26,9 +26,11 @@
         "variable",
         "discretionary",
         "income",
-        "savings"
+        "savings",
+        "unassigned"
       ],
-      "default": "variable"
+      "default": "variable",
+      "description": "'unassigned' is used only for a monitored BVA DETAIL category whose Fixed/Variable/Discretionary group has not yet been confirmed by an admin. Unassigned rows are excluded from group filters and never counted in group summary totals."
     },
     "month_actual": {
       "type": "number",
@@ -57,6 +59,20 @@
     "drilldown_enabled": {
       "type": "boolean",
       "default": true
+    },
+    "bva_detail": {
+      "type": "boolean",
+      "default": false,
+      "description": "True for a monitored BVA DETAIL category (a watchlist row that rolls up into a group, not a group-summary line). Detail rows are shown in Spending Detail and are NOT summed into group totals."
+    },
+    "group_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True once an admin has confirmed this detail category's Fixed/Variable/Discretionary group. Unconfirmed rows surface as 'Mapping requires review'."
+    },
+    "monthly_budget": {
+      "type": "number",
+      "description": "Explicit monthly budget / expected monthly allocation for This Month mode; when absent the dashboard derives annual_budget / 12"
     },
     "internal_notes": {
       "type": "string"

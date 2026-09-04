@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Trash2, Plus } from 'lucide-react';
 
-const GROUPS = ['fixed', 'variable', 'discretionary', 'income', 'savings'];
+const GROUPS = ['fixed', 'variable', 'discretionary', 'income', 'savings', 'unassigned'];
 
 // Parse a comma/newline-separated textarea value into a clean string array.
 function parseNames(v) {
@@ -19,6 +19,15 @@ export default function BudgetLinesEditor({ periodId, lines, reload }) {
   const [busy, setBusy] = useState(false);
 
   const patch = async (id, data) => { await base44.entities.BudgetLine.update(id, data); reload(); };
+
+  // Picking a real Fixed/Variable/Discretionary group for a monitored BVA
+  // DETAIL row also confirms the mapping, so the dashboard stops treating it
+  // as Unassigned. Choosing 'unassigned' clears the confirmation.
+  const setGroup = (l, v) => {
+    const data = { budget_group: v };
+    if (l.bva_detail) data.group_confirmed = ['fixed', 'variable', 'discretionary'].includes(v);
+    patch(l.id, data);
+  };
   const add = async () => {
     setBusy(true);
     await base44.entities.BudgetLine.create({ period_id: periodId, category: 'New Category', budget_group: 'variable' });
@@ -42,10 +51,13 @@ export default function BudgetLinesEditor({ periodId, lines, reload }) {
               <Input className="md:col-span-2 bg-white" defaultValue={l.qb_code || ''} placeholder="QB code (ref)" onBlur={(e) => patch(l.id, { qb_code: e.target.value })} />
               <Input className="md:col-span-3 bg-white" defaultValue={l.category} onBlur={(e) => patch(l.id, { category: e.target.value })} />
               <div className="md:col-span-2">
-                <Select value={l.budget_group} onValueChange={(v) => patch(l.id, { budget_group: v })}>
+                <Select value={l.budget_group} onValueChange={(v) => setGroup(l, v)}>
                   <SelectTrigger className="bg-white"><SelectValue /></SelectTrigger>
                   <SelectContent>{GROUPS.map((g) => <SelectItem key={g} value={g}>{g}</SelectItem>)}</SelectContent>
                 </Select>
+                {l.bva_detail && !l.group_confirmed && (
+                  <p className="mt-1 text-[10px] uppercase tracking-[0.1em] text-amber-600">Group mapping required</p>
+                )}
               </div>
               <Input className="md:col-span-2 bg-white" type="number" step="0.01" defaultValue={l.month_actual} placeholder="Month" onBlur={(e) => patch(l.id, { month_actual: Number(e.target.value || 0) })} />
               <Input className="md:col-span-1 bg-white" type="number" step="0.01" defaultValue={l.ytd_actual} placeholder="YTD" onBlur={(e) => patch(l.id, { ytd_actual: Number(e.target.value || 0) })} />

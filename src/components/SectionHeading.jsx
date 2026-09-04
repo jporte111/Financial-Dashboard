@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function SectionHeading({ title, subtitle, right }) {
+export default function SectionHeading({ title, subtitle = null, right = null }) {
   return (
     <div className="mb-5 flex items-end justify-between gap-4">
       <div>

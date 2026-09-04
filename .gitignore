@@ -30,3 +30,6 @@ dist-ssr
 .env
 .vite
 base44/.app.jsonc
+
+# Client BVA workbooks (financial data — keep out of git)
+bva-workbooks/

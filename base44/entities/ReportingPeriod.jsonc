@@ -118,6 +118,72 @@
     },
     "internal_notes": {
       "type": "string"
+    },
+    "reporting_cutoff_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Confirmed BVA reporting cutoff (e.g. 2026-07-31). Drives elapsed months, pace, and every 'as of' / 'through' label. Not inferred from the workbook filename."
+    },
+    "source_filename": {
+      "type": "string",
+      "description": "Original filename of the imported BVA workbook"
+    },
+    "imported_at": {
+      "type": "string",
+      "description": "ISO timestamp of the most recent BVA workbook import"
+    },
+    "imported_by": {
+      "type": "string",
+      "description": "User (email / name) who ran the most recent BVA import"
+    },
+    "finalized_at": {
+      "type": "string",
+      "description": "ISO timestamp when the period was marked Final"
+    },
+    "finalized_by": {
+      "type": "string"
+    },
+    "bva_import_status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "final"
+      ],
+      "default": "draft",
+      "description": "BVA import lifecycle, separate from the existing review-workflow 'status' field"
+    },
+    "annual_budgeted_income": {
+      "type": "number",
+      "default": 0,
+      "description": "Independently calculated total annual income budget (sum of income line budgets)"
+    },
+    "annual_budgeted_income_workbook": {
+      "type": "number",
+      "description": "The annual income budget total as displayed in the workbook, kept only to show the discrepancy when it omits sub-cent lines"
+    },
+    "annual_budgeted_expenses": {
+      "type": "number",
+      "default": 0,
+      "description": "Total annual expense budget (Fixed + Variable + Discretionary)"
+    },
+    "monthly_income_budget": {
+      "type": "number",
+      "description": "Explicitly imported monthly income budget baseline; when absent the dashboard derives annual / 12"
+    },
+    "bva_validation_warnings": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Independent-validation warnings for this period: { code, section, message, sourceValue, calculatedValue, requiresAdminReview, blocksFinalize, overridden, override }"
+    },
+    "bva_overrides": {
+      "type": "object",
+      "description": "Map of warning code -> { reason, by, at } recorded when an authorized user accepts a discrepancy"
+    },
+    "bva_parsed_source": {
+      "type": "object",
+      "description": "Raw parsed values from the last workbook import, retained for the Admin review view"
     }
   },
   "required": [
