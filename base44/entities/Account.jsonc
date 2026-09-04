@@ -4,14 +4,14 @@
   "properties": {
     "account_code": {
       "type": "string",
-      "description": "QuickBooks account number / code"
+      "description": "Account number / code (historically from QuickBooks; the QuickBooks integration has been removed)"
     },
     "account_name": {
       "type": "string"
     },
     "full_account_path": {
       "type": "string",
-      "description": "Full colon-delimited QuickBooks account path, e.g. 'Discretionary Costs:Fitness & Self Care:Beauty Supplies'"
+      "description": "Full colon-delimited account path, e.g. 'Discretionary Costs:Fitness & Self Care:Beauty Supplies' (historically from QuickBooks)"
     },
     "parent_account_id": {
       "type": "string",
@@ -68,7 +68,7 @@
     },
     "quickbooks_account_id": {
       "type": "string",
-      "description": "Reserved for future QuickBooks API integration"
+      "description": "Historical QuickBooks account id, set only on records created while the QuickBooks connector was active. The QuickBooks connector and sync functions have been removed; this field is retained solely so existing historical records keep their identity, and nothing writes to it any more."
     }
   },
   "required": [

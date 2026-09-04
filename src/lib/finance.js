@@ -11,8 +11,8 @@ export const fmtCurrency = (n, opts = {}) => {
 export const fmtPct = (n) => `${Number(n || 0).toFixed(2)}%`;
 
 // --- BVA calculation core -------------------------------------------------
-// The BVA dashboard uses these directly; the QuickBooks pages keep the
-// budget-consumption helpers below unchanged.
+// The BVA workbook is the only financial-data source for this app; there is
+// no QuickBooks integration left to keep separate helpers for.
 export {
   computeYtd as bvaComputeYtd,
   computeMonth as bvaComputeMonth,
@@ -57,32 +57,11 @@ export const GROUP_LABELS = {
   savings: 'Savings',
 };
 
-// Core budget math for a single line
-export function computeLine(line, monthsElapsed = 12, useMonth = false) {
-  const annual = Number(line.annual_budget || 0);
-  const actual = useMonth ? Number(line.month_actual || 0) : Number(line.ytd_actual || 0);
-  const months = useMonth ? 1 : monthsElapsed;
-  const remaining = annual - actual;
-  const pctUsed = annual ? (actual / annual) * 100 : 0;
-  let expected;
-  if (useMonth) expected = annual / 12;
-  else if (line.pace_method === 'none') expected = annual;
-  else if (line.pace_method === 'custom' && line.expected_ytd_override != null)
-    expected = Number(line.expected_ytd_override);
-  else expected = (annual * monthsElapsed) / 12;
-  const variance = expected - actual; // positive = under pace
-  const pctVariance = expected ? (variance / expected) * -100 : 0;
-  return { annual, ytd: actual, remaining, pctUsed, expected, variance, pctVariance, status: statusOf(variance, expected) };
-}
-
-export function statusOf(variance, expected) {
-  if (variance >= 0) {
-    if (expected > 0 && variance / expected < 0.05) return 'near';
-    return 'under';
-  }
-  return 'over';
-}
-
+// Legacy budget-consumption status vocabulary. The only callers that ever
+// produced these keys (the QuickBooks Live page and the Excel/QuickBooks
+// reconciliation table) have been removed along with QuickBooks itself;
+// these maps stay only because StatusPill and BudgetBar still merge them
+// with the current PACE_STATUS_* maps for a single shared lookup.
 export const STATUS_TEXT = { under: 'Under Budget', near: 'Near Budget', over: 'Over Budget' };
 
 export const STATUS_STYLES = {
@@ -90,21 +69,3 @@ export const STATUS_STYLES = {
   near: { text: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200', bar: 'bg-amber-500', dot: 'bg-amber-500' },
   over: { text: 'text-rose-800', bg: 'bg-rose-50', border: 'border-rose-300', bar: 'bg-rose-500', dot: 'bg-rose-800' },
 };
-
-export function aggregateGroup(lines, monthsElapsed, useMonth = false) {
-  const totals = lines.reduce(
-    (acc, l) => {
-      const c = computeLine(l, monthsElapsed, useMonth);
-      acc.month += Number(l.month_actual || 0);
-      acc.ytd += c.ytd;
-      acc.annual += c.annual;
-      acc.expected += c.expected;
-      return acc;
-    },
-    { month: 0, ytd: 0, annual: 0, expected: 0 }
-  );
-  const remaining = totals.annual - totals.ytd;
-  const pctUsed = totals.annual ? (totals.ytd / totals.annual) * 100 : 0;
-  const variance = totals.expected - totals.ytd;
-  return { ...totals, remaining, pctUsed, variance, status: statusOf(variance, totals.expected) };
-}

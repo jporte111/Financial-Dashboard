@@ -7,14 +7,14 @@
     },
     "qb_code": {
       "type": "string",
-      "description": "Excel account code \u2014 kept for reference only; no longer the pairing key to QuickBooks"
+      "description": "Reference account/category code (from the BVA workbook). There is no QuickBooks integration; this is a display-only reference code."
     },
     "qb_account_names": {
       "type": "array",
       "items": {
         "type": "string"
       },
-      "description": "Extra QuickBooks account names this line should roll up, in addition to any QBO account whose name matches the category. Pairing is by normalized account name."
+      "description": "Historical extra account names this line matches for the transaction drill-down, matched by normalized account name against locally stored Account records. There is no live QuickBooks connection \u2014 this only looks up records that already exist in the database."
     },
     "category": {
       "type": "string"

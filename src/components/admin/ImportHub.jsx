@@ -3,16 +3,14 @@ import { useSearchParams } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import BvaImportCenter from '@/components/admin/BvaImportCenter';
 import BvaReview from '@/components/admin/BvaReview';
-import ImportCenter from '@/components/admin/ImportCenter';
 
-// Single "Import" area with three subtabs. The BVA workflow and the legacy
-// QuickBooks importer are both reachable here; neither replaces the other.
-// The active subtab is kept in the URL (?import=bva|bva-review|quickbooks) so
-// it is linkable and survives a reload.
+// The BVA workbook is the only financial-data source for this app — there is
+// no QuickBooks importer here any more. Two subtabs: importing a new monthly
+// workbook, and reviewing past imports. The active subtab is kept in the URL
+// (?import=bva|bva-review) so it is linkable and survives a reload.
 const SUBTABS = [
   ['bva', 'BVA Import'],
   ['bva-review', 'BVA Review'],
-  ['quickbooks', 'QuickBooks Import'],
 ];
 const DEFAULT_SUBTAB = 'bva';
 
@@ -42,9 +40,6 @@ export default function ImportHub() {
       </TabsContent>
       <TabsContent value="bva-review">
         <BvaReview />
-      </TabsContent>
-      <TabsContent value="quickbooks">
-        <ImportCenter />
       </TabsContent>
     </Tabs>
   );

@@ -9,7 +9,6 @@ import { format } from 'date-fns';
 const NAV = [
   { to: '/', label: 'Dashboard' },
   { to: '/budget', label: 'Budget (Excel)' },
-  { to: '/live-quickbooks', label: 'Live (QuickBooks)' },
   { to: '/savings', label: 'Savings & Distributions' },
   { to: '/cash', label: 'Cash' },
   { to: '/reports', label: 'Reports' },

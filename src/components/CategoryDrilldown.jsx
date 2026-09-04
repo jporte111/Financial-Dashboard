@@ -18,7 +18,9 @@ function Stat({ label, value, hint = null }) {
   );
 }
 
-export default function CategoryDrilldown({ line, periodId, monthsElapsed, sourceFilter, onClose }) {
+// BVA-only: fetches whatever transaction detail already exists locally for a
+// category (never QuickBooks — see base44/functions/categoryTransactions).
+export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClose }) {
   const [txns, setTxns] = useState(null);
 
   useEffect(() => {
@@ -28,10 +30,8 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, sourc
     base44.functions
       .invoke('categoryTransactions', {
         period_id: periodId,
-        account_id: line.account_id || null,
         category: line.category,
         qb_account_names: line.qb_account_names || [],
-        source_filter: sourceFilter || null,
       })
       .then((res) => {
         if (cancelled) return;
@@ -42,7 +42,7 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, sourc
     return () => {
       cancelled = true;
     };
-  }, [line, periodId, sourceFilter]);
+  }, [line, periodId]);
 
   const hasBudgetContext = line && (line.has_snapshot || (line.annual_budget && Number(line.annual_budget) > 0));
   const c = hasBudgetContext

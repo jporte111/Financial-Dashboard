@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Trash2, Plus, ChevronRight, ChevronDown, RefreshCw } from 'lucide-react';
+import { Trash2, Plus, ChevronRight, ChevronDown } from 'lucide-react';
 import { buildTree } from '@/lib/rollup';
 
 const GROUPS = ['fixed', 'variable', 'discretionary', 'income', 'savings'];
@@ -82,25 +82,9 @@ function Row({ account, accounts, depth, childrenOf, onPatch, onDelete, onToggle
 export default function AccountHierarchyManager() {
   const [accounts, setAccounts] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState(null);
 
   const load = () => { base44.entities.Account.list('account_code').then(setAccounts); };
   useEffect(load, []);
-
-  const syncQuickbooks = async () => {
-    setSyncing(true);
-    setSyncResult(null);
-    try {
-      const res = await base44.functions.invoke('quickbooksSync', {});
-      setSyncResult(res.data);
-      load();
-    } catch (e) {
-      setSyncResult({ error: e.message || 'Sync failed' });
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   const { roots, childrenOf } = useMemo(() => (accounts ? buildTree(accounts) : { roots: [], childrenOf: {} }), [accounts]);
 
@@ -122,20 +106,9 @@ export default function AccountHierarchyManager() {
           <p className="text-xs text-stone-400">Set each account's budget parent and whether it carries its own budget. Subaccount activity rolls up to its budget parent.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" className="rounded-full" onClick={syncQuickbooks} disabled={syncing}>
-            {syncing ? 'Syncing…' : <><RefreshCw className="mr-1 h-4 w-4" /> Sync from QuickBooks</>}
-          </Button>
           <Button variant="outline" className="rounded-full" onClick={add} disabled={busy}><Plus className="mr-1 h-4 w-4" /> Add Account</Button>
         </div>
       </div>
-
-      {syncResult && (
-        <div className={`mt-3 rounded-xl border p-3 text-xs ${syncResult.error ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-          {syncResult.error
-            ? `Sync failed: ${syncResult.error}`
-            : `QuickBooks sync complete — matched ${syncResult.matchedExisting} existing account${syncResult.matchedExisting === 1 ? '' : 's'}, created ${syncResult.createdNew} new.`}
-        </div>
-      )}
 
       <div className="mt-5 hidden grid-cols-12 gap-2 border-b border-stone-100 px-3 pb-2 text-[11px] uppercase tracking-[0.12em] text-stone-400 md:grid">
         <span className="col-span-4">Account</span>
@@ -149,7 +122,7 @@ export default function AccountHierarchyManager() {
         {!accounts ? (
           <p className="py-8 text-sm text-stone-400">Loading…</p>
         ) : accounts.length === 0 ? (
-          <p className="py-8 text-sm text-stone-500">No accounts yet. They'll be created when you import the Budget Overview report, or add one manually.</p>
+          <p className="py-8 text-sm text-stone-500">No accounts yet. Add one manually, or they'll appear here from historical records.</p>
         ) : (
           roots.map((a) => (
             <Row key={a.id} account={a} accounts={accounts} depth={0} childrenOf={childrenOf} onPatch={patch} onDelete={remove} onToggle={toggle} />
