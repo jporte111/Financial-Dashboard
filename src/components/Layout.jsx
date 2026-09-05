@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { PeriodProvider, usePeriodData } from '@/lib/usePeriod';
 import PeriodSelector from '@/components/PeriodSelector';
-import { LogOut } from 'lucide-react';
+import { Eye, LogOut } from 'lucide-react';
 import { format } from 'date-fns';
 
 const NAV = [
@@ -54,6 +54,14 @@ export default function Layout() {
                   </button>
                 )}
                 <PeriodSelector periods={ctx.periods} periodId={ctx.periodId} onChange={ctx.setPeriodId} />
+                <Link
+                  to="/client"
+                  className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-2 text-xs font-medium uppercase tracking-[0.14em] text-stone-500 transition hover:bg-stone-100 hover:text-stone-700"
+                  title="Open Sonia's client view (no login)"
+                >
+                  <Eye className="h-4 w-4" />
+                  <span className="hidden md:inline">Client View</span>
+                </Link>
                 <button
                   onClick={() => base44.auth.logout('/login')}
                   className="rounded-full p-2.5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700"
