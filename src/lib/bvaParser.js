@@ -130,6 +130,7 @@ export function parseBvaWorkbook(data) {
   // ---- Distributions --------------------------------------------------
   const distEntities = [];
   let distReportedTotal = null;
+  let distReportedQuarterTotals = null;
   const distHdr = findRow(aoa, (row) => row.some((c) => low(c) === 'entity'));
   if (distHdr >= 0) {
     const hrow = aoa[distHdr];
@@ -146,6 +147,16 @@ export function parseBvaWorkbook(data) {
       if (!name) continue;
       if (/^total$/i.test(name)) {
         distReportedTotal = cYtd >= 0 ? toNum(row[cYtd]) : null;
+        // The Total row's own per-quarter column cells, captured separately
+        // from the entity rows so a per-quarter reconciliation can pinpoint
+        // exactly which quarter (and, within it, which entity) a workbook
+        // formula error affects — rather than only knowing the grand total
+        // disagrees. This workbook has previously had a manually-typed
+        // column range that silently skipped one entity's row.
+        const qt = qCols.slice(0, 4).map((c) => toNum(row[c]));
+        if (qt.some((v) => v != null)) {
+          distReportedQuarterTotals = { q1: qt[0], q2: qt[1], q3: qt[2], q4: qt[3] };
+        }
         break;
       }
       const q = [0, 0, 0, 0];
@@ -345,7 +356,7 @@ export function parseBvaWorkbook(data) {
       suggestedYear,
     },
     cash: { accounts: cashAccounts, reportedTotal: cashReportedTotal },
-    distributions: { entities: distEntities, reportedTotal: distReportedTotal },
+    distributions: { entities: distEntities, reportedTotal: distReportedTotal, reportedQuarterTotals: distReportedQuarterTotals },
     income: {
       categories: incomeCats,
       reportedActualTotal: incomeReportedActual,

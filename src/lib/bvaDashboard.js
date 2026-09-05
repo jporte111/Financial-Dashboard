@@ -291,7 +291,11 @@ export function buildBvaDashboard(data, opts = {}) {
     return { id: d.id, name: d.entity_name, q1: n(d.q1), q2: n(d.q2), q3: n(d.q3), q4: n(d.q4), ytd };
   });
   const distEntitySum = round2(distEntities.reduce((s, e) => s + e.ytd, 0));
-  // Business-reported total is preserved; it is NOT replaced by the entity sum.
+  // The stored total (set at import time from the sum of each entity's own
+  // quarters — see bvaImport.js) is what the dashboard shows. This check
+  // flags any drift between that stored value and a fresh recompute from the
+  // current Distribution records — e.g. a manual edit after import, or a
+  // legacy period stored before this calculation was corrected.
   const distributionsYtd = period.distributions_ytd != null ? round2(n(period.distributions_ytd)) : distEntitySum;
   const distReconciles = period.distributions_ytd == null ? null : distEntitySum === distributionsYtd;
 
@@ -374,7 +378,7 @@ export function buildBvaDashboard(data, opts = {}) {
       accounts: cashRows,
     },
     distributions: {
-      reportedTotal: distributionsYtd,
+      total: distributionsYtd,
       entitySum: distEntitySum,
       reconciles: distReconciles,
       entities: distEntities,

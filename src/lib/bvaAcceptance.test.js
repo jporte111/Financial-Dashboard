@@ -18,7 +18,8 @@ import { round2, STATUS } from './bva.js';
 //     "expenses": { "actualTotal", "budgetTotal", "remaining", "percentUsed",
 //                   "overallVariance", "overallVariancePct" },
 //     "groups": { "fixed": { "actual","annual","remaining","percentUsed","variance","variancePct","status" }, "variable": {...}, "discretionary": {...} },
-//     "distributions": { "reportedTotal" },
+//     "distributions": { "entitySum", "workbookReportedTotal",
+//                         "gap": { "entity", "quarter", "amount", "entityYtd", "message" } },
 //     "transfers": { "total" } }
 const DIR = path.resolve(process.cwd(), 'bva-workbooks');
 const WORKBOOK = path.join(DIR, 'SS-Budget-August-2026.xlsx');
@@ -89,14 +90,28 @@ describe.skipIf(!ready)('acceptance values reconcile against the reference workb
     expect(round2(g('fixed').annual + g('variable').annual + g('discretionary').annual)).toBe(EXPECTED.expenses.budgetTotal);
   });
 
-  it('Distributions: business-reported YTD preserved; entity sum stays an unresolved, finalize-blocking warning', () => {
-    expect(R.distributions.reportedTotal).toBe(EXPECTED.distributions.reportedTotal);
-    expect(R.distributions.reconciled).toBe(false);
-    const w = v.warnings.find((x) => x.code === 'distribution_entity_sum_mismatch');
+  it('Distributions: the entity-quarter sum is authoritative; the workbook total is audit-only; no override is required', () => {
+    expect(R.distributions.entitySum).toBe(EXPECTED.distributions.entitySum);
+    expect(R.distributions.ytd).toBe(EXPECTED.distributions.entitySum);
+    expect(R.distributions.workbookReportedTotal).toBe(EXPECTED.distributions.workbookReportedTotal);
+    expect(R.distributions.reconciled).toBe(false); // factually: the workbook total disagrees
+    const w = v.warnings.find((x) => x.code === 'distribution_workbook_total_corrected');
     expect(w).toBeDefined();
-    expect(w.requiresAdminReview).toBe(true);
-    expect(w.blocksFinalize).toBe(true);
+    expect(w.requiresAdminReview).toBe(true); // still flagged so the workbook formula gets fixed
+    expect(w.blocksFinalize).toBe(false); // arithmetically correct; no override needed
+    expect(w.sourceValue).toBe(EXPECTED.distributions.workbookReportedTotal);
+    expect(w.calculatedValue).toBe(EXPECTED.distributions.entitySum);
+    expect(w.difference).toBe(EXPECTED.distributions.gap.amount);
+    expect(w.message).toBe(EXPECTED.distributions.gap.message);
+    expect(v.blocksFinalize).toBe(false);
     expect(R.distributions.entities.some((e) => e.matches === false)).toBe(true);
+  });
+
+  it("the flagged entity's YTD is its own quarters summed, ignoring the workbook's broken per-entity formula", () => {
+    const e = R.distributions.entities.find((x) => x.name === EXPECTED.distributions.gap.entity);
+    expect(e).toBeDefined();
+    expect(round2(e.q1 + e.q2 + e.q3 + e.q4)).toBe(EXPECTED.distributions.gap.entityYtd);
+    expect(e.calculatedYtd).toBe(EXPECTED.distributions.gap.entityYtd);
   });
 
   it('Recurring transfers total reconciles; labels flagged for review', () => {

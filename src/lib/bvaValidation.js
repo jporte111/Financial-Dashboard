@@ -10,10 +10,14 @@
 //     with a reason is saved.
 //   - Annual income budget: use the independently calculated total; record the
 //     workbook's displayed total as a discrepancy (it omits sub-cent lines).
-//   - Distributions YTD: preserve the business-reported total; still recompute
-//     each entity from its quarters; the entity-sum-vs-reported gap is an
-//     unresolved warning that requires Admin review. Never silently replace the
-//     reported total with the entity sum, and do not call the detail reconciled.
+//   - Distributions YTD: the sum of each entity's own quarters (q1+q2+q3+q4)
+//     is authoritative. The workbook's displayed grand total is kept only as
+//     an audit-trail source value — it is a manually-typed cell range and has
+//     been wrong before (e.g. a column subtotal formula that silently skips
+//     one entity's row). When the two disagree, this does NOT block
+//     finalization and needs no override: the arithmetic is simply corrected,
+//     and a non-blocking notice records what happened for Admin review so the
+//     source spreadsheet's formula can be fixed.
 //   - A period cannot be marked Final while a required reconciliation fails
 //     unless an explicit override is recorded for it.
 
@@ -22,6 +26,33 @@ import { n, round2, expectedPacePct, computeYtd, elapsedMonthsFromCutoff } from 
 export const SEVERITY = { ERROR: 'error', WARNING: 'warning' };
 
 const eq = (a, b) => round2(a) === round2(b);
+const money = (v) => `$${Math.abs(round2(v)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const QUARTER_LABEL = { q1: 'Q1', q2: 'Q2', q3: 'Q3', q4: 'Q4' };
+
+// When the workbook's displayed quarterly column subtotals are available,
+// pinpoint exactly which quarter disagrees with the independently-summed
+// column total, then check whether one specific entity's value for that
+// quarter fully explains the gap. Returns null when there is nothing to
+// pin down (no column totals captured, or no single entity/quarter explains
+// the difference) so callers can fall back to a generic message.
+function explainDistributionGap(entities, reportedQuarterTotals) {
+  if (!reportedQuarterTotals) return null;
+  const calcQ = { q1: 0, q2: 0, q3: 0, q4: 0 };
+  for (const e of entities) {
+    calcQ.q1 += n(e.q1);
+    calcQ.q2 += n(e.q2);
+    calcQ.q3 += n(e.q3);
+    calcQ.q4 += n(e.q4);
+  }
+  for (const q of ['q1', 'q2', 'q3', 'q4']) {
+    const reportedQ = reportedQuarterTotals[q];
+    if (reportedQ == null || eq(calcQ[q], reportedQ)) continue;
+    const gap = round2(calcQ[q] - reportedQ);
+    const hit = entities.find((e) => eq(n(e[q]), gap));
+    if (hit) return { entity: hit.name, quarter: q, amount: round2(n(hit[q])) };
+  }
+  return null;
+}
 
 function warn(list, w) {
   list.push({
@@ -162,7 +193,13 @@ export function validateBva(parsed, opts = {}) {
 
   const overall = computeYtd({ actualYtd: expActualSum, annualBudget: expBudgetSum }, elapsedMonths);
 
-  // ---- Distributions: preserve reported total, flag the entity gap ----
+  // ---- Distributions: entity-quarter sum is authoritative --------------
+  // Each entity's own quarters (q1+q2+q3+q4) are always independently
+  // correct regardless of what the workbook's own per-entity YTD formula
+  // says. The workbook's grand-total cell is retained only as an audit
+  // source value; when it disagrees, the calculated sum wins outright and no
+  // override is required — this is an arithmetic correction, not an open
+  // question.
   const distEntities = (parsed?.distributions?.entities || []).map((e) => {
     const calculatedYtd = round2(n(e.q1) + n(e.q2) + n(e.q3) + n(e.q4));
     return {
@@ -177,20 +214,23 @@ export function validateBva(parsed, opts = {}) {
     };
   });
   const distEntitySum = round2(distEntities.reduce((s, e) => s + e.calculatedYtd, 0));
-  const distReportedTotal = parsed?.distributions?.reportedTotal ?? null;
+  const distWorkbookTotal = parsed?.distributions?.reportedTotal ?? null;
   let distributionsReconciled = false;
-  if (distReportedTotal != null) {
-    distributionsReconciled = eq(distEntitySum, distReportedTotal) && distEntities.every((e) => e.matches !== false);
+  if (distWorkbookTotal != null) {
+    distributionsReconciled = eq(distEntitySum, distWorkbookTotal) && distEntities.every((e) => e.matches !== false);
     if (!distributionsReconciled) {
+      const gapExplanation = explainDistributionGap(distEntities, parsed?.distributions?.reportedQuarterTotals);
+      const message = gapExplanation
+        ? `Workbook total omitted ${gapExplanation.entity} ${QUARTER_LABEL[gapExplanation.quarter]} of ${money(gapExplanation.amount)}. Dashboard uses the recalculated entity-quarter total of ${money(distEntitySum)}.`
+        : 'Distribution entity quarterly totals do not match the workbook displayed total. The recalculated entity-quarter total is used.';
       warn(warnings, {
-        code: 'distribution_entity_sum_mismatch',
+        code: 'distribution_workbook_total_corrected',
         section: 'distributions',
-        message:
-          'Distribution entity quarterly totals do not reconcile to the business-reported Distributions YTD. The reported total is preserved; this discrepancy is unresolved and needs Admin review.',
-        sourceValue: distReportedTotal,
+        message,
+        sourceValue: distWorkbookTotal,
         calculatedValue: distEntitySum,
-        requiresAdminReview: true,
-        blocksFinalize: !overrides.distribution_entity_sum_mismatch,
+        requiresAdminReview: true, // keep flagging the workbook formula error for BVA Review
+        blocksFinalize: false, // arithmetically correct; no override needed to use it
       });
     }
   }
@@ -257,8 +297,13 @@ export function validateBva(parsed, opts = {}) {
       },
       distributions: {
         entities: distEntities,
-        reportedTotal: distReportedTotal, // preserved, business-reported
+        // Authoritative: the sum of each entity's own quarters.
+        ytd: distEntitySum,
         entitySum: distEntitySum,
+        // Audit-trail only — the workbook's own displayed grand total. Never
+        // used as the dashboard figure; retained so BVA Review can show
+        // "workbook said X, calculated Y" side by side.
+        workbookReportedTotal: distWorkbookTotal,
         reconciled: distributionsReconciled,
       },
       transfers: { items: transferItems.map((t) => ({ ...t, amount: round2(t.amount) })), total: transfersTotal },

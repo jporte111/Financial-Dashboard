@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { planBvaImport, planFinalize, groupMapFromLines } from './bvaImport.js';
 import { validateBva } from './bvaValidation.js';
-import { workbookLikeParsed, cleanParsed, SAMPLE_CUTOFF } from './__fixtures__/bvaSample.js';
+import { workbookLikeParsed, cleanParsed, distributionsGapOnlyParsed, SAMPLE_CUTOFF } from './__fixtures__/bvaSample.js';
 
 const confirm = { month: 7, year: 2026, cutoffDate: SAMPLE_CUTOFF, filename: 'SS-Budget-August-2026.xlsx', importedBy: 'admin@x' };
 
@@ -82,9 +82,11 @@ describe('income budget + distributions handling', () => {
     expect(p.periodData.annual_budgeted_income_workbook).toBe(1320000); // workbook displayed
   });
 
-  it('preserves the business-reported Distributions YTD (never the entity sum)', () => {
+  it('stores the calculated entity-quarter sum as Distributions YTD (never the raw workbook total)', () => {
     const p = plan(workbookLikeParsed);
-    expect(p.periodData.distributions_ytd).toBe(5000);
+    // Entity One 3000 + Entity Two (2000+1500+1500) 5000 = 8000; the
+    // workbook's own (wrong) displayed total of 6500 is not stored here.
+    expect(p.periodData.distributions_ytd).toBe(8000);
   });
 });
 
@@ -136,13 +138,14 @@ describe('finalize gating', () => {
   const parsed = workbookLikeParsed();
   const validation = validateBva(parsed, { cutoffDate: SAMPLE_CUTOFF });
 
-  it('refuses to finalize while a required reconciliation is open without an override', () => {
+  it('refuses to finalize while a required reconciliation (cash) is open without an override', () => {
+    expect(validation.openReconciliations).toContain('cash_total_mismatch');
     expect(() => planFinalize({ period: { id: 'p1' }, validation, finalizedBy: 'admin@x' })).toThrow(/Cannot finalize/);
   });
 
   it('finalizes once every open reconciliation has an override with a reason', () => {
     const overrides = {
-      distribution_entity_sum_mismatch: { reason: 'confirmed with bookkeeper', by: 'admin@x', at: '2026-09-03' },
+      cash_total_mismatch: { reason: 'confirmed with bookkeeper', by: 'admin@x', at: '2026-09-03' },
     };
     const out = planFinalize({ period: { id: 'p1' }, validation, overrides, finalizedBy: 'admin@x' });
     expect(out.id).toBe('p1');
@@ -151,14 +154,26 @@ describe('finalize gating', () => {
     expect(out.data.published).toBe(true);
     expect(out.data.finalized_by).toBe('admin@x');
     expect(out.data.bva_overrides).toEqual(overrides);
-    const w = out.data.bva_validation_warnings.find((x) => x.code === 'distribution_entity_sum_mismatch');
+    const w = out.data.bva_validation_warnings.find((x) => x.code === 'cash_total_mismatch');
     expect(w.overridden).toBe(true);
     expect(w.blocksFinalize).toBe(false);
+    // the (non-blocking) distributions correction is untouched by the override
+    const dw = out.data.bva_validation_warnings.find((x) => x.code === 'distribution_workbook_total_corrected');
+    expect(dw.blocksFinalize).toBe(false);
+    expect(dw.overridden).toBeFalsy();
   });
 
   it('a clean workbook finalizes with no overrides', () => {
     const cleanV = validateBva(cleanParsed(), { cutoffDate: SAMPLE_CUTOFF });
     const out = planFinalize({ period: { id: 'p2' }, validation: cleanV, finalizedBy: 'admin@x' });
+    expect(out.data.status).toBe('final');
+  });
+
+  it('finalizes with no overrides at all when the only discrepancy is the distributions correction', () => {
+    const v = validateBva(distributionsGapOnlyParsed(), { cutoffDate: SAMPLE_CUTOFF });
+    expect(v.blocksFinalize).toBe(false);
+    expect(v.openReconciliations).toEqual([]);
+    const out = planFinalize({ period: { id: 'p3' }, validation: v, finalizedBy: 'admin@x' });
     expect(out.data.status).toBe('final');
   });
 });
