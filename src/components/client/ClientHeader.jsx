@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 // Public client-view header: brand crest, statement title, published-period
 // pill switcher and a discreet firm sign-in link. Sticks to the top on both
 // desktop and mobile so the period selector is always reachable.
-export default function ClientHeader({ periods, activePeriodId, onSelectPeriod }) {
+export default function ClientHeader({ periods, activePeriodId, onSelectPeriod, signedIn = false }) {
   return (
     <header className="sticky top-0 z-40 border-b border-stone-300 bg-stone-50/95 backdrop-blur">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
@@ -37,9 +37,19 @@ export default function ClientHeader({ periods, activePeriodId, onSelectPeriod }
                 ))}
               </SelectContent>
             </Select>
-            <Link to="/login" className="hidden text-xs text-stone-400 underline-offset-4 hover:text-stone-600 hover:underline sm:inline">
-              Firm sign-in
-            </Link>
+            {signedIn ? (
+              <Link
+                to="/"
+                className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-600 shadow-sm transition hover:bg-stone-100 hover:text-stone-900"
+                title="Return to the firm dashboard"
+              >
+                Back to Admin
+              </Link>
+            ) : (
+              <Link to="/login" className="hidden text-xs text-stone-400 underline-offset-4 hover:text-stone-600 hover:underline sm:inline">
+                Firm sign-in
+              </Link>
+            )}
           </div>
         </div>
       </div>

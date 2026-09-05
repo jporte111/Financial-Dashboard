@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { base44 } from '@/api/base44Client';
 import { usePublicDashboard } from '@/lib/usePublicDashboard';
 import CategoryTable from '@/components/CategoryTable';
 import ClientHeader from '@/components/client/ClientHeader';
@@ -13,6 +14,16 @@ import ClientDrilldown from '@/components/client/ClientDrilldown';
 export default function ClientView() {
   const { loading, error, vm, periods, period, setSelectedId } = usePublicDashboard();
   const [selectedLine, setSelectedLine] = useState(null);
+  const [signedIn, setSignedIn] = useState(false);
+
+  // A firm user browsing from the admin side stays logged in — offer a
+  // one-click return instead of the sign-in link.
+  useEffect(() => {
+    base44.auth
+      .isAuthenticated()
+      .then(setSignedIn)
+      .catch(() => setSignedIn(false));
+  }, []);
 
   // Monitored watchlist categories, shown exactly as she sees them today —
   // minus the internal "mapping requires review" wording, which stays
@@ -24,7 +35,7 @@ export default function ClientView() {
 
   return (
     <div className="min-h-screen bg-stone-50 font-body text-stone-900">
-      <ClientHeader periods={periods} activePeriodId={period?.id} onSelectPeriod={setSelectedId} />
+      <ClientHeader periods={periods} activePeriodId={period?.id} onSelectPeriod={setSelectedId} signedIn={signedIn} />
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
         {loading ? (
