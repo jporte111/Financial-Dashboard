@@ -1,8 +1,9 @@
 import React from 'react';
-import { fmtCurrency, fmtPct, fmtVariance, fmtSignedPct } from '@/lib/finance';
+import { fmtCurrency, fmtPct } from '@/lib/finance';
 import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import StatusPill from '@/components/StatusPill';
 import InfoHint from '@/components/InfoHint';
+import Variance, { VariancePct } from '@/components/Variance';
 import { PACE_VARIANCE_TOOLTIP } from '@/lib/finance';
 
 function Card({ label, value, subtitle = null, children = null, muted = false }) {
@@ -84,10 +85,10 @@ export default function SnapshotCards({ vm }) {
         </div>
         <div className="mt-3 flex flex-wrap items-baseline gap-x-8 gap-y-1">
           <p className="font-body text-2xl md:text-[28px] leading-tight tracking-tight tabular-nums">
-            {fmtVariance(s.overallVarianceAmount)}
+            <Variance amount={s.overallVarianceAmount} />
           </p>
-          <p className="text-lg tabular-nums text-stone-500">
-            {fmtSignedPct(s.overallVariancePct)} {s.onPace ? '' : s.favorable ? 'Under Budget' : 'Over Budget'}
+          <p className="text-lg tabular-nums">
+            <VariancePct pct={s.overallVariancePct} amount={s.overallVarianceAmount} />
           </p>
         </div>
       </div>

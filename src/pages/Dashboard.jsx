@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useBvaDashboard } from '@/lib/useBvaDashboard';
-import { fmtCurrency, fmtPct, fmtVariance, fmtSignedPct, FLAG_TEXT } from '@/lib/finance';
+import { fmtCurrency, fmtPct, FLAG_TEXT } from '@/lib/finance';
+import Variance, { VariancePct } from '@/components/Variance';
 import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import SnapshotCards from '@/components/SnapshotCards';
 import GroupOverview from '@/components/GroupOverview';
@@ -119,11 +120,19 @@ export default function Dashboard() {
                   </div>
                   <StatusPill status={d.ytd.status} />
                 </div>
-                <p className="mt-3 font-display text-xl tabular-nums">{fmtVariance(d.ytd.varianceToPace, { cents: false })}</p>
-                <p className="text-sm text-stone-500">
-                  {fmtCurrency(d.ytd.actual)} of {fmtCurrency(d.ytd.annual)} · {fmtPct(d.ytd.percentUsed * 100)} used · {fmtSignedPct(d.ytd.variancePct)}
-                </p>
-                <p className="mt-2 text-xs text-stone-400">
+                <div className="mt-4">
+                  <p className="font-display text-xl tabular-nums">
+                    <Variance amount={d.ytd.varianceToPace} cents={false} />
+                  </p>
+                  <p className="mt-1 text-xs tabular-nums">
+                    <VariancePct pct={d.ytd.variancePct} amount={d.ytd.varianceToPace} showLabel={false} />
+                  </p>
+                </div>
+                <div className="mt-4 space-y-1 text-sm text-stone-500">
+                  <p>{fmtCurrency(d.ytd.actual)} of {fmtCurrency(d.ytd.annual)}</p>
+                  <p>{fmtPct(d.ytd.percentUsed * 100)} of annual budget used</p>
+                </div>
+                <p className="mt-4 text-xs text-stone-400">
                   {d.reasons.map((r) => FLAG_TEXT[r]).filter(Boolean).join(' · ')}
                 </p>
               </button>
