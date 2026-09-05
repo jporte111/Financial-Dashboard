@@ -190,13 +190,23 @@ describe('cash reconciliation', () => {
   });
 });
 
-describe('distributions preserve the business-reported total', () => {
-  it('keeps the reported YTD and flags the entity-sum discrepancy', () => {
+describe('distributions: dashboard flags drift between the stored total and a fresh entity recompute', () => {
+  it('flags a mismatch when the stored period total does not match a live recompute of the Distribution records', () => {
     const vm = buildBvaDashboard(baseData(), { month: false });
-    expect(vm.distributions.reportedTotal).toBe(8000); // business-reported, preserved
-    expect(vm.distributions.entitySum).toBe(13000); // 3000 + 10000 from quarters
+    expect(vm.distributions.total).toBe(8000); // stored on the period (e.g. a stale scalar, or a legacy period)
+    expect(vm.distributions.entitySum).toBe(13000); // 3000 + 10000 from quarters, recomputed live
     expect(vm.distributions.reconciles).toBe(false);
     expect(vm.states.distributions).toBe(SECTION_STATE.DISCREPANCY);
+  });
+
+  it('shows no discrepancy once the stored total matches the entity-quarter sum (the normal case after import)', () => {
+    const d = baseData();
+    d.period.distributions_ytd = 13000; // what bvaImport now stores: the calculated entity-quarter sum
+    const vm = buildBvaDashboard(d, { month: false });
+    expect(vm.distributions.total).toBe(13000);
+    expect(vm.distributions.entitySum).toBe(13000);
+    expect(vm.distributions.reconciles).toBe(true);
+    expect(vm.states.distributions).toBe(SECTION_STATE.OK);
   });
 });
 

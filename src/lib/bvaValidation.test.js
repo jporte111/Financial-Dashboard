@@ -33,7 +33,8 @@ describe('parts-vs-total reconciliations (requirements 1-6)', () => {
   it('5. distribution entities equal Distributions YTD (clean case)', () => {
     const v = run(cleanParsed());
     expect(v.reconciled.distributions.entitySum).toBe(5000);
-    expect(v.reconciled.distributions.reportedTotal).toBe(5000);
+    expect(v.reconciled.distributions.ytd).toBe(5000);
+    expect(v.reconciled.distributions.workbookReportedTotal).toBe(5000);
     expect(v.reconciled.distributions.reconciled).toBe(true);
   });
 
@@ -58,32 +59,43 @@ describe('workbook defect handling', () => {
     expect(v.reconciled.income.remaining).toBe(round2(1320012 - 770007));
   });
 
-  it('distributions: preserves the business-reported total, flags the entity-sum gap, requires Admin review, blocks finalize, and is not marked reconciled', () => {
+  it('distributions: the calculated entity-quarter sum is authoritative; the workbook total is kept only for audit; no override is required', () => {
     const v = run(workbookLikeParsed());
-    const w = v.warnings.find((x) => x.code === 'distribution_entity_sum_mismatch');
+    const w = v.warnings.find((x) => x.code === 'distribution_workbook_total_corrected');
     expect(w).toBeDefined();
-    expect(w.sourceValue).toBe(5000); // business-reported, preserved
-    expect(w.calculatedValue).toBe(8000); // entity quarters sum
-    expect(w.requiresAdminReview).toBe(true);
-    expect(w.blocksFinalize).toBe(true);
-    expect(v.reconciled.distributions.reportedTotal).toBe(5000);
-    expect(v.reconciled.distributions.reconciled).toBe(false);
-    // per-entity recompute still happens
+    expect(w.sourceValue).toBe(6500); // the workbook's own (wrong) displayed total — audit only
+    expect(w.calculatedValue).toBe(8000); // entity-quarter sum — authoritative
+    expect(w.requiresAdminReview).toBe(true); // still flagged so the source spreadsheet can be fixed
+    expect(w.blocksFinalize).toBe(false); // arithmetically correct; no override needed
+    // the specific, attributed correction notice
+    expect(w.message).toBe(
+      'Workbook total omitted Entity Two Q2 of $1,500.00. Dashboard uses the recalculated entity-quarter total of $8,000.00.'
+    );
+    expect(v.reconciled.distributions.entitySum).toBe(8000);
+    expect(v.reconciled.distributions.ytd).toBe(8000);
+    expect(v.reconciled.distributions.workbookReportedTotal).toBe(6500);
+    expect(v.reconciled.distributions.reconciled).toBe(false); // factually: workbook != calculated
+    // (this fixture also has an unrelated, still-blocking cash discrepancy —
+    // see the "finalize gating" describe block below for that interaction —
+    // so overall v.blocksFinalize is not asserted here.)
+    // per-entity recompute still happens, ignoring each entity's own (also
+    // wrong) displayed YTD
     const two = v.reconciled.distributions.entities.find((e) => e.name === 'Entity Two');
     expect(two.calculatedYtd).toBe(5000);
-    expect(two.reportedYtd).toBe(2000);
+    expect(two.reportedYtd).toBe(4500);
     expect(two.matches).toBe(false);
   });
 
-  it('an explicit override clears the finalize block for the distribution discrepancy', () => {
-    const v = run(workbookLikeParsed(), {
-      overrides: { distribution_entity_sum_mismatch: { reason: 'confirmed with bookkeeper', by: 'admin@x', at: '2026-09-03' } },
-    });
-    const w = v.warnings.find((x) => x.code === 'distribution_entity_sum_mismatch');
-    expect(w.blocksFinalize).toBe(false);
-    expect(v.blocksFinalize).toBe(false);
-    // the warning is still recorded, just not blocking
+  it('falls back to a generic distributions message when the gap cannot be attributed to one entity/quarter', () => {
+    const p = cleanParsed();
+    // Reported total disagrees, but no per-quarter column totals were parsed,
+    // so there is nothing to pin the gap to.
+    p.distributions.reportedTotal = 4000;
+    const v = run(p);
+    const w = v.warnings.find((x) => x.code === 'distribution_workbook_total_corrected');
     expect(w).toBeDefined();
+    expect(w.blocksFinalize).toBe(false);
+    expect(w.message).toBe('Distribution entity quarterly totals do not match the workbook displayed total. The recalculated entity-quarter total is used.');
   });
 
   it('carries forward parser structural warnings (misaligned transfer labels)', () => {
@@ -99,10 +111,11 @@ describe('finalize gating (requirement: no Final while required reconciliations 
   it('a clean workbook does not block finalize', () => {
     expect(run(cleanParsed()).blocksFinalize).toBe(false);
   });
-  it('a real-shaped workbook blocks finalize until the distribution discrepancy is overridden', () => {
+  it('a real-shaped workbook blocks finalize on its cash discrepancy, but NOT on the distributions correction', () => {
     const v = run(workbookLikeParsed());
     expect(v.blocksFinalize).toBe(true);
-    expect(v.openReconciliations).toContain('distribution_entity_sum_mismatch');
+    expect(v.openReconciliations).toContain('cash_total_mismatch');
+    expect(v.openReconciliations).not.toContain('distribution_workbook_total_corrected');
   });
   it('flags a hard cash mismatch as a finalize blocker', () => {
     const p = cleanParsed();

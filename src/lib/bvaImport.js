@@ -89,8 +89,12 @@ export function planBvaImport(args) {
     annual_budgeted_income: incomeBudgetCalc,
     annual_budgeted_income_workbook: incomeBudgetWorkbook,
     annual_budgeted_expenses: round2(R.expenses.budgetTotal),
-    // Distributions YTD is the business-reported total, preserved as-is.
-    distributions_ytd: R.distributions.reportedTotal != null ? round2(R.distributions.reportedTotal) : null,
+    // Distributions YTD is the sum of each entity's own quarters — always
+    // authoritative. The workbook's displayed grand total is a manually-typed
+    // cell range that has been wrong before; it is retained only inside
+    // bva_parsed_source (below) for BVA Review's audit trail, never stored
+    // here as the dashboard figure.
+    distributions_ytd: round2(R.distributions.entitySum),
     bva_validation_warnings: validation.warnings,
     bva_parsed_source: parsed,
     bva_import_status: 'draft',

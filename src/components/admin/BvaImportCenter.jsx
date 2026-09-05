@@ -211,7 +211,11 @@ export default function BvaImportCenter() {
               <Line label="YTD Expenses" value={fmtCurrency(R.expenses.actualTotal)} />
               <Line label="Annual Budgeted Expenses" value={fmtCurrency(R.expenses.budgetTotal)} />
               <Line label="Overall variance to expected pace" value={`${fmtCurrency(R.expenses.overall.varianceToPace)} (${fmtPct(R.expenses.overall.variancePct * 100)})`} />
-              <Line label="Distributions YTD (business-reported)" value={fmtCurrency(R.distributions.reportedTotal)} sub={`entities sum ${fmtCurrency(R.distributions.entitySum)}`} />
+              <Line
+                label="Distributions YTD (calculated from quarterly distributions)"
+                value={fmtCurrency(R.distributions.entitySum)}
+                sub={R.distributions.workbookReportedTotal != null && !R.distributions.reconciled ? `workbook displayed ${fmtCurrency(R.distributions.workbookReportedTotal)}` : ''}
+              />
               <Line label="Recurring transfers total" value={fmtCurrency(R.transfers.total)} />
               <Line
                 label="Monitored detail categories"

@@ -162,7 +162,7 @@ export default function Dashboard() {
         )}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ['Distributions YTD', vm.savingsDistributions.distributionsYtd, 'Business-reported'],
+            ['Distributions YTD', vm.savingsDistributions.distributionsYtd, 'Calculated from quarterly distributions'],
             ['Savings / Distributions In', vm.savingsDistributions.savingsIn, 'Mapping unverified — Admin review'],
             ['Expenses Paid From Savings', vm.savingsDistributions.savingsSpend, 'Mapping unverified — Admin review'],
             ['Net Savings', vm.savingsDistributions.netSavings, 'Savings In − Expenses From Savings'],

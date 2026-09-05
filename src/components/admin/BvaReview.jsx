@@ -103,7 +103,7 @@ function BvaReviewRow({ period, open, onToggle, budgetLines }) {
                     <ReconRow label="YTD Expenses" src={period.bva_parsed_source?.expenseSummary?.reportedActualTotal} calc={R.expenses.actualTotal} />
                     <ReconRow label="Annual Budgeted Expenses" src={period.bva_parsed_source?.expenseSummary?.reportedBudgetTotal} calc={R.expenses.budgetTotal} />
                     <ReconRow label="Overall pace variance" src={period.bva_parsed_source?.expenseSummary?.reportedVarianceAmount} calc={R.expenses.overall.varianceToPace} />
-                    <ReconRow label="Distributions YTD" src={R.distributions.reportedTotal} calc={R.distributions.entitySum} note="reported total preserved; entity sum shown" />
+                    <ReconRow label="Distributions YTD" src={R.distributions.workbookReportedTotal} calc={R.distributions.entitySum} note="calculated entity-quarter total is authoritative; workbook total is audit-only" />
                     <ReconRow label="Recurring transfers" src={period.bva_parsed_source?.transfers?.reportedTotal} calc={R.transfers.total} />
                   </tbody>
                 </table>

@@ -2,11 +2,16 @@
 // Real client workbooks live only in the git-ignored bva-workbooks/ directory.
 //
 // `cleanParsed()`      — everything reconciles, no blocking warnings.
-// `workbookLikeParsed()` — reproduces the three real-workbook defects:
-//   1. displayed annual income budget omits a sub-cent line,
-//   2. a distribution entity's quarters don't match its reported YTD, so the
-//      entity sum does not reconcile to the business-reported total,
-//   3. recurring-transfer label columns are misaligned.
+// `workbookLikeParsed()` — reproduces four real-workbook-shaped defects:
+//   1. displayed annual income budget omits a sub-cent line (non-blocking;
+//      calculated wins),
+//   2. a cash account total the workbook displays disagrees with the sum of
+//      accounts (still blocking, used to exercise the override mechanism),
+//   3. the workbook's own Q2 distributions column subtotal silently skips
+//      one entity's row (the same class of manually-typed-range bug as the
+//      real workbook's Q3 column skipping Sample Entity) — the
+//      corrected entity-quarter sum is authoritative and does NOT block,
+//   4. recurring-transfer label columns are misaligned.
 //
 // Reporting context for both: cutoff 2026-07-31 -> 7 elapsed months,
 // expected pace 7/12 = 58.33%.
@@ -83,11 +88,23 @@ export function workbookLikeParsed() {
   const p = cleanParsed();
   // 1. Displayed income budget total omits the 12 sub-cent Interest line.
   p.income.reportedBudgetTotal = 1320000;
-  // 2. Entity Two's quarters (2000) disagree with its reported YTD (5000);
-  //    the business-reported total (5000) stays authoritative.
-  p.distributions.entities[1] = { name: 'Entity Two', q1: 5000, q2: 0, q3: 0, q4: 0, reportedYtd: 2000 };
-  p.distributions.reportedTotal = 5000;
-  // 3. Misaligned transfer labels.
+
+  // 2. A still-blocking discrepancy unrelated to distributions, so
+  //    finalize-gating tests have a real reconciliation to override.
+  p.cash.reportedTotal = 41000; // accounts still sum to 40000
+
+  // 3. Distributions: the workbook's own Q2 column subtotal silently skips
+  //    Entity Two's row, and Entity Two's own displayed YTD is also wrong
+  //    (a second, independent formula error, mirroring the real workbook
+  //    where the per-entity row and the grand-total row have separate bugs).
+  //    Entity Two's true YTD is 2000+1500+1500+0 = 5000.
+  p.distributions.entities[1] = { name: 'Entity Two', q1: 2000, q2: 1500, q3: 1500, q4: 0, reportedYtd: 4500 };
+  // Column totals: q1 3000 (1000+2000, correct), q2 1000 (only Entity One's
+  // 1000 — Entity Two's 1500 is dropped), q3 2500 (correct), q4 0.
+  p.distributions.reportedQuarterTotals = { q1: 3000, q2: 1000, q3: 2500, q4: 0 };
+  p.distributions.reportedTotal = 6500; // 3000+1000+2500+0 — the workbook's own (wrong) grand total
+
+  // 4. Misaligned transfer labels.
   p.transfers.items = p.transfers.items.map((t) => ({ ...t, labelsNeedReview: true }));
   p.parseWarnings = [
     {
@@ -96,5 +113,15 @@ export function workbookLikeParsed() {
       message: 'Recurring transfer label columns are misaligned; confirm each transfer in Admin.',
     },
   ];
+  return p;
+}
+
+// Isolates only the distributions defect (no cash/income/transfer defects),
+// for tests proving the distributions correction alone never blocks finalize.
+export function distributionsGapOnlyParsed() {
+  const p = cleanParsed();
+  p.distributions.entities[1] = { name: 'Entity Two', q1: 2000, q2: 1500, q3: 1500, q4: 0, reportedYtd: 4500 };
+  p.distributions.reportedQuarterTotals = { q1: 3000, q2: 1000, q3: 2500, q4: 0 };
+  p.distributions.reportedTotal = 6500;
   return p;
 }
