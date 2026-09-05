@@ -1,8 +1,9 @@
 import React from 'react';
-import { fmtCurrency, fmtPct, fmtVariance, fmtSignedPct, PACE_VARIANCE_TOOLTIP } from '@/lib/finance';
+import { fmtCurrency, fmtPct, PACE_VARIANCE_TOOLTIP } from '@/lib/finance';
 import BudgetBar from '@/components/BudgetBar';
 import StatusPill from '@/components/StatusPill';
 import InfoHint from '@/components/InfoHint';
+import Variance, { VariancePct } from '@/components/Variance';
 
 function Row({ label, value, hint = null }) {
   return (
@@ -45,7 +46,7 @@ export default function GroupOverview({ groups, monthMode, expectedPacePct }) {
                 <>
                   <Row label="Current Month" value={fmtCurrency(c.actual)} />
                   <Row label="Expected This Month" value={fmtCurrency(c.monthlyBudget)} />
-                  <Row label="Difference" value={fmtVariance(c.varianceToBudget)} />
+                  <Row label="Difference" value={<Variance amount={c.varianceToBudget} />} />
                 </>
               ) : (
                 <>
@@ -54,8 +55,8 @@ export default function GroupOverview({ groups, monthMode, expectedPacePct }) {
                   <Row label="Remaining" value={fmtCurrency(c.remaining)} />
                   <Row label="Percent Used" value={fmtPct(c.percentUsed * 100)} />
                   <Row label="Expected Pace" value={fmtPct((expectedPacePct ?? c.pacePct) * 100)} />
-                  <Row label="Variance to Expected Pace" hint={PACE_VARIANCE_TOOLTIP} value={fmtVariance(c.varianceToPace)} />
-                  <Row label="Variance Percentage" value={`${fmtSignedPct(c.variancePct)}${c.varianceToPace === 0 ? '' : c.favorable ? ' Under Budget' : ' Over Budget'}`} />
+                  <Row label="Variance to Expected Pace" hint={PACE_VARIANCE_TOOLTIP} value={<Variance amount={c.varianceToPace} />} />
+                  <Row label="Variance Percentage" value={<VariancePct pct={c.variancePct} amount={c.varianceToPace} />} />
                 </>
               )}
             </div>

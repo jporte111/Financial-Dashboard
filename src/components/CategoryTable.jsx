@@ -1,5 +1,6 @@
 import React from 'react';
-import { fmtCurrency, fmtPct, fmtVariance, fmtSignedPct } from '@/lib/finance';
+import { fmtCurrency, fmtPct } from '@/lib/finance';
+import Variance, { VariancePct } from '@/components/Variance';
 import BudgetBar from '@/components/BudgetBar';
 import StatusPill from '@/components/StatusPill';
 import { ChevronRight, AlertTriangle } from 'lucide-react';
@@ -64,8 +65,10 @@ export default function CategoryTable({ rows, monthMode = false, onSelect }) {
             </div>
 
             <div className="md:col-span-2 text-sm">
-              <p className="tabular-nums">{fmtVariance(monthMode ? c.varianceToBudget : c.varianceToPace, { cents: false })}</p>
-              {!monthMode && <p className="text-xs text-stone-500">{fmtSignedPct(c.variancePct)}</p>}
+              <p className="tabular-nums"><Variance amount={monthMode ? c.varianceToBudget : c.varianceToPace} cents={false} /></p>
+              {!monthMode && (
+                <p className="text-xs tabular-nums"><VariancePct pct={c.variancePct} amount={c.varianceToPace} showLabel={false} /></p>
+              )}
               {!monthMode && r.currentMonthShown !== false && (
                 <p className="mt-1 text-xs text-stone-400">This month {fmtCurrency(r.monthActual)}</p>
               )}
