@@ -104,7 +104,7 @@ export default function Dashboard() {
 
       {!monthMode && vm.attention.length > 0 && (
         <section>
-          <SectionHeading title="Categories Needing Attention" subtitle="Flagged from validated BVA detail · largest unfavorable variance first" />
+          <SectionHeading title="Categories Needing Attention" subtitle="Flagged from validated BVA detail · largest Over Budget variance first" />
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {vm.attention.map((d) => (
               <button

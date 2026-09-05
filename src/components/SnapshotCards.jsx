@@ -87,7 +87,7 @@ export default function SnapshotCards({ vm }) {
             {fmtVariance(s.overallVarianceAmount)}
           </p>
           <p className="text-lg tabular-nums text-stone-500">
-            {fmtSignedPct(s.overallVariancePct)} {s.onPace ? '' : s.favorable ? 'favorable' : 'unfavorable'}
+            {fmtSignedPct(s.overallVariancePct)} {s.onPace ? '' : s.favorable ? 'Under Budget' : 'Over Budget'}
           </p>
         </div>
       </div>

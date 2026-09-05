@@ -33,12 +33,13 @@ export {
   FLAG_TEXT,
 } from './bva.js';
 
-// "$1,234.56 favorable" / "$1,234.56 unfavorable" / "On pace"
+// "$1,234.56 Under Budget" / "$1,234.56 Over Budget" / "On pace"
+// (positive variance = spending below the expected pace; negative = above)
 export function fmtVariance(amount, { cents = true } = {}) {
   const v = Number(amount || 0);
   const rounded = Math.round(v * 100) / 100;
   if (rounded === 0) return 'On pace';
-  const label = rounded > 0 ? 'favorable' : 'unfavorable';
+  const label = rounded > 0 ? 'Under Budget' : 'Over Budget';
   return `${fmtCurrency(Math.abs(rounded), { cents })} ${label}`;
 }
 
