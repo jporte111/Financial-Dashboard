@@ -6,7 +6,7 @@ function Metric({ label, value, children }) {
   return (
     <div className="min-w-[78%] snap-start rounded-2xl border border-stone-300 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] sm:min-w-[45%] lg:min-w-0">
       <p className="text-xs uppercase tracking-[0.14em] text-stone-500">{label}</p>
-      <p className="mt-3 font-display text-4xl leading-none tracking-tight tabular-nums text-stone-900 sm:text-[44px]">{value}</p>
+      <p className="mt-2 font-display text-2xl leading-tight tracking-tight tabular-nums text-stone-900 sm:text-3xl">{value}</p>
       <div className="mt-3">{children}</div>
     </div>
   );

@@ -25,7 +25,7 @@ export default function ClientSidePanel({ vm }) {
     <aside className="space-y-6 lg:sticky lg:top-32">
       <div className={CARD}>
         <p className={LABEL}>Cash Reserves</p>
-        <p className="mt-2 font-display text-3xl tracking-tight tabular-nums">{fmtCurrency(cash.total)}</p>
+        <p className="mt-2 font-display text-2xl tracking-tight tabular-nums">{fmtCurrency(cash.total)}</p>
         {vm.labels.cashAsOf && <p className="mt-1 text-xs text-stone-400">{vm.labels.cashAsOf}</p>}
         {cash.accounts.length > 0 && (
           <div className="mt-4 divide-y divide-stone-100">
