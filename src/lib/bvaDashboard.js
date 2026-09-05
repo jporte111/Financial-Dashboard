@@ -265,7 +265,7 @@ export function buildBvaDashboard(data, opts = {}) {
   });
 
   // Categories Needing Attention: every flagged detail row, largest
-  // unfavorable dollar variance first.
+  // Over Budget dollar variance first (most negative variance-to-pace).
   const attention = detail
     .filter((d) => d.flagged)
     .sort((a, b) => a.ytd.varianceToPace - b.ytd.varianceToPace);

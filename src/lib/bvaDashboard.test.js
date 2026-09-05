@@ -211,7 +211,7 @@ describe('distributions: dashboard flags drift between the stored total and a fr
 });
 
 describe('Categories Needing Attention', () => {
-  it('lists flagged detail rows, largest unfavorable dollar variance first', () => {
+  it('lists flagged detail rows, largest Over Budget dollar variance first', () => {
     const vm = buildBvaDashboard(baseData(), { month: false });
     const codes = vm.attention.map((a) => a.code);
     // 8002 Apparel (exceeded, ~-37k) is worse than 8003 Wellness (~-9k);

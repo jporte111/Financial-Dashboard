@@ -55,7 +55,7 @@ export default function GroupOverview({ groups, monthMode, expectedPacePct }) {
                   <Row label="Percent Used" value={fmtPct(c.percentUsed * 100)} />
                   <Row label="Expected Pace" value={fmtPct((expectedPacePct ?? c.pacePct) * 100)} />
                   <Row label="Variance to Expected Pace" hint={PACE_VARIANCE_TOOLTIP} value={fmtVariance(c.varianceToPace)} />
-                  <Row label="Variance Percentage" value={`${fmtSignedPct(c.variancePct)}${c.varianceToPace === 0 ? '' : c.favorable ? ' favorable' : ' unfavorable'}`} />
+                  <Row label="Variance Percentage" value={`${fmtSignedPct(c.variancePct)}${c.varianceToPace === 0 ? '' : c.favorable ? ' Under Budget' : ' Over Budget'}`} />
                 </>
               )}
             </div>
