@@ -19,6 +19,7 @@ import SavingsDistributions from '@/pages/SavingsDistributions';
 import Cash from '@/pages/Cash';
 import Reports from '@/pages/Reports';
 import Admin from '@/pages/Admin';
+import ClientView from '@/pages/ClientView';
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
@@ -50,7 +51,8 @@ const AuthenticatedApp = () => {
       <Route path="/register" element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
-      <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
+      <Route path="/client" element={<ClientView />} />
+      <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/client" replace />} />}>
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/budget" element={<Budget />} />

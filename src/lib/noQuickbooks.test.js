@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import process from 'node:process';
 
 // Structural proof that QuickBooks has been fully disconnected: no source
 // file calls the QuickBooks/Intuit API, the QuickBooks-calling backend

@@ -159,6 +159,30 @@ export function buildBvaDashboard(data, opts = {}) {
     const ytd = aggregateYtd(gl, elapsedMonths);
     const monthly = round2(gl.reduce((s, l) => s + (n(l.monthly_budget) || n(l.annual_budget) / MONTHS_IN_YEAR), 0));
     const monthC = computeMonth({ monthActual, annualBudget: ytd.annual, monthlyBudget: monthly });
+    // Per-line rows for this group's category breakdown (used by the public
+    // client view's group cards). Shape matches the detail rows so CategoryTable
+    // and the drill-down render them unchanged.
+    const lineRows = gl.map((l) => {
+      const lineC = computeYtd({ actualYtd: n(l.ytd_actual), annualBudget: n(l.annual_budget) }, elapsedMonths);
+      const lineM = computeMonth({ monthActual: n(l.month_actual), annualBudget: n(l.annual_budget), monthlyBudget: l.monthly_budget });
+      return {
+        id: l.id,
+        category: l.category,
+        code: l.qb_code || null,
+        group: key,
+        qb_account_names: Array.isArray(l.qb_account_names) ? l.qb_account_names : [],
+        annual_budget: n(l.annual_budget),
+        ytd_actual: n(l.ytd_actual),
+        month_actual: n(l.month_actual),
+        has_snapshot: true,
+        monthActual: round2(n(l.month_actual)),
+        ytd: lineC,
+        month: lineM,
+        view: monthMode ? lineM : lineC,
+        hasUnresolvedWarning: false,
+        drilldownEnabled: l.drilldown_enabled !== false,
+      };
+    });
     return {
       key,
       label: GROUP_LABEL[key],
@@ -167,6 +191,7 @@ export function buildBvaDashboard(data, opts = {}) {
       month: monthC,
       view: monthMode ? monthC : ytd,
       lineCount: gl.length,
+      lines: lineRows,
     };
   });
 
