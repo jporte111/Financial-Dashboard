@@ -60,7 +60,7 @@ export default function Budget() {
           {vm.incomeRows.map((l) => (
             <div key={l.id} className="grid gap-2 border-b border-stone-100 px-6 py-4 text-sm last:border-0 md:grid-cols-6 md:gap-4">
               <span className="col-span-2 font-medium">{l.code ? `${l.code} · ` : ''}{l.category}</span>
-              <span className="tabular-nums md:text-right">{fmtCurrency(l.monthActual)}</span>
+              <span className="tabular-nums md:text-right">{l.monthActual == null ? <span className="text-stone-400">—</span> : fmtCurrency(l.monthActual)}</span>
               <span className="tabular-nums md:text-right">{fmtCurrency(l.actualYtd)}</span>
               <span className="tabular-nums md:text-right">{fmtCurrency(l.annualBudget)}</span>
               <span className="tabular-nums md:text-right">{fmtCurrency(l.remaining)} · {fmtPct(l.percentUsed * 100)}</span>
@@ -68,12 +68,19 @@ export default function Budget() {
           ))}
           <div className="grid gap-2 bg-stone-50 px-6 py-4 text-sm font-medium md:grid-cols-6 md:gap-4">
             <span className="col-span-2">Total Income</span>
-            <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.monthIncome)}</span>
+            <span className="tabular-nums md:text-right">
+              {vm.snapshot.monthIncome == null ? <span className="text-stone-400">—</span> : fmtCurrency(vm.snapshot.monthIncome)}
+            </span>
             <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.ytdIncome)}</span>
             <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.annualBudgetedIncome)}</span>
             <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.remainingIncomeBudget)} · {fmtPct(incomeUsed * 100)}</span>
           </div>
         </div>
+        {vm.snapshot.monthIncomeMissing && (
+          <p className="mt-2 text-xs text-stone-400">
+            Current-month income is not provided by the BVA workbook for this period — shown as “—”, not $0.00.
+          </p>
+        )}
         {vm.snapshot.incomeWorkbookBudget != null && (
           <p className="mt-2 text-xs text-stone-400">
             Workbook displayed an annual income budget of {fmtCurrency(vm.snapshot.incomeWorkbookBudget)}; the independently calculated

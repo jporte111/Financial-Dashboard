@@ -34,7 +34,7 @@
     },
     "month_actual": {
       "type": "number",
-      "default": 0
+      "description": "Current-month actual for this line. Null / absent means the BVA workbook's month column was blank for this period — 'Source value missing', not a confirmed $0. No 0 default so a blank month column is never stored as a fabricated zero."
     },
     "ytd_actual": {
       "type": "number",

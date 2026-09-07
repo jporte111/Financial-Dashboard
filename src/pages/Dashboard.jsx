@@ -171,15 +171,15 @@ export default function Dashboard() {
         )}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ['Distributions YTD', vm.savingsDistributions.distributionsYtd, 'Calculated from quarterly distributions'],
-            ['Savings / Distributions In', vm.savingsDistributions.savingsIn, 'Mapping unverified — Admin review'],
-            ['Expenses Paid From Savings', vm.savingsDistributions.savingsSpend, 'Mapping unverified — Admin review'],
-            ['Net Savings', vm.savingsDistributions.netSavings, 'Savings In − Expenses From Savings'],
-          ].map(([label, value, note]) => (
+            ['Distributions YTD', vm.savingsDistributions.distributionsYtd, 'Calculated from quarterly distributions', SECTION_STATE.MISSING],
+            ['Savings / Distributions In', vm.savingsDistributions.savingsIn, 'Not in the BVA workbook — enter and confirm in Admin', SECTION_STATE.NEEDS_REVIEW],
+            ['Expenses Paid From Savings', vm.savingsDistributions.savingsSpend, 'Not in the BVA workbook — enter and confirm in Admin', SECTION_STATE.NEEDS_REVIEW],
+            ['Net Savings', vm.savingsDistributions.netSavings, 'Savings In − Expenses From Savings', SECTION_STATE.MISSING],
+          ].map(([label, value, note, missingState]) => (
             <div key={label} className="rounded-2xl border border-stone-200 bg-white p-6">
               <p className="text-xs uppercase tracking-[0.14em] text-stone-500">{label}</p>
-              <p className="mt-3 font-display text-2xl tracking-tight tabular-nums">
-                {value == null ? SECTION_STATE_TEXT[SECTION_STATE.MISSING] : fmtCurrency(value)}
+              <p className={`mt-3 font-display tracking-tight tabular-nums ${value == null ? 'text-lg text-stone-400' : 'text-2xl'}`}>
+                {value == null ? SECTION_STATE_TEXT[missingState] : fmtCurrency(value)}
               </p>
               {note && <p className="mt-2 text-xs text-stone-400">{note}</p>}
             </div>

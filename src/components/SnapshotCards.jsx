@@ -33,22 +33,32 @@ export default function SnapshotCards({ vm }) {
   }
 
   if (monthMode) {
-    const noActivity = vm.states.groups === SECTION_STATE.NO_MONTH_ACTIVITY;
+    // Three distinct states per current-month figure:
+    //   missing  — the BVA workbook carried no month column ("Source value missing")
+    //   zero     — a real imported $0 ("No current-month activity imported.")
+    //   value    — an actual figure
+    const monthCard = (label, amount, missing) => {
+      const zero = !missing && Math.round(Number(amount || 0) * 100) / 100 === 0;
+      return (
+        <Card
+          label={label}
+          value={missing ? SECTION_STATE_TEXT[SECTION_STATE.MISSING] : fmtCurrency(amount)}
+          subtitle={
+            missing
+              ? 'Not provided by the BVA workbook'
+              : zero
+                ? SECTION_STATE_TEXT[SECTION_STATE.NO_MONTH_ACTIVITY]
+                : `${vm.labels.displayMonth}`
+          }
+          muted={missing || zero}
+        />
+      );
+    };
     return (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card label="Total Cash" value={fmtCurrency(s.totalCash)} subtitle={vm.labels.cashAsOf} />
-        <Card
-          label="Current-Month Income"
-          value={noActivity ? '$0.00' : fmtCurrency(s.monthIncome)}
-          subtitle={noActivity ? SECTION_STATE_TEXT[SECTION_STATE.NO_MONTH_ACTIVITY] : `${vm.labels.displayMonth}`}
-          muted={noActivity}
-        />
-        <Card
-          label="Current-Month Expenses"
-          value={noActivity ? '$0.00' : fmtCurrency(s.monthExpenses)}
-          subtitle={noActivity ? SECTION_STATE_TEXT[SECTION_STATE.NO_MONTH_ACTIVITY] : `${vm.labels.displayMonth}`}
-          muted={noActivity}
-        />
+        {monthCard('Current-Month Income', s.monthIncome, s.monthIncomeMissing)}
+        {monthCard('Current-Month Expenses', s.monthExpenses, s.monthExpensesMissing)}
         <Card
           label="Expected Monthly Expense Budget"
           value={fmtCurrency(s.annualExpenseBudget / 12)}
