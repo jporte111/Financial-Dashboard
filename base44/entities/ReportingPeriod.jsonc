@@ -65,11 +65,11 @@
     },
     "month_income": {
       "type": "number",
-      "default": 0
+      "description": "Current-month income. Null / absent means the BVA workbook carried no month figure for this period (dashboard shows 'Source value missing'); an explicit 0 is a confirmed zero. No 0 default so a missing value is never stored as a fabricated zero."
     },
     "month_expenses": {
       "type": "number",
-      "default": 0
+      "description": "Current-month expenses. Null / absent means not provided by the BVA workbook (dashboard shows 'Source value missing'); an explicit 0 is a confirmed zero."
     },
     "distributions_ytd": {
       "type": "number",
@@ -77,11 +77,11 @@
     },
     "savings_in_ytd": {
       "type": "number",
-      "default": 0
+      "description": "Savings / Distributions In (YTD). Not present in the BVA workbook — a manually entered value. Null / absent means it has not been entered and mapping is unverified (dashboard shows 'Mapping requires review'); an explicit 0 is a confirmed zero. No 0 default."
     },
     "savings_spend_ytd": {
       "type": "number",
-      "default": 0
+      "description": "Expenses Paid From Savings (YTD). Not present in the BVA workbook — a manually entered value. Null / absent means not entered / mapping unverified; an explicit 0 is a confirmed zero. No 0 default."
     },
     "checklist": {
       "type": "object",

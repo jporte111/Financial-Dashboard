@@ -123,6 +123,12 @@ export function validateBva(parsed, opts = {}) {
   const incomeCats = parsed?.income?.categories || [];
   const incomeActualSum = round2(incomeCats.reduce((s, c) => s + n(c.actualYtd), 0));
   const incomeBudgetSum = round2(incomeCats.reduce((s, c) => s + n(c.annualBudget), 0));
+  // Current-month total is null when the workbook's month column was blank —
+  // "unknown", not a confirmed $0. Only a present-but-zero column yields 0.
+  const incomeMonthPresent = parsed?.income?.hasMonthColumn === true || incomeCats.some((c) => c.monthActual != null);
+  const incomeMonthSum = incomeMonthPresent
+    ? round2(incomeCats.reduce((s, c) => s + n(c.monthActual), 0))
+    : null;
   const incomeActualReported = parsed?.income?.reportedActualTotal;
   const incomeBudgetReported = parsed?.income?.reportedBudgetTotal;
 
@@ -159,11 +165,15 @@ export function validateBva(parsed, opts = {}) {
   const groups = groupsRaw.map((g) => ({
     key: g.key,
     name: g.name || g.key,
-    monthActual: n(g.monthActual),
+    monthActual: g.monthActual == null ? null : n(g.monthActual),
     ...computeYtd({ actualYtd: g.actualYtd, annualBudget: g.annualBudget }, elapsedMonths),
   }));
   const expActualSum = round2(groups.reduce((s, g) => s + g.actual, 0));
   const expBudgetSum = round2(groups.reduce((s, g) => s + g.annual, 0));
+  const expenseMonthPresent = parsed?.expenseSummary?.hasMonthColumn === true || groups.some((g) => g.monthActual != null);
+  const expenseMonthSum = expenseMonthPresent
+    ? round2(groups.reduce((s, g) => s + n(g.monthActual), 0))
+    : null;
   const expActualReported = parsed?.expenseSummary?.reportedActualTotal;
   const expBudgetReported = parsed?.expenseSummary?.reportedBudgetTotal;
 
@@ -256,7 +266,7 @@ export function validateBva(parsed, opts = {}) {
     name: d.name,
     group: d.group || 'unassigned',
     groupConfirmed: !!d.groupConfirmed,
-    monthActual: n(d.monthActual),
+    monthActual: d.monthActual == null ? null : n(d.monthActual),
     ...computeYtd({ actualYtd: d.actualYtd, annualBudget: d.annualBudget }, elapsedMonths),
   }));
 
@@ -275,7 +285,7 @@ export function validateBva(parsed, opts = {}) {
         categories: incomeCats.map((c) => ({
           code: c.code || null,
           name: c.name,
-          monthActual: round2(c.monthActual),
+          monthActual: c.monthActual == null ? null : round2(c.monthActual),
           actualYtd: round2(c.actualYtd),
           annualBudget: round2(c.annualBudget),
           remaining: round2(n(c.annualBudget) - n(c.actualYtd)),
@@ -286,6 +296,9 @@ export function validateBva(parsed, opts = {}) {
         workbookBudgetTotal: incomeBudgetReported == null ? null : round2(incomeBudgetReported),
         remaining: incomeRemaining,
         percentUsed: incomePercentUsed,
+        // null = the workbook carried no current-month income figures.
+        monthActualTotal: incomeMonthSum,
+        monthPresent: incomeMonthPresent,
       },
       expenses: {
         groups,
@@ -294,6 +307,9 @@ export function validateBva(parsed, opts = {}) {
         remaining: round2(expBudgetSum - expActualSum),
         percentUsed: expBudgetSum !== 0 ? expActualSum / expBudgetSum : 0,
         overall,
+        // null = the workbook carried no current-month expense figures.
+        monthActualTotal: expenseMonthSum,
+        monthPresent: expenseMonthPresent,
       },
       distributions: {
         entities: distEntities,

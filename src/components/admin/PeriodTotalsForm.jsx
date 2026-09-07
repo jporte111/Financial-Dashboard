@@ -17,6 +17,11 @@ const FIELDS = [
   ['months_elapsed', 'Months Elapsed (budget pace)'],
 ];
 
+// These fields legitimately have no value until one is entered. A blank input
+// must be saved as null ("Source value missing" / "Mapping requires review"),
+// never coerced to a fabricated 0 that reads as a confirmed figure.
+const NULLABLE = new Set(['month_income', 'month_expenses', 'savings_in_ytd', 'savings_spend_ytd']);
+
 export default function PeriodTotalsForm({ period, reload }) {
   const [form, setForm] = useState(period || {});
   const [saving, setSaving] = useState(false);
@@ -32,7 +37,14 @@ export default function PeriodTotalsForm({ period, reload }) {
 
   const save = async () => {
     setSaving(true);
-    const payload = Object.fromEntries(FIELDS.map(([k]) => [k, Number(form[k] || 0)]));
+    const payload = Object.fromEntries(
+      FIELDS.map(([k]) => {
+        const raw = form[k];
+        const blank = raw === '' || raw == null;
+        if (blank && NULLABLE.has(k)) return [k, null];
+        return [k, Number(raw || 0)];
+      })
+    );
     await base44.entities.ReportingPeriod.update(period.id, {
       ...payload,
       last_updated: new Date().toISOString().slice(0, 10),

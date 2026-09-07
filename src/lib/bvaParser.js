@@ -210,7 +210,9 @@ export function parseBvaWorkbook(data) {
       const cat = {
         code,
         name,
-        monthActual: toNum(row[cMonth]) || 0,
+        // Blank "Current Month" cells stay null — the workbook's month column
+        // is frequently empty and a blank must not be read as a confirmed $0.
+        monthActual: toNum(row[cMonth]),
         actualYtd: actualYtd || 0,
         annualBudget: annualBudget || 0,
       };
@@ -269,7 +271,8 @@ export function parseBvaWorkbook(data) {
       groups.push({
         key,
         name: name.replace(/\s+/g, ' ').trim(),
-        monthActual: toNum(row[cMonth]) || 0,
+        // Blank "Current Month" cells stay null (see the income block above).
+        monthActual: toNum(row[cMonth]),
         actualYtd: toNum(row[cYtd]) || 0,
         annualBudget: cBudget >= 0 ? toNum(row[cBudget]) || 0 : 0,
       });
@@ -302,7 +305,8 @@ export function parseBvaWorkbook(data) {
         name,
         group: 'unassigned',
         groupConfirmed: false,
-        monthActual: toNum(row[1]) || 0,
+        // Blank "Current Month" cells stay null (see the income block above).
+        monthActual: toNum(row[1]),
         actualYtd: actualYtd || 0,
         annualBudget: annualBudget || 0,
       });
@@ -347,6 +351,14 @@ export function parseBvaWorkbook(data) {
     }
   }
 
+  // Did the workbook actually carry any "Current Month" figures for a block,
+  // or was that whole column blank? A blank column means the month figure is
+  // unknown for this period (shown as "Source value missing"), which is a
+  // different thing from an imported value that is genuinely $0.
+  const incomeHasMonthColumn = incomeCats.some((c) => c.monthActual != null);
+  const expenseHasMonthColumn = groups.some((g) => g.monthActual != null);
+  const detailHasMonthColumn = detailCats.some((d) => d.monthActual != null);
+
   return {
     meta: {
       sheetName,
@@ -361,6 +373,7 @@ export function parseBvaWorkbook(data) {
       categories: incomeCats,
       reportedActualTotal: incomeReportedActual,
       reportedBudgetTotal: incomeReportedBudget,
+      hasMonthColumn: incomeHasMonthColumn,
     },
     expenseSummary: {
       groups,
@@ -369,8 +382,9 @@ export function parseBvaWorkbook(data) {
       reportedVarianceAmount: expReportedVarianceAmount,
       reportedVariancePct: expReportedVariancePct,
       pacePctProxy,
+      hasMonthColumn: expenseHasMonthColumn,
     },
-    detail: { categories: detailCats },
+    detail: { categories: detailCats, hasMonthColumn: detailHasMonthColumn },
     transfers: { items: transferItems, reportedTotal: null },
     parseWarnings,
   };

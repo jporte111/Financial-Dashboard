@@ -4,6 +4,7 @@ import { usePeriodContext } from '@/lib/usePeriod';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
 import SectionHeading from '@/components/SectionHeading';
 import { fmtCurrency } from '@/lib/finance';
+import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { format } from 'date-fns';
 
@@ -27,8 +28,12 @@ export default function SavingsDistributions() {
   const list = dists || [];
   const q = (k) => list.reduce((s, d) => s + Number(d[k] || 0), 0);
   const ytdOf = (d) => Number(d.q1 || 0) + Number(d.q2 || 0) + Number(d.q3 || 0) + Number(d.q4 || 0);
-  const savingsIn = Number(period.savings_in_ytd || 0);
-  const savingsOut = Number(period.savings_spend_ytd || 0);
+  // A missing / never-entered scalar stays null — it is not a confirmed $0.
+  // (These two fields are not in the BVA workbook; they are entered in Admin.)
+  const savingsIn = period.savings_in_ytd == null ? null : Number(period.savings_in_ytd);
+  const savingsOut = period.savings_spend_ytd == null ? null : Number(period.savings_spend_ytd);
+  const netSavings = savingsIn == null || savingsOut == null ? null : savingsIn - savingsOut;
+  const distributionsYtd = period.distributions_ytd == null ? null : Number(period.distributions_ytd);
 
   return (
     <div className="space-y-14">
@@ -36,13 +41,22 @@ export default function SavingsDistributions() {
         <SectionHeading title="Savings & Other Spending" subtitle="Extraordinary items funded from accumulated savings — excluded from the personal budget" />
         <div className="grid gap-4 sm:grid-cols-3">
           {[
-            ['Savings / Distributions In', savingsIn],
-            ['Expenses Paid From Savings', savingsOut],
-            ['Net Savings', savingsIn - savingsOut],
-          ].map(([label, value]) => (
+            ['Savings / Distributions In', savingsIn, SECTION_STATE.NEEDS_REVIEW],
+            ['Expenses Paid From Savings', savingsOut, SECTION_STATE.NEEDS_REVIEW],
+            ['Net Savings', netSavings, SECTION_STATE.MISSING],
+          ].map(([label, value, missingState]) => (
             <div key={label} className="rounded-2xl border border-stone-200 bg-white p-6">
               <p className="text-xs uppercase tracking-[0.14em] text-stone-500">{label}</p>
-              <p className="mt-3 font-display text-2xl tracking-tight tabular-nums">{fmtCurrency(value)}</p>
+              <p className={`mt-3 font-display tracking-tight tabular-nums ${value == null ? 'text-base text-stone-400' : 'text-2xl'}`}>
+                {value == null ? SECTION_STATE_TEXT[missingState] : fmtCurrency(value)}
+              </p>
+              {value == null && (
+                <p className="mt-2 text-xs text-stone-400">
+                  {missingState === SECTION_STATE.NEEDS_REVIEW
+                    ? 'Not in the BVA workbook — enter and confirm in Admin'
+                    : 'Needs both inputs before it can be calculated'}
+                </p>
+              )}
             </div>
           ))}
         </div>
@@ -67,7 +81,9 @@ export default function SavingsDistributions() {
 
       <section>
         <SectionHeading title={`${period.year} YTD Distributions`} subtitle="By entity and quarter" />
-        <p className="mb-5 font-display text-3xl tracking-tight tabular-nums">{fmtCurrency(period.distributions_ytd)}</p>
+        <p className={`mb-5 font-display tracking-tight tabular-nums ${distributionsYtd == null ? 'text-lg text-stone-400' : 'text-3xl'}`}>
+          {distributionsYtd == null ? SECTION_STATE_TEXT[SECTION_STATE.MISSING] : fmtCurrency(distributionsYtd)}
+        </p>
         <div className="overflow-x-auto rounded-2xl border border-stone-200 bg-white">
           <table className="w-full text-sm">
             <thead>
