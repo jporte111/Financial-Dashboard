@@ -58,6 +58,16 @@ function splitCode(label) {
   return { code: null, name: s };
 }
 
+// FIXED / VARIABLE / DISCRETIONARY label -> group key, shared by the anchored
+// EXPENSE block and the anchorless simplified-layout fallback.
+const groupKey = (name) => {
+  const l = name.toLowerCase();
+  if (l.includes('fixed')) return 'fixed';
+  if (l.includes('variable')) return 'variable';
+  if (l.includes('discretionary')) return 'discretionary';
+  return null;
+};
+
 function findRow(aoa, predicate, startAt = 0) {
   for (let r = startAt; r < aoa.length; r++) {
     if (predicate(aoa[r] || [], r)) return r;
@@ -104,6 +114,20 @@ export function parseBvaWorkbook(data) {
       if (iso) {
         cutoffDate = iso;
         break;
+      }
+    }
+  }
+  // Simplified layouts put the cutoff in a meta line ("Reporting Cutoff
+  // Date: 08/31/2026") instead of under the cash header.
+  if (!cutoffDate) {
+    for (let r = 0; r < Math.min(3, aoa.length); r++) {
+      const m = low((aoa[r] || [])[0]).match(/reporting cutoff date[:\s]*([\d\/\-]+)/);
+      if (m) {
+        const iso = toISODate(m[1]);
+        if (iso) {
+          cutoffDate = iso;
+          break;
+        }
       }
     }
   }
@@ -180,19 +204,28 @@ export function parseBvaWorkbook(data) {
   let incomeReportedBudget = null;
   let pacePctProxy = null;
   const incomeHdr = findRow(aoa, (row) => low(row[0]) === 'income');
+  // Income block columns. Hoisted because the simplified layout's bare
+  // FIXED / VARIABLE / DISCRETIONARY rows reuse these same columns.
+  let incMonth = 1;
+  let incYtd = 2;
+  let incBudget = -1;
   if (incomeHdr >= 0) {
-    const hRow = aoa[incomeHdr];
-    const cBudget = colIndexInRow(hRow, (v) => v === 'budget');
-    // "Category" sub-header row establishes month / ytd columns.
-    let cMonth = 1;
-    let cYtd = 2;
+    incBudget = colIndexInRow(aoa[incomeHdr], (v) => v === 'budget');
+    // "Category" sub-header row establishes month / ytd / budget columns.
     const catHdr = findRow(aoa, (row) => low(row[0]) === 'category', incomeHdr);
     if (catHdr >= 0 && catHdr <= incomeHdr + 2) {
       const cr = aoa[catHdr];
-      const m = colIndexInRow(cr, (v) => v.includes('current month'));
+      // "Month Actual" is the simplified layout's spelling of "Current Month".
+      const m = colIndexInRow(cr, (v) => v.includes('current month') || v.includes('month actual'));
       const y = colIndexInRow(cr, (v) => v.includes('actual ytd') || v === 'ytd');
-      if (m >= 0) cMonth = m;
-      if (y >= 0) cYtd = y;
+      if (m >= 0) incMonth = m;
+      if (y >= 0) incYtd = y;
+      // The simplified layout labels the budget column "Annual Budget" on the
+      // sub-header row instead of "Budget" on the INCOME header row.
+      if (incBudget === -1) {
+        const b = colIndexInRow(cr, (v) => v.includes('annual budget') || (v.endsWith('budget') && !v.includes('%')));
+        if (b >= 0) incBudget = b;
+      }
     }
     const startRow = catHdr >= 0 ? catHdr + 1 : incomeHdr + 1;
     for (let r = startRow; r < aoa.length; r++) {
@@ -200,19 +233,19 @@ export function parseBvaWorkbook(data) {
       const label = norm(row[0]);
       if (!label) continue;
       if (/^total\s*income/i.test(label)) {
-        incomeReportedActual = toNum(row[cYtd]);
-        incomeReportedBudget = cBudget >= 0 ? toNum(row[cBudget]) : null;
+        incomeReportedActual = toNum(row[incYtd]);
+        incomeReportedBudget = incBudget >= 0 ? toNum(row[incBudget]) : null;
         break;
       }
       const { code, name } = splitCode(label);
-      const annualBudget = cBudget >= 0 ? toNum(row[cBudget]) : null;
-      const actualYtd = toNum(row[cYtd]);
+      const annualBudget = incBudget >= 0 ? toNum(row[incBudget]) : null;
+      const actualYtd = toNum(row[incYtd]);
       const cat = {
         code,
         name,
         // Blank "Current Month" cells stay null — the workbook's month column
         // is frequently empty and a blank must not be read as a confirmed $0.
-        monthActual: toNum(row[cMonth]),
+        monthActual: toNum(row[incMonth]),
         actualYtd: actualYtd || 0,
         annualBudget: annualBudget || 0,
       };
@@ -244,13 +277,6 @@ export function parseBvaWorkbook(data) {
       if (m >= 0) cMonth = m;
       if (y >= 0) cYtd = y;
     }
-    const groupKey = (name) => {
-      const l = name.toLowerCase();
-      if (l.includes('fixed')) return 'fixed';
-      if (l.includes('variable')) return 'variable';
-      if (l.includes('discretionary')) return 'discretionary';
-      return null;
-    };
     for (let r = expHdr + 1; r < aoa.length; r++) {
       const row = aoa[r] || [];
       const label = norm(row[0]);
@@ -276,6 +302,35 @@ export function parseBvaWorkbook(data) {
         actualYtd: toNum(row[cYtd]) || 0,
         annualBudget: cBudget >= 0 ? toNum(row[cBudget]) || 0 : 0,
       });
+    }
+  }
+
+  // ---- Expense summary (simplified layout: no EXPENSE header) -----
+  // Bare FIXED / VARIABLE / DISCRETIONARY rows between "Total Income" and
+  // "Total Expenses", reusing the income block's columns.
+  if (!groups.length) {
+    const totalIncomeRow = findRow(aoa, (row) => /^total\s*income/i.test(norm(row[0])));
+    const totalExpensesRow = findRow(aoa, (row) => /^total\s*expense/i.test(norm(row[0])));
+    if (totalIncomeRow >= 0 && totalExpensesRow > totalIncomeRow) {
+      for (let r = totalIncomeRow + 1; r < totalExpensesRow; r++) {
+        const row = aoa[r] || [];
+        const label = norm(row[0]);
+        if (!label) continue;
+        const { name } = splitCode(label);
+        const key = groupKey(name);
+        if (!key) continue;
+        groups.push({
+          key,
+          name: name.replace(/\s+/g, ' ').trim(),
+          // Blank "Current Month" cells stay null (see the income block above).
+          monthActual: toNum(row[incMonth]),
+          actualYtd: toNum(row[incYtd]) || 0,
+          annualBudget: incBudget >= 0 ? toNum(row[incBudget]) || 0 : 0,
+        });
+      }
+      const teRow = aoa[totalExpensesRow] || [];
+      expReportedActual = toNum(teRow[incYtd]);
+      expReportedBudget = incBudget >= 0 ? toNum(teRow[incBudget]) : null;
     }
   }
 
@@ -313,6 +368,35 @@ export function parseBvaWorkbook(data) {
     }
   }
 
+  // Simplified layout: no DETAIL header — code-prefixed rows directly follow
+  // the "Total Expenses" row (code + name, month, actual YTD, budget), ending
+  // at the first non-code row (the transfers block).
+  if (detailHdr === -1) {
+    const totalExpensesRow = findRow(aoa, (row) => /^total\s*expense/i.test(norm(row[0])));
+    if (totalExpensesRow >= 0) {
+      for (let r = totalExpensesRow + 1; r < aoa.length; r++) {
+        const row = aoa[r] || [];
+        const label = norm(row[0]);
+        if (!label) continue; // blank separator rows
+        const { code, name } = splitCode(label);
+        if (!code) break; // first non-code row starts the transfer block
+        const actualYtd = toNum(row[2]);
+        const annualBudget = toNum(row[3]);
+        if (actualYtd == null && annualBudget == null) continue;
+        detailCats.push({
+          code,
+          name,
+          group: 'unassigned',
+          groupConfirmed: false,
+          // Blank month cells stay null — never a fabricated $0.
+          monthActual: toNum(row[1]),
+          actualYtd: actualYtd || 0,
+          annualBudget: annualBudget || 0,
+        });
+      }
+    }
+  }
+
   // ---- Monthly Transfers / Debits -------------------------------
   // Amount is column A (numeric); the label columns B/C/D are historically
   // misaligned, so they are captured raw and flagged for Admin confirmation.
@@ -347,6 +431,44 @@ export function parseBvaWorkbook(data) {
         'transfer_labels_misaligned',
         'transfers',
         'Recurring transfer amounts parsed cleanly, but the source / purpose / destination label columns are misaligned in the workbook. Confirm each transfer in Admin.'
+      );
+    }
+  }
+  // Simplified layout: no "Monthly Transfers/Debits" header — label-first
+  // rows with the amount in the last column, e.g.
+  // ["Sample Bank", "Sample Purpose", "", 1000.00].
+  if (trHdr === -1) {
+    const totalExpensesRow = findRow(aoa, (row) => /^total\s*expense/i.test(norm(row[0])));
+    for (let r = totalExpensesRow >= 0 ? totalExpensesRow + 1 : 0; r < aoa.length; r++) {
+      const row = aoa[r] || [];
+      const label = norm(row[0]);
+      if (!label || toNum(label) != null) continue;
+      if (splitCode(label).code) continue; // monitored detail rows, handled above
+      // Amount = rightmost numeric cell in the row.
+      let amountCol = -1;
+      for (let c = row.length - 1; c >= 1; c--) {
+        if (toNum(row[c]) != null) {
+          amountCol = c;
+          break;
+        }
+      }
+      if (amountCol === -1) continue;
+      const rawB = norm(row[1]);
+      const rawC = norm(row[2]);
+      transferItems.push({
+        amount: toNum(row[amountCol]),
+        source: label,
+        purpose: rawB || rawC || null,
+        destination: rawC && toNum(rawC) == null ? rawC : null,
+        rawLabels: [label, rawB, rawC].filter(Boolean),
+        labelsNeedReview: true,
+      });
+    }
+    if (transferItems.length) {
+      pushWarn(
+        'transfer_labels_misaligned',
+        'transfers',
+        'This workbook lists recurring transfers as unlabeled rows; confirm the source and purpose of each transfer in Admin.'
       );
     }
   }
