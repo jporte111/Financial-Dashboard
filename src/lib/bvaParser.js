@@ -436,7 +436,7 @@ export function parseBvaWorkbook(data) {
   }
   // Simplified layout: no "Monthly Transfers/Debits" header — label-first
   // rows with the amount in the last column, e.g.
-  // ["Sample Bank", "Sample Purpose", "", 1000.00].
+  // ["Acct A", "Tax Savings", "", 500].
   if (trHdr === -1) {
     const totalExpensesRow = findRow(aoa, (row) => /^total\s*expense/i.test(norm(row[0])));
     for (let r = totalExpensesRow >= 0 ? totalExpensesRow + 1 : 0; r < aoa.length; r++) {
