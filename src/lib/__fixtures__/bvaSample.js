@@ -9,7 +9,7 @@
 //      accounts (still blocking, used to exercise the override mechanism),
 //   3. the workbook's own Q2 distributions column subtotal silently skips
 //      one entity's row (the same class of manually-typed-range bug as the
-//      real workbook's Q3 column skipping Sample Entity) — the
+//      real workbook's Q3 column skipping one entity's row) — the
 //      corrected entity-quarter sum is authoritative and does NOT block,
 //   4. recurring-transfer label columns are misaligned.
 //
