@@ -1,6 +1,16 @@
 {
   "name": "ReportingPeriod",
   "type": "object",
+  // Direct entity access is admin-only for every operation. Anonymous visitors
+  // (the no-login client view) get published data only through the backend
+  // functions, which read with the service role and enforce publication and
+  // field rules server-side (base44/shared/publicDashboardCore.ts).
+  "rls": {
+    "create": { "user_condition": { "role": "admin" } },
+    "read": { "user_condition": { "role": "admin" } },
+    "update": { "user_condition": { "role": "admin" } },
+    "delete": { "user_condition": { "role": "admin" } }
+  },
   "properties": {
     "label": {
       "type": "string",
