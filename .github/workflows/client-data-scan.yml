@@ -1,0 +1,70 @@
+name: Client data scan (structural)
+
+# Runs the structural checks from scripts/client-data-scan.mjs on every commit of
+# every push (Base44 Builder commits included) and weekly on every branch:
+# blocked workbook and expected-values files, unscannable binaries, and a warning
+# for uneven dollar amounts in comments.
+#
+# This workflow deliberately has NO access to CLIENT_IDENTIFIERS. It runs code
+# from the pushed commit, which anyone with push access (including the Builder)
+# could change to print or send the secret. Identifier matching runs instead in
+# the separate private guard repository, which only reads this repo as data.
+#
+# LIMITATION: this detects but cannot PREVENT a bad push. The Builder pushes
+# straight to main and skips local git hooks, and without branch protection (a
+# required status check, which needs GitHub Pro or an organization for a private
+# repo) GitHub accepts the push before this runs.
+
+on:
+  push:
+  schedule:
+    - cron: '0 13 * * 1' # Mondays 13:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          scan() { node scripts/client-data-scan.mjs --no-identifiers "$@"; }
+          if [ "$EVENT" != push ]; then
+            status=0
+            for ref in $(git for-each-ref --format='%(refname)' refs/remotes/origin | grep -v '/HEAD$'); do
+              scan --tree "$ref" || status=$?
+            done
+            exit $status
+          fi
+          if git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            scan "$BEFORE..$GITHUB_SHA"
+          elif [ "$GITHUB_REF" = refs/heads/main ]; then
+            scan --rev-list "$GITHUB_SHA"
+          else
+            # New branch or tag: scan everything not already on main.
+            scan "origin/main..$GITHUB_SHA"
+          fi
+
+      # A failed run on a bot push notifies no one, so open an issue. It carries
+      # only the commit hash and the run link.
+      - name: Open alert issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Client data scan (structural) failed at ${GITHUB_SHA::7}"
+          if [ -z "$(gh issue list -R "$GITHUB_REPOSITORY" --state all --search "\"$title\" in:title" --json number --jq '.[].number')" ]; then
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "The structural client data scan failed (a blocked workbook, expected-values or binary file). Findings are in the run log: $RUN_URL"
+          fi

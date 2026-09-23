@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Blocks client data before it is committed locally. CI is the backstop; Base44
+# Builder commits never run this hook.
+# Enable once per clone:  git config core.hooksPath .githooks
+# Needs the git-ignored bva-workbooks/client-identifiers.txt (or $CLIENT_IDENTIFIERS);
+# without it the commit is refused rather than silently unscanned.
+set -euo pipefail
+exec node scripts/client-data-scan.mjs --cached
