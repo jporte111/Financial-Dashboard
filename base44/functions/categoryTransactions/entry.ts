@@ -1,27 +1,20 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
-import { transactionsForCategory } from '../../shared/categoryTransactionsCore.ts';
+import { handleCategoryTransactionsRequest } from '../../shared/publicDashboardCore.ts';
 
-// Return the YTD transactions behind a BVA-reported category, for the
-// Spending Detail drill-down. Authenticated endpoint — the public client view
-// uses publicCategoryTransactions instead. The shared core reads only
-// Transaction / Account records already stored in the database and always
-// excludes QuickBooks-sourced records.
+// Signed-in category drill-down (admin Spending Detail). Admins can open any
+// period, including drafts under review. Any other signed-in user gets exactly
+// the public rules: published + final periods only, line resolved server-side,
+// public row fields. The shared core reads only stored Transaction / Account
+// records and always excludes QuickBooks-sourced records.
 export default async function(req) {
   try {
     const base44 = createClientFromRequest(req);
-    const user = await base44.auth.me();
-    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
+    let user = null;
+    try { user = await base44.auth.me(); } catch { user = null; }
     let body = {};
     try { body = await req.json(); } catch { body = {}; }
-    const { period_id, category, qb_account_names } = body;
-    if (!period_id) return Response.json({ error: 'period_id required' }, { status: 400 });
-    if (!category) return Response.json({ error: 'category required' }, { status: 400 });
-
-    const period = await base44.asServiceRole.entities.ReportingPeriod.get(period_id);
-    if (!period) return Response.json({ error: 'Period not found' }, { status: 404 });
-
-    return Response.json(await transactionsForCategory(base44, period, category, qb_account_names));
+    const { status, body: out } = await handleCategoryTransactionsRequest(base44, body, user);
+    return Response.json(out, { status });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }

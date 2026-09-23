@@ -106,13 +106,21 @@ describe('QuickBooks is fully disconnected — structural checks over the real r
   });
 
   it('the BVA drill-down function never returns a QuickBooks-sourced transaction and takes no QuickBooks-only params', () => {
-    const text = fs.readFileSync(path.join(ROOT, 'base44/functions/categoryTransactions/entry.ts'), 'utf8');
-    expect(text).toMatch(/source\s*!==\s*['"]quickbooks['"]/);
+    // The drill-down entry points are thin wrappers; the logic lives in the
+    // shared core (QuickBooks exclusion) and publicDashboardCore (request
+    // handling), so the invariants are checked there.
+    const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+    const entry = read('base44/functions/categoryTransactions/entry.ts');
+    const core = read('base44/shared/categoryTransactionsCore.ts');
+    const handler = read('base44/shared/publicDashboardCore.ts');
+    expect(core).toMatch(/source\s*!==\s*['"]quickbooks['"]/);
     // no source_filter param and no Live-page single-account request param —
-    // the request body only ever destructures these three fields now.
-    expect(text).not.toMatch(/source_filter/);
-    expect(text).toMatch(/const\s*\{\s*period_id,\s*category,\s*qb_account_names\s*\}\s*=\s*body/);
-    expect(text).not.toMatch(/quickbooks\.api\.intuit\.com/i);
+    // the admin request body only ever destructures these three fields now.
+    for (const text of [entry, core, handler]) {
+      expect(text).not.toMatch(/source_filter/);
+      expect(text).not.toMatch(/quickbooks\.api\.intuit\.com/i);
+    }
+    expect(handler).toMatch(/const\s*\{\s*period_id,\s*category,\s*qb_account_names\s*\}\s*=\s*body/);
   });
 
   it('no shared rollup helper still sums QuickBooks-linked live transactions', () => {

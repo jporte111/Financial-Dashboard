@@ -8,10 +8,19 @@ import { buildIndexes, accountsForNames } from './rollupHelpers.ts';
 // never surface as if they were live data. The BVA workbook is the only
 // financial-data source for the dashboard; this only supplements it with
 // underlying transaction detail when such records already exist locally.
-export async function transactionsForCategory(base44, period, category, qb_account_names) {
+//
+// Options (both used by the public, no-login drill-down):
+//   publishedOnly  build YTD only from periods that are published and final
+//                  (plus the requested period), so a draft month's
+//                  transactions can never reach an anonymous visitor.
+//   publicRows     return only the fields the client drill-down displays.
+export async function transactionsForCategory(base44, period, category, qb_account_names, { publishedOnly = false, publicRows = false } = {}) {
   // YTD = every period this year up to and including the selected month.
   const yearPeriods = await base44.asServiceRole.entities.ReportingPeriod.filter({ year: period.year }, 'month');
-  const ytdPeriodIds = yearPeriods.filter((p) => p.month <= period.month).map((p) => p.id);
+  const ytdPeriodIds = yearPeriods
+    .filter((p) => p.month <= period.month)
+    .filter((p) => !publishedOnly || p.id === period.id || (p.published && p.status === 'final'))
+    .map((p) => p.id);
 
   let ytdTxns = [];
   if (ytdPeriodIds.length) {
@@ -56,6 +65,8 @@ export async function transactionsForCategory(base44, period, category, qb_accou
     total: rows.length,
     ytd_amount: rows.reduce((s, r) => s + r.amount, 0),
     month_amount: rows.filter((r) => r.in_month).reduce((s, r) => s + r.amount, 0),
-    transactions: rows,
+    transactions: publicRows
+      ? rows.map(({ id, date, vendor, description, amount, full_account_path }) => ({ id, date, vendor, description, amount, full_account_path }))
+      : rows,
   };
 }

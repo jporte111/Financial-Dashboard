@@ -16,12 +16,13 @@ export default function ClientView() {
   const [selectedLine, setSelectedLine] = useState(null);
   const [signedIn, setSignedIn] = useState(false);
 
-  // A firm user browsing from the admin side stays logged in — offer a
-  // one-click return instead of the sign-in link.
+  // A firm admin browsing from the admin side stays logged in — offer a
+  // one-click return instead of the sign-in link. Only admins can use the
+  // admin side, so only admins get the shortcut.
   useEffect(() => {
     base44.auth
-      .isAuthenticated()
-      .then(setSignedIn)
+      .me()
+      .then((me) => setSignedIn(me?.role === 'admin'))
       .catch(() => setSignedIn(false));
   }, []);
 

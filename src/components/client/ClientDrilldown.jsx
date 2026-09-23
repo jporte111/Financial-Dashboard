@@ -32,8 +32,9 @@ function DrilldownBody({ line, periodId, monthsElapsed }) {
     base44.functions
       .invoke('publicCategoryTransactions', {
         period_id: periodId,
+        // The server resolves the line and its account names itself.
+        budget_line_id: line.id,
         category: line.category,
-        qb_account_names: line.qb_account_names || [],
       })
       .then((res) => {
         if (!cancelled) setTxns((res.data || res).transactions || []);
