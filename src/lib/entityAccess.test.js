@@ -25,7 +25,7 @@ const FINANCIAL = [
 // A published ReportingPeriod is read-only for direct writes (even admins);
 // its state fields are writable only by the periodTransition function.
 const UNPUBLISHED_ADMIN = { $and: [ADMIN, { 'data.published': { $ne: true } }] };
-const PROTECTED_STATE = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides'];
+const PROTECTED_STATE = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log'];
 
 describe('entity access rules', () => {
   it.each(FINANCIAL.filter((n) => n !== 'ReportingPeriod'))('%s is admin-only for create, read, update and delete', (name) => {
