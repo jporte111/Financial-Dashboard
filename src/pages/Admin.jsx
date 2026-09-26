@@ -13,12 +13,26 @@ import AccountHierarchyManager from '@/components/admin/AccountHierarchyManager'
 import ImportHub from '@/components/admin/ImportHub';
 
 export default function Admin() {
-  const { user, isAdmin, period, periodId, periods, setPeriodId, reload } = usePeriodContext();
+  const { isAdmin, period, periodId, periods, setPeriodId, reload } = usePeriodContext();
   const lines = useEntityByPeriod('BudgetLine', periodId);
   const cash = useEntityByPeriod('CashAccount', periodId, 'sort_order');
   const dists = useEntityByPeriod('Distribution', periodId);
   const transfers = useEntityByPeriod('RecurringTransfer', periodId);
   const savings = useEntityByPeriod('SavingsSpend', periodId);
+
+  // Final and published periods are read-only through the normal editing
+  // workflow until controlled draft revisions exist: a final period has been
+  // validated, so editing its figures would bypass that validation. The server
+  // refuses changes to a published ReportingPeriod; line-level records are
+  // guarded here in the UI (see the Phase 1 limitations).
+  const locked = !!period?.published || period?.status === 'final';
+  const LockNote = () =>
+    locked ? (
+      <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">
+        <strong>{period.label}</strong> is {period.published ? 'published' : 'final'} and read-only. To change it,
+        reopen it in Review &amp; Publish{period.published ? ' (this removes it from the client dashboard until it is finalized and published again)' : ''}.
+      </div>
+    ) : null;
 
   if (!isAdmin)
     return <p className="rounded-2xl border border-stone-200 bg-white p-12 text-center text-sm text-stone-500">This area is restricted to the internal team.</p>;
@@ -41,6 +55,8 @@ export default function Admin() {
       </TabsList>
 
       <TabsContent value="data" className="space-y-5">
+        <LockNote />
+        <fieldset disabled={locked} className="min-w-0 space-y-5 disabled:opacity-70" data-testid="period-editors">
         <PeriodTotalsForm period={period} reload={reload} />
         <BudgetLinesEditor periodId={periodId} lines={lines.items} reload={lines.reload} />
         <SupportingDataEditor
@@ -97,10 +113,14 @@ export default function Admin() {
             { key: 'purpose', label: 'Purpose / Destination', wide: true },
           ]}
         />
+        </fieldset>
       </TabsContent>
 
-      <TabsContent value="transactions">
-        <TransactionsEditor periodId={periodId} lines={lines.items} />
+      <TabsContent value="transactions" className="space-y-5">
+        <LockNote />
+        <fieldset disabled={locked} className="min-w-0 disabled:opacity-70" data-testid="transaction-editors">
+          <TransactionsEditor periodId={periodId} lines={lines.items} />
+        </fieldset>
       </TabsContent>
 
       <TabsContent value="accounts">
@@ -112,8 +132,10 @@ export default function Admin() {
       </TabsContent>
 
       <TabsContent value="review" className="space-y-5">
-        <PublishPanel period={period} user={user} reload={reload} />
-        <ReviewQueue periodId={periodId} />
+        <PublishPanel period={period} reload={reload} />
+        <fieldset disabled={locked} className="min-w-0 disabled:opacity-70" data-testid="review-editors">
+          <ReviewQueue periodId={periodId} />
+        </fieldset>
       </TabsContent>
 
       <TabsContent value="periods">

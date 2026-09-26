@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { parseBvaWorkbook } from '@/lib/bvaParser';
 import { validateBva } from '@/lib/bvaValidation';
-import { planBvaImport, planFinalize, groupMapFromLines } from '@/lib/bvaImport';
+import { planBvaImport, importPreflight, groupMapFromLines } from '@/lib/bvaImport';
+import { periodTransition } from '@/lib/periodTransition';
 import { fmtCurrency, fmtPct } from '@/lib/finance';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,6 +29,7 @@ export default function BvaImportCenter() {
   const [log, setLog] = useState([]);
   const [applied, setApplied] = useState(null); // { periodId }
   const [overrides, setOverrides] = useState({});
+  const [blockers, setBlockers] = useState([]); // refusals returned by the server-side gate
 
   const addLog = (l) => setLog((x) => [...x, l]);
 
@@ -61,9 +63,24 @@ export default function BvaImportCenter() {
       const match = existingPeriods.find(
         (p) => Number(p.month) === Number(confirm.month) && Number(p.year) === Number(confirm.year)
       );
+      // Refuse before any write: published months are read-only until draft
+      // revisions exist; an existing unpublished month is first reset to draft
+      // on the server, so no earlier "final" state can cover re-imported figures.
+      const pre = importPreflight(match);
+      if (!pre.allowed) {
+        addLog(`✗ ${pre.reason} Nothing was changed.`);
+        return;
+      }
+      if (pre.needsInvalidate) {
+        const inv = await periodTransition('invalidate', match.id);
+        if (!inv.ok) {
+          addLog(`✗ Import refused by the server: ${(inv.blockers[0] && inv.blockers[0].message) || inv.error}. Nothing was changed.`);
+          return;
+        }
+      }
       let existing = { budgetLines: [], cashAccounts: [], distributions: [], transfers: [] };
       if (match) {
-        addLog(`Existing ${MONTHS[confirm.month - 1]} ${confirm.year} period found — updating in place (no duplicate).`);
+        addLog(`Existing ${MONTHS[confirm.month - 1]} ${confirm.year} period found (not published) — updating the draft in place.`);
         const [budgetLines, cashAccounts, distributions, transfers] = await Promise.all([
           base44.entities.BudgetLine.filter({ period_id: match.id }, undefined, 1000),
           base44.entities.CashAccount.filter({ period_id: match.id }, undefined, 500),
@@ -110,7 +127,7 @@ export default function BvaImportCenter() {
         addLog(`${name}: +${bucket.toCreate.length} ~${bucket.toUpdate.length} -${bucket.toDelete.length}`);
       }
 
-      addLog('✓ Import applied as Draft. Review discrepancies below, then finalize.');
+      addLog('✓ Import applied as Draft (not visible to clients). Review discrepancies below, then finalize.');
       setApplied({ periodId, action: plan.action });
     } catch (e) {
       addLog(`✗ ${e.message || e}`);
@@ -119,22 +136,22 @@ export default function BvaImportCenter() {
     }
   };
 
+  // Finalize runs on the server: every rule is re-checked there and the period
+  // becomes Final (validated, locked) in one write. It is NOT published --
+  // publishing is a separate step in Review & Publish.
   const finalize = async () => {
     if (!applied || !validation) return;
     setBusy(true);
     try {
-      const me = await base44.auth.me();
-      const payload = planFinalize({
-        period: { id: applied.periodId },
-        validation,
-        overrides,
-        finalizedBy: me?.email || me?.full_name || '',
-      });
-      await base44.entities.ReportingPeriod.update(payload.id, payload.data);
-      addLog('✓ Period marked Final and published.');
-      setApplied({ ...applied, finalized: true });
-    } catch (e) {
-      addLog(`✗ ${e.message || e}`);
+      const res = await periodTransition('finalize', applied.periodId, { overrides });
+      if (res.ok) {
+        setBlockers([]);
+        addLog('✓ Period marked Final (validated). Publish it from Review & Publish when ready.');
+        setApplied({ ...applied, finalized: true });
+      } else {
+        setBlockers(res.blockers);
+        addLog(`✗ Not finalized: ${res.blockers.length ? `${res.blockers.length} item(s) must be resolved (listed below)` : res.error}. Nothing was changed.`);
+      }
     } finally {
       setBusy(false);
     }
@@ -276,13 +293,34 @@ export default function BvaImportCenter() {
           </Button>
           {applied && !applied.finalized && (
             <Button variant="outline" className="rounded-full" disabled={busy || !canFinalize} onClick={finalize}>
-              Mark Final &amp; Publish
+              Mark Final (validated)
             </Button>
           )}
           {applied && !applied.finalized && openWarnings.length > 0 && (
             <span className="text-xs text-rose-700">{openWarnings.length} reconciliation(s) need an override reason before finalizing.</span>
           )}
           {applied?.finalized && <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Final</span>}
+        </div>
+      )}
+
+      {blockers.length > 0 && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5">
+          <p className="mb-2 text-xs uppercase tracking-[0.12em] text-rose-700">Finalization blocked by the server</p>
+          <div className="space-y-3 text-sm">
+            {blockers.map((b) => (
+              <div key={b.code}>
+                <p className="text-stone-700">{b.message}</p>
+                {b.overridable && (
+                  <Input
+                    placeholder={b.code.startsWith('detail_unassigned:') ? 'Exclusion reason (documented; required)' : 'Override reason (required)'}
+                    className="mt-1 h-8 text-xs"
+                    value={overrides[b.code]?.reason || ''}
+                    onChange={(e) => setOverrides((o) => ({ ...o, [b.code]: e.target.value ? { reason: e.target.value } : undefined }))}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

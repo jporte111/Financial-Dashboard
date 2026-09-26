@@ -21,7 +21,8 @@ export default function PeriodsManager({ periods, reload, onSelect }) {
       start_date: format(start, 'yyyy-MM-dd'),
       end_date: format(end, 'yyyy-MM-dd'),
       months_elapsed: Number(month),
-      status: 'draft',
+      // status / published take their schema defaults (draft, unpublished);
+      // state changes go only through the periodTransition function.
       last_updated: format(new Date(), 'yyyy-MM-dd'),
     });
     reload();

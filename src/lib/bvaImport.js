@@ -100,14 +100,12 @@ export function planBvaImport(args) {
     distributions_ytd: round2(R.distributions.entitySum),
     bva_validation_warnings: validation.warnings,
     bva_parsed_source: parsed,
-    bva_import_status: 'draft',
+    // No state fields (status / published / bva_import_status / finalized_*):
+    // those are written only by the periodTransition function. A new period
+    // takes the schema defaults (draft, unpublished); an existing unpublished
+    // period is reset to draft by periodTransition 'invalidate' BEFORE any
+    // import write (see importPreflight).
   };
-  // On create only, seed the review-workflow status; never downgrade an
-  // existing period's status on re-import.
-  if (action === 'create') {
-    periodData.status = 'draft';
-    periodData.published = false;
-  }
 
   // --- Budget lines: 3 group summaries + N monitored detail rows -------
   const desiredLines = [];
@@ -215,34 +213,20 @@ export function planBvaImport(args) {
   };
 }
 
-/**
- * Build the payload that marks a period Final. Throws when a required
- * reconciliation is still failing and has not been explicitly overridden.
- */
-export function planFinalize({ period, validation, overrides = {}, finalizedBy }) {
-  const stillOpen = (validation.openReconciliations || []).filter((code) => !overrides[code]);
-  if (stillOpen.length) {
-    throw new Error(
-      `Cannot finalize: ${stillOpen.length} reconciliation(s) still open without an override — ${stillOpen.join(', ')}`
-    );
+// Decide, before any write, whether an import may touch the matched period.
+// Published months are refused until draft revisions exist; an existing
+// unpublished month must first be reset to draft by periodTransition
+// 'invalidate', so stale "final" state can never cover re-imported figures.
+export function importPreflight(match) {
+  if (!match) return { allowed: true, action: 'create', needsInvalidate: false };
+  if (match.published) {
+    return {
+      allowed: false,
+      action: 'refuse',
+      reason: `${match.label || 'This month'} is published. Re-importing a published month is refused until draft revisions are available.`,
+    };
   }
-  const mergedWarnings = (validation.warnings || []).map((w) =>
-    overrides[w.code] ? { ...w, overridden: true, override: overrides[w.code], blocksFinalize: false } : w
-  );
-  return {
-    id: period.id,
-    data: {
-      bva_import_status: 'final',
-      status: 'final',
-      published: true,
-      finalized_at: new Date().toISOString(),
-      finalized_by: finalizedBy || null,
-      publication_date: new Date().toISOString().slice(0, 10),
-      bva_overrides: overrides,
-      bva_validation_warnings: mergedWarnings,
-      last_updated: new Date().toISOString().slice(0, 10),
-    },
-  };
+  return { allowed: true, action: 'update', needsInvalidate: true };
 }
 
 // Derive a prior category-number -> group map from existing BudgetLine rows so

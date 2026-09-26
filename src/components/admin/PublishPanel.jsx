@@ -1,33 +1,43 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
+import { periodTransition } from '@/lib/periodTransition';
+import { PUBLISH_CHECKLIST } from '../../../base44/shared/publishGate.ts';
 
-const ITEMS = [
-  ['categories_reviewed', 'Categories reviewed'],
-  ['classes_reviewed', 'Classes reviewed'],
-  ['refunds_reviewed', 'Refunds reviewed'],
-  ['income_reviewed', 'Income reviewed'],
-  ['cash_confirmed', 'Cash balances confirmed'],
-  ['distributions_confirmed', 'Distribution totals confirmed'],
-  ['budget_report_reviewed', 'Budget report reviewed'],
-];
-
-const STAGES = [
+// Review stages an admin may set directly. "Final" is deliberately absent:
+// a period becomes final only through validated finalization (BVA Import),
+// and is published only through the server-side publication gate.
+export const STAGES = [
   ['draft', 'Draft'],
   ['transactions_posted', 'Transactions Posted'],
   ['categories_reviewed', 'Categories Reviewed'],
   ['classes_reviewed', 'Classes Reviewed'],
   ['reports_reviewed', 'Reports Reviewed'],
-  ['final', 'Final'],
 ];
 
-export default function PublishPanel({ period, user, reload }) {
+export default function PublishPanel({ period, reload }) {
   const [checklist, setChecklist] = useState(period?.checklist || {});
+  const [check, setCheck] = useState(null); // server-side evaluation, read-only
+  const [busy, setBusy] = useState(false);
+  const [confirmReopen, setConfirmReopen] = useState(false);
   const { toast } = useToast();
-  const complete = ITEMS.every(([k]) => checklist[k]);
+
+  const isPublished = !!period?.published;
+  const isFinal = period?.status === 'final' && period?.bva_import_status === 'final' && !!period?.finalized_at;
+  const validatedImport = period?.bva_import_status === 'final' || period?.bva_import_status === 'draft';
+  const periodId = period?.id;
+
+  useEffect(() => {
+    setChecklist(period?.checklist || {});
+    setConfirmReopen(false);
+    if (!periodId) return;
+    let cancelled = false;
+    periodTransition('check', periodId).then((r) => !cancelled && setCheck(r.ok ? r : null));
+    return () => { cancelled = true; };
+  }, [periodId, period?.checklist, period?.status, period?.published]);
 
   if (!period) {
     return (
@@ -37,6 +47,21 @@ export default function PublishPanel({ period, user, reload }) {
     );
   }
 
+  const run = async (fn, okTitle) => {
+    setBusy(true);
+    try {
+      const res = await fn();
+      if (res.ok) toast({ title: okTitle });
+      else toast({ title: 'Refused by the server — nothing was changed', description: (res.blockers[0] && res.blockers[0].message) || res.error });
+      reload();
+      return res;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // The checklist is part of the publication rules; it is editable only while
+  // the period is not published (the server refuses edits to published periods).
   const toggle = async (k, v) => {
     const next = { ...checklist, [k]: v };
     setChecklist(next);
@@ -44,63 +69,94 @@ export default function PublishPanel({ period, user, reload }) {
     reload();
   };
 
-  const setStage = async (status) => {
-    await base44.entities.ReportingPeriod.update(period.id, { status });
-    toast({ title: `Stage set to ${status.replace(/_/g, ' ')}` });
-    reload();
-  };
-
-  const publish = async () => {
-    await base44.entities.ReportingPeriod.update(period.id, {
-      status: 'final',
-      published: true,
-      publication_date: new Date().toISOString().slice(0, 10),
-      reviewed_by: user?.full_name || user?.email || '',
-    });
-    toast({ title: 'Published to Sonia' });
-    reload();
-  };
-
-  const unpublish = async () => {
-    await base44.entities.ReportingPeriod.update(period.id, { published: false, status: 'draft' });
-    toast({ title: 'Reporting period reopened' });
-    reload();
-  };
+  const publishBlockers = check?.publish?.blockers || [];
+  const statusLabel = isPublished ? 'Published' : isFinal ? 'Final (not yet published)' : 'Draft';
 
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-6">
       <p className="font-display text-lg">Review & Publication — {period.label}</p>
+      <p className="mt-1 text-sm text-stone-600">Status: <span className="font-medium">{statusLabel}</span></p>
 
       <div className="mt-5">
-        <p className="text-xs uppercase tracking-[0.12em] text-stone-500">Workflow Stage</p>
-        <Select value={period.status} onValueChange={setStage}>
-          <SelectTrigger className="mt-2 w-[260px]"><SelectValue /></SelectTrigger>
+        <p className="text-xs uppercase tracking-[0.12em] text-stone-500">Review Stage</p>
+        <Select
+          value={STAGES.some(([k]) => k === period.status) ? period.status : undefined}
+          onValueChange={(stage) => run(() => periodTransition('set_stage', period.id, { stage }), `Stage set to ${stage.replace(/_/g, ' ')}`)}
+          disabled={busy || isPublished || isFinal}
+        >
+          <SelectTrigger className="mt-2 w-[260px]"><SelectValue placeholder={isFinal || isPublished ? 'Final' : 'Select stage'} /></SelectTrigger>
           <SelectContent>{STAGES.map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}</SelectContent>
         </Select>
+        <p className="mt-1 text-xs text-stone-500">A period becomes Final only by validated finalization in BVA Import.</p>
       </div>
 
       <div className="mt-6 space-y-3">
         <p className="text-xs uppercase tracking-[0.12em] text-stone-500">Pre-Publication Checklist</p>
-        {ITEMS.map(([k, label]) => (
+        {PUBLISH_CHECKLIST.map(([k, label]) => (
           <label key={k} className="flex items-center gap-3 text-sm">
-            <Checkbox checked={!!checklist[k]} onCheckedChange={(v) => toggle(k, !!v)} />
+            <Checkbox checked={!!checklist[k]} disabled={isPublished} onCheckedChange={(v) => toggle(k, !!v)} />
             {label}
           </label>
         ))}
       </div>
 
-      <div className="mt-6 flex items-center gap-3">
-        <Button onClick={publish} disabled={!complete} className="rounded-full">
-          {period.published ? 'Re-publish' : 'Mark Final & Publish to Sonia'}
-        </Button>
-        {period.published && (
-          <Button variant="outline" className="rounded-full" onClick={unpublish}>Reopen Period</Button>
+      {!isPublished && publishBlockers.length > 0 && (
+        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
+          <p className="mb-1 text-xs uppercase tracking-[0.12em] text-amber-800">Publication blocked until resolved</p>
+          <ul className="list-disc space-y-1 pl-5 text-stone-700">
+            {publishBlockers.map((b) => <li key={b.code}>{b.message}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        {!isPublished && (
+          <Button
+            onClick={() => run(() => periodTransition('publish', period.id), 'Published to Sonia')}
+            disabled={busy || !isFinal || publishBlockers.length > 0}
+            className="rounded-full"
+          >
+            Publish to Sonia
+          </Button>
+        )}
+        {(isPublished || isFinal) && !confirmReopen && (
+          <Button variant="outline" className="rounded-full" disabled={busy} onClick={() => setConfirmReopen(true)}>
+            Reopen Period
+          </Button>
         )}
       </div>
-      {!complete && <p className="mt-3 text-xs text-stone-500">Complete every checklist item to publish.</p>}
-      {period.published && (
+
+      {confirmReopen && (
+        <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-stone-700">
+          <p>
+            Reopening {isPublished ? 'removes this report from the client dashboard and ' : ''}returns the period to Draft.
+            {isPublished && period.bva_import_status !== 'final' && (
+              <> This period was published before validated BVA imports existed; after reopening it can be published again
+                only after a validated BVA import and finalization.</>
+            )}
+          </p>
+          <div className="mt-3 flex gap-3">
+            <Button
+              variant="destructive"
+              className="rounded-full"
+              disabled={busy}
+              onClick={async () => { await run(() => periodTransition('reopen', period.id), 'Reporting period reopened'); setConfirmReopen(false); }}
+            >
+              Confirm reopen
+            </Button>
+            <Button variant="outline" className="rounded-full" onClick={() => setConfirmReopen(false)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+
+      {!isPublished && !isFinal && (
+        <p className="mt-3 text-xs text-stone-500">
+          {validatedImport ? 'Finalize the validated import in BVA Import before publishing.' : 'This period has no validated BVA import; import the workbook first.'}
+        </p>
+      )}
+      {isPublished && (
         <p className="mt-3 text-xs text-emerald-700">
-          Published{period.publication_date ? ` on ${period.publication_date}` : ''}{period.reviewed_by ? ` · reviewed by ${period.reviewed_by}` : ''}
+          Published{period.publication_date ? ` on ${period.publication_date}` : ''}{period.reviewed_by ? ` · reviewed by ${period.reviewed_by}` : ''} · read-only
         </p>
       )}
     </div>
