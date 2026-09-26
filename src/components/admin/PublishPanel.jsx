@@ -23,6 +23,8 @@ export default function PublishPanel({ period, reload }) {
   const [check, setCheck] = useState(null); // server-side evaluation, read-only
   const [busy, setBusy] = useState(false);
   const [confirmReopen, setConfirmReopen] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopenLabel, setReopenLabel] = useState('');
   const { toast } = useToast();
 
   const isPublished = !!period?.published;
@@ -33,6 +35,8 @@ export default function PublishPanel({ period, reload }) {
   useEffect(() => {
     setChecklist(period?.checklist || {});
     setConfirmReopen(false);
+    setReopenReason('');
+    setReopenLabel('');
     if (!periodId) return;
     let cancelled = false;
     periodTransition('check', periodId).then((r) => !cancelled && setCheck(r.ok ? r : null));
@@ -119,28 +123,63 @@ export default function PublishPanel({ period, reload }) {
             Publish to Sonia
           </Button>
         )}
-        {(isPublished || isFinal) && !confirmReopen && (
+        {isFinal && !isPublished && !confirmReopen && (
           <Button variant="outline" className="rounded-full" disabled={busy} onClick={() => setConfirmReopen(true)}>
-            Reopen Period
+            Reopen to Draft
           </Button>
         )}
       </div>
 
+      {isPublished && !confirmReopen && (
+        <details className="mt-8 rounded-xl border border-stone-200 p-4 text-sm text-stone-600">
+          <summary className="cursor-pointer text-xs uppercase tracking-[0.12em] text-stone-500">Exceptional administrative action</summary>
+          <p className="mt-3">
+            Published reports are preserved as the client&apos;s historical record. Reopening one removes it from the client
+            dashboard and is not the way to correct a report. Use it only in exceptional circumstances.
+          </p>
+          <Button variant="outline" className="mt-3 rounded-full" disabled={busy} onClick={() => setConfirmReopen(true)}>
+            Remove from client dashboard and reopen…
+          </Button>
+        </details>
+      )}
+
       {confirmReopen && (
         <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-stone-700">
           <p>
-            Reopening {isPublished ? 'removes this report from the client dashboard and ' : ''}returns the period to Draft.
+            {isPublished ? 'This removes the report from the client dashboard and ' : 'This '}returns the period to Draft.
             {isPublished && period.bva_import_status !== 'final' && (
-              <> This period was published before validated BVA imports existed; after reopening it can be published again
-                only after a validated BVA import and finalization.</>
+              <> This period was published before validated BVA imports existed; it can be published again only after a
+                validated BVA import and finalization.</>
             )}
+            {' '}The reason is recorded in the period&apos;s audit log.
           </p>
+          <textarea
+            className="mt-3 w-full rounded-md border border-stone-200 bg-white p-2 text-sm"
+            rows={2}
+            placeholder="Reason (required, at least 10 characters)"
+            value={reopenReason}
+            onChange={(e) => setReopenReason(e.target.value)}
+          />
+          {isPublished && (
+            <input
+              className="mt-2 w-full rounded-md border border-stone-200 bg-white p-2 text-sm"
+              placeholder={`Type "${period.label}" to confirm`}
+              value={reopenLabel}
+              onChange={(e) => setReopenLabel(e.target.value)}
+            />
+          )}
           <div className="mt-3 flex gap-3">
             <Button
               variant="destructive"
               className="rounded-full"
-              disabled={busy}
-              onClick={async () => { await run(() => periodTransition('reopen', period.id), 'Reporting period reopened'); setConfirmReopen(false); }}
+              disabled={busy || reopenReason.trim().length < 10 || (isPublished && reopenLabel !== period.label)}
+              onClick={async () => {
+                const res = await run(
+                  () => periodTransition('reopen', period.id, { reason: reopenReason, confirm: reopenLabel }),
+                  'Reporting period reopened'
+                );
+                if (res.ok) setConfirmReopen(false);
+              }}
             >
               Confirm reopen
             </Button>

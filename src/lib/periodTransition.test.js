@@ -12,7 +12,7 @@ import { PUBLISH_CHECKLIST } from '../../base44/shared/publishGate.ts';
 
 const ADMIN = { role: 'admin', email: 'admin@example.invalid', full_name: 'Admin' };
 const STATE_AND_AUDIT = new Set([
-  'status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides',
+  'status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log',
   'bva_validation_warnings', 'publication_date', 'reviewed_by', 'last_updated',
 ]);
 const NOW = new Date('2026-08-05T10:00:00Z');
@@ -156,17 +156,56 @@ describe('publish', () => {
 });
 
 describe('reopen / invalidate / set_stage', () => {
-  it('reopen of a published period unpublishes and returns to draft in one write', async () => {
+  const publishedFx = () => {
     const fx = draftFixture();
     fx.period = { ...fx.period, status: 'final', bva_import_status: 'final', finalized_at: 'x', published: true };
-    const r = await run(fx, { action: 'reopen', period_id: 'p1' });
+    return fx;
+  };
+  const REASON = 'client requested withdrawal of this report';
+
+  it('reopen of a published period is refused without a reason, with no write', async () => {
+    for (const reason of [undefined, '', 'too short']) {
+      const r = await run(publishedFx(), { action: 'reopen', period_id: 'p1', reason, confirm: 'July 2026' });
+      expect(r.status).toBe(409);
+      expect(r.body.blockers[0].code).toBe('reopen_reason_required');
+      expect(r.writes).toEqual([]);
+    }
+  });
+
+  it('reopen of a published period is refused without the exact label confirmation, with no write', async () => {
+    for (const confirm of [undefined, '', 'july 2026', 'June 2026']) {
+      const r = await run(publishedFx(), { action: 'reopen', period_id: 'p1', reason: REASON, confirm });
+      expect(r.status).toBe(409);
+      expect(r.body.blockers[0].code).toBe('reopen_confirmation_required');
+      expect(r.writes).toEqual([]);
+    }
+  });
+
+  it('confirmed reopen of a published period unpublishes, returns to draft and records the reason, in one write', async () => {
+    const fx = publishedFx();
+    fx.period.reopen_log = [{ at: 'earlier', by: 'someone', reason: 'older entry', was_published: true }];
+    const r = await run(fx, { action: 'reopen', period_id: 'p1', reason: `  ${REASON}  `, confirm: 'July 2026' });
     expectOnlyStateWrite(r.writes);
-    expect(r.writes[0].data).toMatchObject({ published: false, status: 'draft', bva_import_status: 'draft', finalized_at: null });
+    const d = r.writes[0].data;
+    expect(d).toMatchObject({ published: false, status: 'draft', bva_import_status: 'draft', finalized_at: null });
+    expect(d.reopen_log).toEqual([
+      { at: 'earlier', by: 'someone', reason: 'older entry', was_published: true },
+      { at: NOW.toISOString(), by: ADMIN.email, reason: REASON, was_published: true },
+    ]);
+  });
+
+  it('reopen of a final (unpublished) period needs a reason but no label confirmation', async () => {
+    const fx = draftFixture();
+    fx.period = { ...fx.period, status: 'final', bva_import_status: 'final', finalized_at: 'x' };
+    expect((await run(fx, { action: 'reopen', period_id: 'p1' })).status).toBe(409);
+    const r = await run(fx, { action: 'reopen', period_id: 'p1', reason: REASON });
+    expectOnlyStateWrite(r.writes);
+    expect(r.writes[0].data.reopen_log[0].was_published).toBe(false);
   });
 
   it('reopen of a legacy published period (no BVA metadata) does not invent bva_import_status', async () => {
     const fx = { period: { id: 'p1', label: 'March 2026', status: 'final', published: true }, lines: [] };
-    const r = await run(fx, { action: 'reopen', period_id: 'p1' });
+    const r = await run(fx, { action: 'reopen', period_id: 'p1', reason: REASON, confirm: 'March 2026' });
     expect(r.writes[0].data).toMatchObject({ published: false, status: 'draft' });
     expect(r.writes[0].data).not.toHaveProperty('bva_import_status');
   });

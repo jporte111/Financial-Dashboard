@@ -187,6 +187,10 @@
       },
       "description": "Independent-validation warnings for this period: { code, section, message, sourceValue, calculatedValue, requiresAdminReview, blocksFinalize, overridden, override }"
     },
+    "reopen_log": {
+      "type": "array",
+      "description": "Audit trail of exceptional reopen operations: { at, by, reason, was_published }. Written only by the periodTransition function."
+    },
     "bva_overrides": {
       "type": "object",
       "description": "Map of warning code -> { reason, by, at } recorded when an authorized user accepts a discrepancy"

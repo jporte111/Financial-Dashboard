@@ -11,12 +11,17 @@
 //   check       evaluate finalize and publish rules; writes nothing
 //   finalize    draft -> final (records override / exclusion reasons); NOT published
 //   publish     final -> published
-//   reopen      published or final -> draft (unpublishes; figures untouched)
+//   reopen      EXCEPTIONAL: published or final -> draft (unpublishes; figures
+//               untouched). Requires a written reason; for a published period
+//               also the exact period label as confirmation. Every reopen is
+//               appended to reopen_log. Until draft revisions exist, published
+//               historical reports are meant to stay published.
 //   invalidate  before a re-import: final -> draft; refused if published
 //   set_stage   intermediate review stages only (never 'final'); not when final/published
 
 import { evaluateFinalize, evaluatePublish, recordedOverrides } from './publishGate.ts';
 
+export const MIN_REOPEN_REASON = 10;
 export const STAGES = ['draft', 'transactions_posted', 'categories_reviewed', 'classes_reviewed', 'reports_reviewed'];
 const reply = (status, body) => ({ status, body });
 const today = (now) => now.toISOString().slice(0, 10);
@@ -86,7 +91,16 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
     if (!period.published && period.status !== 'final' && period.bva_import_status !== 'final') {
       return reply(409, { ok: false, action, blockers: [{ code: 'not_final_or_published', message: 'Only a final or published period can be reopened.', overridable: false }] });
     }
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (reason.length < MIN_REOPEN_REASON) {
+      return reply(409, { ok: false, action, blockers: [{ code: 'reopen_reason_required', message: `Reopening is exceptional: give a reason of at least ${MIN_REOPEN_REASON} characters.`, overridable: false }] });
+    }
+    if (period.published && body.confirm !== period.label) {
+      return reply(409, { ok: false, action, blockers: [{ code: 'reopen_confirmation_required', message: 'To remove a published report from the client dashboard, type the period label exactly to confirm.', overridable: false }] });
+    }
+    const log = Array.isArray(period.reopen_log) ? period.reopen_log : [];
     return update({
+      reopen_log: [...log, { at: now.toISOString(), by: who, reason, was_published: !!period.published }],
       published: false,
       status: 'draft',
       ...(period.bva_import_status ? { bva_import_status: 'draft' } : {}),
