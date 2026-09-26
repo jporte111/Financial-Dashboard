@@ -27,20 +27,45 @@ function draftFixture(parsedFactory = cleanParsed) {
   return { period, lines };
 }
 
+// Base44 rejects null for string and number fields with HTTP 422 (observed on
+// the local Base44 server); the fake does the same, so any null write fails.
+function rejectNulls(data) {
+  const k = Object.keys(data).find((key) => data[key] === null);
+  if (k) throw Object.assign(new Error(`Error in field ${k}: Input should be a valid string`), { status: 422 });
+}
+
 // Fake Base44 service role that records every write.
-function fake({ period, lines = [] }, { failUpdate = false } = {}) {
+function fake({ period, lines = [], others = [] }, { failUpdate = false, dropOnCreate = [], raceDuplicate = false, failDelete = false } = {}) {
   const writes = [];
+  const store = new Map([...(period ? [[period.id, period]] : []), ...others.map((p) => [p.id, p])]);
+  let n = 0;
   const svc = {
     entities: {
       ReportingPeriod: {
         get: async (id) => {
-          if (!period || id !== period.id) throw new Error('Object not found');
-          return period;
+          if (!store.has(id)) throw new Error('Object not found');
+          return store.get(id);
+        },
+        filter: async (q) => [...store.values()].filter((p) => Object.entries(q).every(([k, v]) => p[k] === v)),
+        create: async (data) => {
+          rejectNulls(data);
+          writes.push({ entity: 'ReportingPeriod', op: 'create', data });
+          const rec = { id: `new${++n}`, ...data };
+          for (const k of dropOnCreate) delete rec[k];
+          store.set(rec.id, rec);
+          if (raceDuplicate) store.set('racer', { ...rec, id: 'racer' });
+          return rec;
+        },
+        delete: async (id) => {
+          writes.push({ entity: 'ReportingPeriod', op: 'delete', id });
+          if (failDelete) throw new Error('delete failed');
+          store.delete(id);
         },
         update: async (id, data) => {
+          rejectNulls(data);
           writes.push({ entity: 'ReportingPeriod', id, data });
           if (failUpdate) throw new Error('network');
-          return { ...period, ...data };
+          return { ...store.get(id), ...data };
         },
       },
       BudgetLine: {
@@ -49,7 +74,7 @@ function fake({ period, lines = [] }, { failUpdate = false } = {}) {
       },
     },
   };
-  return { base44: { asServiceRole: svc }, writes };
+  return { base44: { asServiceRole: svc }, writes, store };
 }
 
 const run = (fx, body, user = ADMIN, opts) => {
@@ -187,7 +212,7 @@ describe('reopen / invalidate / set_stage', () => {
     const r = await run(fx, { action: 'reopen', period_id: 'p1', reason: `  ${REASON}  `, confirm: 'July 2026' });
     expectOnlyStateWrite(r.writes);
     const d = r.writes[0].data;
-    expect(d).toMatchObject({ published: false, status: 'draft', bva_import_status: 'draft', finalized_at: null });
+    expect(d).toMatchObject({ published: false, status: 'draft', bva_import_status: 'draft', finalized_at: '', finalized_by: '' });
     expect(d.reopen_log).toEqual([
       { at: 'earlier', by: 'someone', reason: 'older entry', was_published: true },
       { at: NOW.toISOString(), by: ADMIN.email, reason: REASON, was_published: true },
@@ -230,7 +255,7 @@ describe('reopen / invalidate / set_stage', () => {
     fx.period = { ...fx.period, status: 'final', bva_import_status: 'final', finalized_at: 'x' };
     const r = await run(fx, { action: 'invalidate', period_id: 'p1' });
     expectOnlyStateWrite(r.writes);
-    expect(r.writes[0].data).toMatchObject({ status: 'draft', bva_import_status: 'draft', finalized_at: null });
+    expect(r.writes[0].data).toMatchObject({ status: 'draft', bva_import_status: 'draft', finalized_at: '', finalized_by: '' });
   });
 
   it('invalidate on a plain draft writes nothing', async () => {
@@ -259,5 +284,75 @@ describe('reopen / invalidate / set_stage', () => {
     expect(r.status).toBe(200);
     expect(r.body.finalize.ok).toBe(false);
     expect(r.writes).toEqual([]);
+  });
+});
+
+describe('no null is ever written (Base44 rejects null with 422)', () => {
+  it('every transition that clears a field writes an empty string instead', async () => {
+    const fx = draftFixture();
+    fx.period = { ...fx.period, status: 'final', bva_import_status: 'final', finalized_at: 'x', finalized_by: 'y', published: true };
+    const r = await run(fx, { action: 'reopen', period_id: 'p1', reason: 'fictional exceptional withdrawal', confirm: 'July 2026' });
+    expect(r.status).toBe(200);
+    for (const w of r.writes) for (const v of Object.values(w.data || {})) expect(v).not.toBeNull();
+  });
+});
+
+describe('create: one verified server-side write, duplicate-safe', () => {
+  const data = { label: 'October 2026', month: 10, year: 2026, total_cash: 5, month_income: null, published: true, status: 'final', reopen_log: ['x'] };
+
+  it('creates draft + unpublished with the state in the same write, ignoring caller state and nulls', async () => {
+    const f = fake({ period: null });
+    const r = await handlePeriodTransition(f.base44, { action: 'create', data }, ADMIN, NOW);
+    expect(r.status).toBe(201);
+    expect(r.body.state).toEqual({ status: 'draft', published: false, bva_import_status: 'draft', finalized_at: '' });
+    const creates = f.writes.filter((w) => w.op === 'create');
+    expect(creates).toHaveLength(1);
+    expect(creates[0].data).toMatchObject({ status: 'draft', published: false, bva_import_status: 'draft', finalized_at: '', finalized_by: '', total_cash: 5 });
+    expect(creates[0].data).not.toHaveProperty('month_income');
+    expect(creates[0].data).not.toHaveProperty('reopen_log');
+  });
+
+  it('refuses a month that already exists (a retry never duplicates) and writes nothing', async () => {
+    const f = fake({ period: null, others: [{ id: 'oct', month: 10, year: 2026, status: 'draft', published: false, bva_import_status: 'draft' }] });
+    const r = await handlePeriodTransition(f.base44, { action: 'create', data }, ADMIN, NOW);
+    expect(r.status).toBe(409);
+    expect(r.body).toMatchObject({ period_id: 'oct', blockers: [{ code: 'period_exists' }] });
+    expect(f.writes).toEqual([]);
+  });
+
+  it('if the stored state cannot be verified, removes the record and reports failure', async () => {
+    const f = fake({ period: null }, { dropOnCreate: ['status', 'published', 'bva_import_status'] });
+    const r = await handlePeriodTransition(f.base44, { action: 'create', data }, ADMIN, NOW);
+    expect(r.status).toBe(500);
+    expect(r.body).toMatchObject({ ok: false, error: 'initialization_failed', period_id: null });
+    expect(f.writes.map((w) => w.op)).toEqual(['create', 'delete']);
+    expect(f.store.size).toBe(0);
+  });
+
+  it('if removal also fails, reports the unverified record (which the gate can never finalize)', async () => {
+    const f = fake({ period: null }, { dropOnCreate: ['published'], failDelete: true });
+    const r = await handlePeriodTransition(f.base44, { action: 'create', data }, ADMIN, NOW);
+    expect(r.status).toBe(500);
+    expect(r.body.period_id).toBeTruthy();
+    const orphan = f.store.get(r.body.period_id);
+    const { evaluateFinalize, evaluatePublish } = await import('../../base44/shared/publishGate.ts');
+    expect(evaluateFinalize(orphan, []).blockers[0].code).toBe('state_uninitialized');
+    expect(evaluatePublish(orphan, []).blockers[0].code).toBe('state_uninitialized');
+  });
+
+  it('a concurrent duplicate is detected after creation; the new record is removed', async () => {
+    const f = fake({ period: null }, { raceDuplicate: true });
+    const r = await handlePeriodTransition(f.base44, { action: 'create', data }, ADMIN, NOW);
+    expect(r.status).toBe(409);
+    expect(r.body.period_id).toBe('racer');
+    expect([...f.store.keys()]).toEqual(['racer']);
+  });
+
+  it('validates input and requires an admin', async () => {
+    const f = fake({ period: null });
+    expect((await handlePeriodTransition(f.base44, { action: 'create', data: { label: 'x', month: 13, year: 2026 } }, ADMIN, NOW)).status).toBe(400);
+    expect((await handlePeriodTransition(f.base44, { action: 'create' }, ADMIN, NOW)).status).toBe(400);
+    expect((await handlePeriodTransition(f.base44, { action: 'create', data }, { role: 'user' }, NOW)).status).toBe(403);
+    expect(f.writes).toEqual([]);
   });
 });

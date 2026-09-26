@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { periodTransition } from '@/lib/periodTransition';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -10,11 +10,14 @@ const MONTHS = ['January','February','March','April','May','June','July','August
 export default function PeriodsManager({ periods, reload, onSelect }) {
   const [month, setMonth] = useState(1);
   const [year, setYear] = useState(new Date().getFullYear());
+  const [error, setError] = useState('');
 
   const create = async () => {
     const start = new Date(year, month - 1, 1);
     const end = endOfMonth(start);
-    await base44.entities.ReportingPeriod.create({
+    // Created and initialized (draft, unpublished) on the server; refused if
+    // the month already exists.
+    const res = await periodTransition('create', null, { data: {
       label: `${MONTHS[month - 1]} ${year}`,
       month: Number(month),
       year: Number(year),
@@ -24,7 +27,9 @@ export default function PeriodsManager({ periods, reload, onSelect }) {
       // status / published take their schema defaults (draft, unpublished);
       // state changes go only through the periodTransition function.
       last_updated: format(new Date(), 'yyyy-MM-dd'),
-    });
+    } });
+    if (!res.ok) setError((res.blockers[0] && res.blockers[0].message) || res.error || 'The period could not be created.');
+    else setError('');
     reload();
   };
 
@@ -42,13 +47,14 @@ export default function PeriodsManager({ periods, reload, onSelect }) {
         </div>
         <Button className="rounded-full" onClick={create}>Create Period</Button>
       </div>
+      {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
       <div className="mt-6 divide-y divide-stone-100">
         {periods.map((p) => (
           <div key={p.id} className="flex items-center justify-between py-3 text-sm">
             <div>
               <p className="font-medium">{p.label}</p>
               <p className="text-xs text-stone-500">
-                {p.status.replace(/_/g, ' ')}{p.published ? ' · published' : ' · not published'}
+                {p.status ? p.status.replace(/_/g, ' ') : 'not initialized (cannot be finalized)'}{p.published ? ' · published' : ' · not published'}
               </p>
             </div>
             <Button variant="ghost" size="sm" className="rounded-full" onClick={() => onSelect(p.id)}>Edit</Button>

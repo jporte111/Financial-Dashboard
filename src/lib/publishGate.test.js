@@ -215,3 +215,21 @@ describe('recordedOverrides', () => {
     expect(out).not.toHaveProperty('required_value_missing:total_cash');
   });
 });
+
+describe('state initialization and cleared values', () => {
+  it('a period without server-initialized state can never be finalized or published', () => {
+    const { period, lines } = staged();
+    for (const k of ['status', 'published']) {
+      const p = { ...period };
+      delete p[k];
+      expect(evaluateFinalize(p, lines).blockers.map((b) => b.code)).toEqual(['state_uninitialized']);
+      expect(evaluatePublish(p, lines).blockers.map((b) => b.code)).toEqual(['state_uninitialized']);
+    }
+  });
+
+  it("finalized_at cleared to '' means not finalized", () => {
+    const { period, lines } = staged();
+    const p = { ...period, status: 'final', bva_import_status: 'final', finalized_at: '', checklist: fullChecklist };
+    expect(evaluatePublish(p, lines).blockers.map((b) => b.code)).toContain('not_final');
+  });
+});

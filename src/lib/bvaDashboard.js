@@ -67,7 +67,8 @@ function reportingLabels(period, elapsedMonths) {
   if (monthIdx == null && period?.month) monthIdx = period.month - 1;
   const displayMonth = monthIdx != null && year ? `${MONTH_NAMES[monthIdx]} ${year}` : period?.label || '';
   const monthWord = monthIdx != null ? MONTH_NAMES[monthIdx] : '';
-  const isFinal = period?.status === 'final' || period?.finalized_at != null;
+  // finalized_at is cleared to '' (Base44 rejects null for string fields), so test truthiness.
+  const isFinal = period?.status === 'final' || !!period?.finalized_at;
   return {
     displayMonth,
     reportingCutoffDate: cutoff ? fmtDate(cutoff) : null,

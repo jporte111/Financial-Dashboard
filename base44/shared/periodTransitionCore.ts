@@ -8,6 +8,10 @@
 //   - financial figures are never written here -- only state and audit fields.
 //
 // Actions:
+//   create      create a new period as draft + unpublished in ONE service-role
+//               write, read it back to verify its state, refuse a month that
+//               already exists (safe to retry), and never report success for
+//               a period whose state could not be verified
 //   check       evaluate finalize and publish rules; writes nothing
 //   finalize    draft -> final (records override / exclusion reasons); NOT published
 //   publish     final -> published
@@ -19,7 +23,13 @@
 //   invalidate  before a re-import: final -> draft; refused if published
 //   set_stage   intermediate review stages only (never 'final'); not when final/published
 
-import { evaluateFinalize, evaluatePublish, recordedOverrides } from './publishGate.ts';
+import { evaluateFinalize, evaluatePublish, recordedOverrides, hasInitializedState } from './publishGate.ts';
+
+// Base44 rejects null for string and number fields (HTTP 422), so a cleared
+// timestamp / name is written as '' -- the gate treats '' as "not set".
+export const CLEARED = '';
+// State written by the server; never accepted from the caller on create.
+export const PROTECTED_FIELDS = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log'];
 
 export const MIN_REOPEN_REASON = 10;
 export const STAGES = ['draft', 'transactions_posted', 'categories_reviewed', 'classes_reviewed', 'reports_reviewed'];
@@ -42,12 +52,13 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
   if (!user) return reply(401, { error: 'Unauthorized' });
   if (user.role !== 'admin') return reply(403, { error: 'Admins only' });
   const { action, period_id } = body;
-  if (!period_id) return reply(400, { error: 'period_id required' });
-  if (!['check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage'].includes(action)) {
+  if (!period_id && action !== 'create') return reply(400, { error: 'period_id required' });
+  if (!['create', 'check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage'].includes(action)) {
     return reply(400, { error: 'unknown action' });
   }
-
   const svc = base44.asServiceRole;
+  if (action === 'create') return createPeriod(svc, body.data, user, now);
+
   const { period, lines } = await load(svc, period_id);
   if (!period) return reply(404, { error: 'Period not found' });
   const who = user.email || user.full_name || 'admin';
@@ -104,8 +115,8 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
       published: false,
       status: 'draft',
       ...(period.bva_import_status ? { bva_import_status: 'draft' } : {}),
-      finalized_at: null,
-      finalized_by: null,
+      finalized_at: CLEARED,
+      finalized_by: CLEARED,
       last_updated: today(now),
     });
   }
@@ -117,7 +128,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
     if (period.status !== 'final' && period.bva_import_status === 'draft' && !period.finalized_at) {
       return reply(200, { ok: true, action, period_id: period.id, state: pickState(period), unchanged: true });
     }
-    return update({ status: 'draft', bva_import_status: 'draft', finalized_at: null, finalized_by: null, last_updated: today(now) });
+    return update({ status: 'draft', bva_import_status: 'draft', finalized_at: CLEARED, finalized_by: CLEARED, last_updated: today(now) });
   }
 
   // set_stage
@@ -126,6 +137,62 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
     return reply(409, { ok: false, action, blockers: [{ code: 'locked', message: 'Final or published periods change state only by reopen.', overridable: false }] });
   }
   return update({ status: body.stage });
+}
+
+// Create a period with its state in a single service-role write, then verify.
+async function createPeriod(svc, data, user, now) {
+  if (!data || typeof data !== 'object') return reply(400, { error: 'data required' });
+  const month = Number(data.month);
+  const year = Number(data.year);
+  if (!data.label || !Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(year)) {
+    return reply(400, { error: 'label, month (1-12) and year are required' });
+  }
+  const sameMonth = async () => (await svc.entities.ReportingPeriod.filter({ month, year }, undefined, 50)) || [];
+
+  // Duplicate-safe: a month that already exists is never created again (a
+  // retry after a lost response finds the first record here).
+  const existing = await sameMonth();
+  if (existing.length) {
+    return reply(409, { ok: false, action: 'create', period_id: existing[0].id, blockers: [{ code: 'period_exists', message: `${data.label} already exists.`, overridable: false }] });
+  }
+
+  const fields = { ...data };
+  for (const k of PROTECTED_FIELDS) delete fields[k];
+  for (const [k, v] of Object.entries(fields)) if (v === null) delete fields[k]; // Base44 rejects null
+  const created = await svc.entities.ReportingPeriod.create({
+    ...fields,
+    month,
+    year,
+    status: 'draft',
+    published: false,
+    bva_import_status: 'draft',
+    finalized_at: CLEARED,
+    finalized_by: CLEARED,
+    last_updated: today(now),
+  });
+
+  // Verify what was actually stored, and resolve a concurrent duplicate.
+  let stored = null;
+  try { stored = await svc.entities.ReportingPeriod.get(created.id); } catch { stored = null; }
+  const verified = !!stored && hasInitializedState(stored) && stored.status === 'draft' && stored.published === false && stored.bva_import_status === 'draft';
+  const others = (await sameMonth()).filter((p) => p.id !== created.id);
+  if (!verified || others.length) {
+    let removed = false;
+    try { await svc.entities.ReportingPeriod.delete(created.id); removed = true; } catch { removed = false; }
+    if (others.length) {
+      return reply(409, { ok: false, action: 'create', period_id: others[0].id, blockers: [{ code: 'period_exists', message: `${data.label} already exists.`, overridable: false }] });
+    }
+    return reply(500, {
+      ok: false,
+      action: 'create',
+      error: 'initialization_failed',
+      message: removed
+        ? 'The period could not be initialized and was removed. Nothing was created.'
+        : 'The period could not be initialized and could not be removed; it has no valid state and cannot be finalized or published.',
+      period_id: removed ? null : created.id,
+    });
+  }
+  return reply(201, { ok: true, action: 'create', period_id: created.id, state: pickState(stored) });
 }
 
 function pickState(p) {

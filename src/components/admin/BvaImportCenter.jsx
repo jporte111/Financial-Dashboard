@@ -102,9 +102,16 @@ export default function BvaImportCenter() {
       // 1. period
       let periodId = plan.periodId;
       if (plan.action === 'create') {
+        // Created on the server as draft + unpublished in one write, verified
+        // before success is reported; an existing month is never duplicated.
         addLog('Creating reporting period…');
-        const created = await base44.entities.ReportingPeriod.create(plan.periodData);
-        periodId = created.id;
+        const created = await periodTransition('create', null, { data: plan.periodData });
+        if (!created.ok || !created.period_id) {
+          const why = (created.blockers[0] && created.blockers[0].message) || created.error;
+          addLog(`✗ The period was not created: ${why}. No budget lines, cash accounts, distributions or transfers were written.`);
+          return;
+        }
+        periodId = created.period_id;
       } else {
         addLog('Updating reporting period…');
         await base44.entities.ReportingPeriod.update(periodId, plan.periodData);

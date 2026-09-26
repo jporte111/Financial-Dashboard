@@ -107,8 +107,17 @@ function dataBlockers(period, lines, overrides) {
   return out;
 }
 
+// A period must carry its protected state (written by the server on create).
+// A record missing it -- e.g. an interrupted creation -- can never be
+// finalized or published.
+// (bva_import_status is checked separately: legacy periods legitimately lack it
+// and are reported as having no validated import.)
+export const hasInitializedState = (p) =>
+  !!p && typeof p.status === 'string' && p.status !== '' && typeof p.published === 'boolean';
+
 export function evaluateFinalize(period, lines = [], overrides = {}) {
   if (!period) return { ok: false, blockers: [blocker('period_not_found', 'Reporting period not found.')] };
+  if (!hasInitializedState(period)) return { ok: false, blockers: [blocker('state_uninitialized', 'This period was not initialized by the server; it cannot be finalized. Re-create it through the import.')] };
   const out = [];
   if (period.published) out.push(blocker('published_read_only', 'This period is published and read-only.'));
   else if (period.bva_import_status === 'final' || period.status === 'final') out.push(blocker('already_final', 'This period is already final.'));
@@ -121,6 +130,7 @@ export function evaluateFinalize(period, lines = [], overrides = {}) {
 
 export function evaluatePublish(period, lines = []) {
   if (!period) return { ok: false, blockers: [blocker('period_not_found', 'Reporting period not found.')] };
+  if (!hasInitializedState(period)) return { ok: false, blockers: [blocker('state_uninitialized', 'This period was not initialized by the server; it cannot be published.')] };
   const out = [];
   if (period.published) out.push(blocker('already_published', 'This period is already published.'));
   if (period.status !== 'final' || period.bva_import_status !== 'final' || !period.finalized_at) {
