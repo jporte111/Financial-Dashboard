@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { usePeriodContext } from '@/lib/usePeriod';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -19,6 +19,12 @@ export default function Admin() {
   const dists = useEntityByPeriod('Distribution', periodId);
   const transfers = useEntityByPeriod('RecurringTransfer', periodId);
   const savings = useEntityByPeriod('SavingsSpend', periodId);
+  // Controlled so the Periods list can open a period's Monthly Data.
+  const [tab, setTab] = useState(() => (period ? 'data' : 'import'));
+  const openPeriod = (id) => {
+    setPeriodId(id);
+    setTab('data'); // read-only there when the period is published or final
+  };
 
   // Final and published periods are read-only through the normal editing
   // workflow until controlled draft revisions exist: a final period has been
@@ -38,7 +44,7 @@ export default function Admin() {
     return <p className="rounded-2xl border border-stone-200 bg-white p-12 text-center text-sm text-stone-500">This area is restricted to the internal team.</p>;
 
   return (
-    <Tabs defaultValue={period ? 'data' : 'import'} className="space-y-6">
+    <Tabs value={tab} onValueChange={setTab} className="space-y-6">
       {!period && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           No reporting period exists yet. Use <strong>Import</strong> to import a BVA workbook — it creates the
@@ -139,7 +145,7 @@ export default function Admin() {
       </TabsContent>
 
       <TabsContent value="periods">
-        <PeriodsManager periods={periods} reload={reload} onSelect={setPeriodId} />
+        <PeriodsManager periods={periods} selectedId={periodId} reload={reload} onOpen={openPeriod} />
       </TabsContent>
     </Tabs>
   );

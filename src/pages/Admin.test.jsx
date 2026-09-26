@@ -102,3 +102,102 @@ describe('Admin with an existing reporting period (regression guard)', () => {
     expect(within(panel).getByText(/Monthly Totals — July 2026/i)).toBeTruthy();
   });
 });
+
+// Periods list → View / Edit. A stateful provider, so selecting a period
+// really changes the selection as it does in the app.
+function StatefulAdmin({ periods, initialId }) {
+  const [periodId, setPeriodId] = React.useState(initialId);
+  const ctx = {
+    user: { role: 'admin', email: 'admin@example.com' },
+    isAdmin: true,
+    periods,
+    periodId,
+    period: periods.find((p) => p.id === periodId) || null,
+    setPeriodId,
+    reload: vi.fn(),
+    ytdMode: true,
+    setYtdMode: vi.fn(),
+    loading: false,
+  };
+  return (
+    <MemoryRouter>
+      <PeriodProvider value={ctx}>
+        <Admin />
+      </PeriodProvider>
+    </MemoryRouter>
+  );
+}
+
+describe('Periods list: View for published / final periods, Edit for drafts', () => {
+  const PERIODS = [
+    { id: 'sep', label: 'September 2026', month: 9, year: 2026, status: 'final', published: true, checklist: {} },
+    { id: 'aug', label: 'August 2026', month: 8, year: 2026, status: 'final', published: false, checklist: {} },
+    { id: 'jul', label: 'July 2026', month: 7, year: 2026, status: 'draft', published: false, checklist: {} },
+  ];
+  const openPeriods = async () => {
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /^Periods$/i }));
+    await waitFor(() => expect(screen.getByText(/Reporting Periods/i)).toBeTruthy());
+  };
+  const editors = () => screen.getByTestId('period-editors');
+
+  it('labels each row by its state', async () => {
+    render(<StatefulAdmin periods={PERIODS} initialId="sep" />);
+    await openPeriods();
+    expect(screen.getByRole('button', { name: 'View September 2026' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'View August 2026' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Edit July 2026' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Edit (September|August)/ })).toBeNull();
+  });
+
+  it('marks the selected period, and the marker moves with the selection', async () => {
+    render(<StatefulAdmin periods={PERIODS} initialId="sep" />);
+    await openPeriods();
+    expect(screen.getByTestId('period-row-sep').getAttribute('aria-current')).toBe('true');
+    expect(within(screen.getByTestId('period-row-sep')).getByText('Selected')).toBeTruthy();
+    expect(screen.getByTestId('period-row-jul').getAttribute('aria-current')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit July 2026' }));
+    await openPeriods();
+    expect(screen.getByTestId('period-row-jul').getAttribute('aria-current')).toBe('true');
+    expect(screen.getByTestId('period-row-sep').getAttribute('aria-current')).toBeNull();
+  });
+
+  it('View on the already-selected published period opens its read-only Monthly Data', async () => {
+    render(<StatefulAdmin periods={PERIODS} initialId="sep" />);
+    await openPeriods();
+    fireEvent.click(screen.getByRole('button', { name: 'View September 2026' }));
+    await waitFor(() => expect(screen.getByRole('tab', { name: /Monthly Data/i }).getAttribute('aria-selected')).toBe('true'));
+    expect(screen.getByText(/Monthly Totals — September 2026/i)).toBeTruthy();
+    expect(screen.getByText(/is published and read-only/i)).toBeTruthy();
+    expect(editors().disabled).toBe(true);
+  });
+
+  it('View on a final (unpublished) period selects it and opens it read-only', async () => {
+    render(<StatefulAdmin periods={PERIODS} initialId="sep" />);
+    await openPeriods();
+    fireEvent.click(screen.getByRole('button', { name: 'View August 2026' }));
+    await waitFor(() => expect(screen.getByText(/Monthly Totals — August 2026/i)).toBeTruthy());
+    expect(screen.getByText(/is final and read-only/i)).toBeTruthy();
+    expect(editors().disabled).toBe(true);
+  });
+
+  it('Edit on a draft selects it and opens Monthly Data with editing enabled', async () => {
+    render(<StatefulAdmin periods={PERIODS} initialId="sep" />);
+    await openPeriods();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit July 2026' }));
+    await waitFor(() => expect(screen.getByText(/Monthly Totals — July 2026/i)).toBeTruthy());
+    expect(screen.queryByText(/read-only/i)).toBeNull();
+    expect(editors().disabled).toBe(false);
+  });
+
+  it('View and Edit only navigate: no backend function call and no write', async () => {
+    const { base44 } = await import('@/api/base44Client');
+    const invoke = vi.spyOn(base44.functions, 'invoke');
+    render(<StatefulAdmin periods={PERIODS} initialId="jul" />);
+    await openPeriods();
+    const before = invoke.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'View September 2026' }));
+    await waitFor(() => expect(screen.getByText(/Monthly Totals — September 2026/i)).toBeTruthy());
+    expect(invoke.mock.calls.length).toBe(before);
+    invoke.mockRestore();
+  });
+});

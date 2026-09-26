@@ -7,7 +7,12 @@ import { format, endOfMonth } from 'date-fns';
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
-export default function PeriodsManager({ periods, reload, onSelect }) {
+// Published and final periods are read-only in the admin workflow, so their
+// row offers View; drafts offer Edit. Both select the period and open its
+// Monthly Data, where the read-only notice and disabled editors apply.
+const isReadOnly = (p) => !!p.published || p.status === 'final';
+
+export default function PeriodsManager({ periods, selectedId, reload, onOpen }) {
   const [month, setMonth] = useState(1);
   const [year, setYear] = useState(new Date().getFullYear());
   const [error, setError] = useState('');
@@ -49,17 +54,29 @@ export default function PeriodsManager({ periods, reload, onSelect }) {
       </div>
       {error && <p className="mt-3 text-sm text-rose-700">{error}</p>}
       <div className="mt-6 divide-y divide-stone-100">
-        {periods.map((p) => (
-          <div key={p.id} className="flex items-center justify-between py-3 text-sm">
+        {periods.map((p) => {
+          const selected = p.id === selectedId;
+          const action = isReadOnly(p) ? 'View' : 'Edit';
+          return (
+          <div
+            key={p.id}
+            className={`flex items-center justify-between py-3 text-sm ${selected ? '-mx-3 rounded-xl bg-stone-50 px-3' : ''}`}
+            aria-current={selected ? 'true' : undefined}
+            data-testid={`period-row-${p.id}`}
+          >
             <div>
-              <p className="font-medium">{p.label}</p>
+              <p className="font-medium">
+                {p.label}
+                {selected && <span className="ml-2 rounded-full bg-stone-900 px-2 py-0.5 text-[10px] font-normal uppercase tracking-wide text-white">Selected</span>}
+              </p>
               <p className="text-xs text-stone-500">
                 {p.status ? p.status.replace(/_/g, ' ') : 'not initialized (cannot be finalized)'}{p.published ? ' · published' : ' · not published'}
               </p>
             </div>
-            <Button variant="ghost" size="sm" className="rounded-full" onClick={() => onSelect(p.id)}>Edit</Button>
+            <Button variant="ghost" size="sm" className="rounded-full" aria-label={`${action} ${p.label}`} onClick={() => onOpen(p.id)}>{action}</Button>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
