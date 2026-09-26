@@ -8,8 +8,10 @@
   "rls": {
     "create": { "user_condition": { "role": "admin" } },
     "read": { "user_condition": { "role": "admin" } },
-    "update": { "user_condition": { "role": "admin" } },
-    "delete": { "user_condition": { "role": "admin" } }
+    // A published period is read-only for direct writes, even for admins.
+    // State changes go through the periodTransition function (service role).
+    "update": { "$and": [{ "user_condition": { "role": "admin" } }, { "data.published": { "$ne": true } }] },
+    "delete": { "$and": [{ "user_condition": { "role": "admin" } }, { "data.published": { "$ne": true } }] }
   },
   "properties": {
     "label": {
@@ -31,6 +33,8 @@
       "format": "date"
     },
     "status": {
+      // Only the periodTransition function (service role) writes this field.
+      "rls": { "write": false },
       "type": "string",
       "enum": [
         "draft",
@@ -47,6 +51,8 @@
       "default": 1
     },
     "published": {
+      // Only the periodTransition function (service role) writes this field.
+      "rls": { "write": false },
       "type": "boolean",
       "default": false
     },
@@ -147,13 +153,19 @@
       "description": "User (email / name) who ran the most recent BVA import"
     },
     "finalized_at": {
+      // Only the periodTransition function (service role) writes this field.
+      "rls": { "write": false },
       "type": "string",
       "description": "ISO timestamp when the period was marked Final"
     },
     "finalized_by": {
+      // Only the periodTransition function (service role) writes this field.
+      "rls": { "write": false },
       "type": "string"
     },
     "bva_import_status": {
+      // Only the periodTransition function (service role) writes this field.
+      "rls": { "write": false },
       "type": "string",
       "enum": [
         "draft",
@@ -192,6 +204,8 @@
       "description": "Audit trail of exceptional reopen operations: { at, by, reason, was_published }. Written only by the periodTransition function."
     },
     "bva_overrides": {
+      // Only the periodTransition function (service role) writes this field.
+      "rls": { "write": false },
       "type": "object",
       "description": "Map of warning code -> { reason, by, at } recorded when an authorized user accepts a discrepancy"
     },

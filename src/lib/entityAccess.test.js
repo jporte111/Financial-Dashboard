@@ -22,9 +22,22 @@ const FINANCIAL = [
   'Transaction',
 ];
 
+// A published ReportingPeriod is read-only for direct writes (even admins);
+// its state fields are writable only by the periodTransition function.
+const UNPUBLISHED_ADMIN = { $and: [ADMIN, { 'data.published': { $ne: true } }] };
+const PROTECTED_STATE = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides'];
+
 describe('entity access rules', () => {
-  it.each(FINANCIAL)('%s is admin-only for create, read, update and delete', (name) => {
+  it.each(FINANCIAL.filter((n) => n !== 'ReportingPeriod'))('%s is admin-only for create, read, update and delete', (name) => {
     expect(load(name).rls).toEqual({ create: ADMIN, read: ADMIN, update: ADMIN, delete: ADMIN });
+  });
+
+  it('ReportingPeriod: admin-only, and update/delete only while not published', () => {
+    expect(load('ReportingPeriod').rls).toEqual({ create: ADMIN, read: ADMIN, update: UNPUBLISHED_ADMIN, delete: UNPUBLISHED_ADMIN });
+  });
+
+  it.each(PROTECTED_STATE)('ReportingPeriod.%s is never directly writable', (field) => {
+    expect(load('ReportingPeriod').properties[field].rls).toEqual({ write: false });
   });
 
   it('every entity other than the built-in User is covered by the list above', () => {
@@ -35,7 +48,9 @@ describe('entity access rules', () => {
   it('no field-level rule re-opens a financial field', () => {
     for (const name of FINANCIAL) {
       for (const [field, def] of Object.entries(load(name).properties || {})) {
-        if (def && def.rls) expect({ name, field, rls: def.rls }).toEqual({ name, field, rls: { read: ADMIN, write: ADMIN } });
+        if (!def || !def.rls) continue;
+        const allowed = name === 'ReportingPeriod' && PROTECTED_STATE.includes(field) ? { write: false } : { read: ADMIN, write: ADMIN };
+        expect({ name, field, rls: def.rls }).toEqual({ name, field, rls: allowed });
       }
     }
   });
