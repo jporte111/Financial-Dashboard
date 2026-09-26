@@ -9,7 +9,14 @@ export async function periodTransition(action, periodId, extra = {}) {
     const res = await base44.functions.invoke('periodTransition', { action, period_id: periodId, ...extra });
     return { ok: true, ...(res?.data ?? res) };
   } catch (e) {
-    const data = e?.data || {};
-    return { ok: false, status: e?.status, blockers: data.blockers || [], error: data.error || e?.message || 'Request failed' };
+    // Function calls reject with a raw AxiosError (body at e.response.data);
+    // other SDK calls use Base44Error (body at e.data). Read both.
+    const data = e?.response?.data ?? e?.data ?? {};
+    return {
+      ok: false,
+      status: e?.response?.status ?? e?.status,
+      blockers: Array.isArray(data.blockers) ? data.blockers : [],
+      error: data.message || data.error || e?.message || 'Request failed',
+    };
   }
 }

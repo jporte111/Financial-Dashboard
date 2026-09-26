@@ -36,7 +36,9 @@ console.error = () => {}; // the SDK logs every failed request in development
 
 const mk = (token) => createClient({ appId: APP, serverUrl: SERVER, requiresAuth: false, ...(token ? { token } : {}) });
 const status = (e) => e?.status || e?.response?.status || 'err';
-const attempt = async (fn) => { try { return { ok: true, value: await fn() }; } catch (e) { return { ok: false, status: status(e), data: e?.data }; } };
+// Entity calls reject with Base44Error (body at e.data); function calls with a
+// raw AxiosError (body at e.response.data).
+const attempt = async (fn) => { try { return { ok: true, value: await fn() }; } catch (e) { return { ok: false, status: status(e), data: e?.response?.data ?? e?.data }; } };
 let passed = 0, failed = 0;
 const check = (name, ok, detail = '') => { ok ? passed++ : failed++; log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  (${detail})` : ''}`); };
 
