@@ -4,26 +4,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
+import { TOTALS_FIELDS as FIELDS, totalsWrite } from '@/lib/periodTotals';
+import { effectiveRecord } from '../../../base44/shared/sourceMissing.ts';
 
-const FIELDS = [
-  ['total_cash', 'Total Cash'],
-  ['ytd_income', 'YTD Income'],
-  ['ytd_expenses', 'YTD Expenses'],
-  ['month_income', 'Current Month Income'],
-  ['month_expenses', 'Current Month Expenses'],
-  ['distributions_ytd', 'Distributions YTD'],
-  ['savings_in_ytd', 'Savings / Distributions In'],
-  ['savings_spend_ytd', 'Expenses Paid From Savings'],
-  ['months_elapsed', 'Months Elapsed (budget pace)'],
-];
-
-// These fields legitimately have no value until one is entered. A blank input
-// must be saved as null ("Source value missing" / "Mapping requires review"),
-// never coerced to a fabricated 0 that reads as a confirmed figure.
-const NULLABLE = new Set(['month_income', 'month_expenses', 'savings_in_ytd', 'savings_spend_ytd']);
-
+// A blank input means "missing" -- shown as missing everywhere, never saved as
+// a fabricated 0 (see src/lib/periodTotals.js).
 export default function PeriodTotalsForm({ period, reload }) {
-  const [form, setForm] = useState(period || {});
+  const [form, setForm] = useState(effectiveRecord(period || {}));
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
@@ -36,22 +23,21 @@ export default function PeriodTotalsForm({ period, reload }) {
   }
 
   const save = async () => {
+    const write = totalsWrite(period, form);
+    if (write.error) {
+      toast({ title: 'Not saved', description: write.error });
+      return;
+    }
     setSaving(true);
-    const payload = Object.fromEntries(
-      FIELDS.map(([k]) => {
-        const raw = form[k];
-        const blank = raw === '' || raw == null;
-        if (blank && NULLABLE.has(k)) return [k, null];
-        return [k, Number(raw || 0)];
-      })
-    );
-    await base44.entities.ReportingPeriod.update(period.id, {
-      ...payload,
-      last_updated: new Date().toISOString().slice(0, 10),
-    });
-    setSaving(false);
-    toast({ title: 'Monthly totals saved' });
-    reload();
+    try {
+      await base44.entities.ReportingPeriod.update(period.id, write.data);
+      toast({ title: 'Monthly totals saved' });
+      reload();
+    } catch (e) {
+      toast({ title: 'Not saved', description: e?.data?.message || e?.message || 'The update was refused.' });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (

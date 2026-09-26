@@ -19,8 +19,7 @@
       "type": "string"
     },
     "balance": {
-      "type": "number",
-      "default": 0
+      "type": "number"
     },
     "as_of_date": {
       "type": "string",

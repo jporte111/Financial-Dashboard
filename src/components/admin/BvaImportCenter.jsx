@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { parseBvaWorkbook } from '@/lib/bvaParser';
 import { validateBva } from '@/lib/bvaValidation';
@@ -11,6 +11,9 @@ import { Label } from '@/components/ui/label';
 import { FileSpreadsheet, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+// A missing figure is shown as missing, never as $0.00.
+const money = (v) => (v == null ? 'Missing in workbook' : fmtCurrency(v));
 
 function Line({ label, value, sub = null }) {
   return (
@@ -30,13 +33,61 @@ export default function BvaImportCenter() {
   const [applied, setApplied] = useState(null); // { periodId }
   const [overrides, setOverrides] = useState({});
   const [blockers, setBlockers] = useState([]); // refusals returned by the server-side gate
+  const [previous, setPrevious] = useState(null); // latest earlier validated period: what to expect
 
   const addLog = (l) => setLog((x) => [...x, l]);
 
+  // Read-only: the latest validated BVA period before the target month sets
+  // which sections this workbook is expected to contain (watch list,
+  // transfers) and which reporting convention it used.
+  useEffect(() => {
+    if (!parsed || !confirm.month || !confirm.year) {
+      setPrevious(null);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const target = Number(confirm.year) * 12 + Number(confirm.month);
+        const periods = await base44.entities.ReportingPeriod.list('-year', 300);
+        const prior = periods
+          .filter((p) => p.bva_import_status === 'final' && Number(p.year) * 12 + Number(p.month) < target)
+          .sort((a, b) => b.year - a.year || b.month - a.month)[0];
+        if (!prior) {
+          if (!cancelled) setPrevious(null);
+          return;
+        }
+        const [lines, transfers] = await Promise.all([
+          base44.entities.BudgetLine.filter({ period_id: prior.id }, undefined, 1000),
+          base44.entities.RecurringTransfer.filter({ period_id: prior.id }, undefined, 500),
+        ]);
+        if (!cancelled) {
+          setPrevious({
+            label: prior.label,
+            month: prior.month,
+            year: prior.year,
+            cutoffDate: prior.reporting_cutoff_date || null,
+            detailCodes: lines.filter((l) => l.bva_detail && l.qb_code).map((l) => String(l.qb_code)),
+            transferCount: transfers.length,
+          });
+        }
+      } catch {
+        if (!cancelled) setPrevious(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [parsed, confirm.month, confirm.year]);
+
   const validation = useMemo(() => {
     if (!parsed) return null;
-    return validateBva(parsed, { cutoffDate: confirm.cutoffDate || parsed.meta.cutoffDate });
-  }, [parsed, confirm.cutoffDate]);
+    return validateBva(parsed, {
+      cutoffDate: confirm.cutoffDate || parsed.meta.cutoffDate,
+      period: confirm.month && confirm.year ? { month: confirm.month, year: confirm.year } : null,
+      previous,
+    });
+  }, [parsed, confirm.cutoffDate, confirm.month, confirm.year, previous]);
 
   const onFile = async (f) => {
     setFile(f);
@@ -105,7 +156,7 @@ export default function BvaImportCenter() {
         // Created on the server as draft + unpublished in one write, verified
         // before success is reported; an existing month is never duplicated.
         addLog('Creating reporting period…');
-        const created = await periodTransition('create', null, { data: plan.periodData });
+        const created = await periodTransition('create', null, { data: plan.periodWrite });
         if (!created.ok || !created.period_id) {
           const why = (created.blockers[0] && created.blockers[0].message) || created.error;
           addLog(`✗ The period was not created: ${why}. No budget lines, cash accounts, distributions or transfers were written.`);
@@ -114,7 +165,7 @@ export default function BvaImportCenter() {
         periodId = created.period_id;
       } else {
         addLog('Updating reporting period…');
-        await base44.entities.ReportingPeriod.update(periodId, plan.periodData);
+        await base44.entities.ReportingPeriod.update(periodId, plan.periodWrite);
       }
 
       // 2. child entities
@@ -131,7 +182,7 @@ export default function BvaImportCenter() {
         }
         for (const u of bucket.toUpdate) await base44.entities[entity].update(u.id, u.data);
         for (const id of bucket.toDelete) await base44.entities[entity].delete(id);
-        addLog(`${name}: +${bucket.toCreate.length} ~${bucket.toUpdate.length} -${bucket.toDelete.length}`);
+        addLog(`${name}: +${bucket.toCreate.length} ~${bucket.toUpdate.length} -${bucket.toDelete.length}${bucket.replaced?.length ? ` (${bucket.replaced.length} replaced: a value became missing)` : ''}`);
       }
 
       addLog('✓ Import applied as Draft (not visible to clients). Review discrepancies below, then finalize.');
@@ -165,8 +216,11 @@ export default function BvaImportCenter() {
   };
 
   const R = validation?.reconciled;
-  const openWarnings = (validation?.warnings || []).filter((w) => w.blocksFinalize && !overrides[w.code]);
+  const openWarnings = (validation?.warnings || []).filter((w) => w.blocksFinalize && (w.overridable === false || !overrides[w.code]));
+  const mustFix = openWarnings.filter((w) => w.overridable === false);
   const canFinalize = applied && !applied.finalized && openWarnings.length === 0;
+  const SECTION_LABEL = { cash: 'Cash', distributions: 'Distributions', income: 'Income', expenseSummary: 'Expense groups', detail: 'Watch list (DETAIL)', transfers: 'Recurring transfers' };
+  const sectionCount = { cash: R?.cash.accounts.length, distributions: R?.distributions.entities.length, income: R?.income.categories.length, expenseSummary: R?.expenses.groups.length, detail: R?.detail.categories.length, transfers: R?.transfers.items.length };
 
   return (
     <div className="space-y-5">
@@ -214,11 +268,34 @@ export default function BvaImportCenter() {
               </div>
             </div>
             <p className="mt-2 text-xs text-stone-400">
-              Workbook title: <span className="font-medium">{parsed.meta.titleText || '—'}</span> · sheet tab:{' '}
-              <span className="font-medium">{parsed.meta.sheetName}</span> · detected cutoff:{' '}
+              Workbook title: <span className="font-medium">{parsed.meta.titleText || '—'}</span> · sheets:{' '}
+              <span className="font-medium">{(parsed.meta.sheetNames || [parsed.meta.sheetName]).join(', ')}</span> · detected cutoff:{' '}
               <span className="font-medium">{parsed.meta.cutoffDate || 'none'}</span>. Confirm above — the period is not
               inferred from the filename.
             </p>
+            {parsed.sections && (
+              <div className="mt-3 rounded-xl border border-stone-100 bg-stone-50 p-3 text-xs text-stone-600" data-testid="section-inventory">
+                <p className="mb-1 uppercase tracking-[0.12em] text-stone-400">Sections found</p>
+                {Object.keys(SECTION_LABEL).map((k) => {
+                  const sec = parsed.sections[k] || { status: 'absent' };
+                  const where = sec.sheet != null ? `sheet ${sec.sheet + 1}, row ${sec.row}${sec.layout && sec.layout !== 'labelled' ? `, ${sec.layout}` : ''}` : '';
+                  return (
+                    <div key={k} className="flex justify-between gap-3">
+                      <span>{SECTION_LABEL[k]}</span>
+                      <span className={sec.status === 'parsed' ? 'text-stone-600' : 'text-rose-700'}>
+                        {sec.status === 'parsed' ? `${sectionCount[k] ?? 0} row(s) · ${where}` : `${sec.status}${where ? ` · ${where}` : ''}`}
+                      </span>
+                    </div>
+                  );
+                })}
+                {(parsed.sections.informational || []).length > 0 && (
+                  <p className="mt-1 text-stone-400">
+                    Recognized but not imported:{' '}
+                    {parsed.sections.informational.map((i) => `${i.type.replace(/_/g, ' ')} (sheet ${i.sheet + 1}, row ${i.row})`).join('; ')}
+                  </p>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -228,19 +305,19 @@ export default function BvaImportCenter() {
           <div className="rounded-2xl border border-stone-200 bg-white p-6">
             <p className="text-xs uppercase tracking-[0.14em] text-stone-500">Extracted &amp; independently validated</p>
             <div className="mt-3 divide-y divide-stone-100">
-              <Line label="Elapsed months / expected pace" value={`${validation.elapsedMonths} / ${fmtPct(validation.pacePct * 100)}`} />
-              <Line label="Total Cash" value={fmtCurrency(R.cash.total)} />
-              <Line label="YTD Income" value={fmtCurrency(R.income.actualTotal)} />
-              <Line label="Annual Budgeted Income" value={fmtCurrency(R.income.budgetTotal)} sub={R.income.workbookBudgetTotal != null && R.income.workbookBudgetTotal !== R.income.budgetTotal ? `workbook ${fmtCurrency(R.income.workbookBudgetTotal)}` : ''} />
-              <Line label="YTD Expenses" value={fmtCurrency(R.expenses.actualTotal)} />
-              <Line label="Annual Budgeted Expenses" value={fmtCurrency(R.expenses.budgetTotal)} />
-              <Line label="Overall variance to expected pace" value={`${fmtCurrency(R.expenses.overall.varianceToPace)} (${fmtPct(R.expenses.overall.variancePct * 100)})`} />
+              <Line label="Elapsed months / expected pace" value={`${validation.elapsedMonths ?? "missing"} / ${validation.elapsedMonths == null ? "—" : fmtPct(validation.pacePct * 100)}`} />
+              <Line label="Total Cash" value={money(R.cash.total)} />
+              <Line label="YTD Income" value={money(R.income.actualTotal)} />
+              <Line label="Annual Budgeted Income" value={money(R.income.budgetTotal)} sub={R.income.workbookBudgetTotal != null && R.income.workbookBudgetTotal !== R.income.budgetTotal ? `workbook ${money(R.income.workbookBudgetTotal)}` : ''} />
+              <Line label="YTD Expenses" value={money(R.expenses.actualTotal)} />
+              <Line label="Annual Budgeted Expenses" value={money(R.expenses.budgetTotal)} />
+              <Line label="Overall variance to expected pace" value={`${money(R.expenses.overall.varianceToPace)} (${R.expenses.overall.variancePct == null ? "—" : fmtPct(R.expenses.overall.variancePct * 100)})`} />
               <Line
                 label="Distributions YTD (calculated from quarterly distributions)"
-                value={fmtCurrency(R.distributions.entitySum)}
-                sub={R.distributions.workbookReportedTotal != null && !R.distributions.reconciled ? `workbook displayed ${fmtCurrency(R.distributions.workbookReportedTotal)}` : ''}
+                value={money(R.distributions.entitySum)}
+                sub={R.distributions.workbookReportedTotal != null && !R.distributions.reconciled ? `workbook displayed ${money(R.distributions.workbookReportedTotal)}` : ''}
               />
-              <Line label="Recurring transfers total" value={fmtCurrency(R.transfers.total)} />
+              <Line label="Recurring transfers total" value={money(R.transfers.total)} />
               <Line
                 label="Monitored detail categories"
                 value={R.detail.categories.length}
@@ -267,7 +344,10 @@ export default function BvaImportCenter() {
                             workbook {fmtCurrency(w.sourceValue)} · calculated {fmtCurrency(w.calculatedValue)} · Δ {fmtCurrency(w.difference)}
                           </p>
                         )}
-                        {w.blocksFinalize && (
+                        {w.blocksFinalize && w.overridable === false && (
+                          <p className="mt-2 text-xs font-medium text-rose-700">Must be corrected in the workbook — this cannot be overridden.</p>
+                        )}
+                        {w.blocksFinalize && w.overridable !== false && (
                           <div className="mt-2">
                             <Input
                               placeholder="Override reason (required to finalize)"
@@ -304,7 +384,11 @@ export default function BvaImportCenter() {
             </Button>
           )}
           {applied && !applied.finalized && openWarnings.length > 0 && (
-            <span className="text-xs text-rose-700">{openWarnings.length} reconciliation(s) need an override reason before finalizing.</span>
+            <span className="text-xs text-rose-700">
+              {mustFix.length > 0
+                ? `${mustFix.length} issue(s) must be corrected in the workbook before finalizing.`
+                : `${openWarnings.length} reconciliation(s) need an override reason before finalizing.`}
+            </span>
           )}
           {applied?.finalized && <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Final</span>}
         </div>

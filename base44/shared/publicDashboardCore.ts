@@ -18,6 +18,7 @@
 // separate, later change) so this module alters no figure the client sees.
 
 import { transactionsForCategory } from './categoryTransactionsCore.ts';
+import { effectiveRecord } from './sourceMissing.ts';
 
 export const isPublishedFinal = (p) => !!p && !!p.published && p.status === 'final';
 
@@ -30,7 +31,10 @@ export const PUBLIC_PERIOD_FIELDS = [
 
 const numOrNull = (v) => (v != null ? Number(v) : null);
 
-export const publicPeriod = (p) => ({
+// A field listed in source_missing_fields is served as missing (null), never
+// as the stale number behind it. The list itself is not served.
+export const publicPeriod = (raw) => publicPeriodFields(effectiveRecord(raw));
+const publicPeriodFields = (p) => ({
   id: p.id,
   label: p.label,
   month: p.month,

@@ -8,6 +8,7 @@
 // untouched.
 
 import { round2, n, elapsedMonthsFromCutoff } from './bva.js';
+import { withoutNulls, nextMissingList, MISSING_MARKER } from '../../base44/shared/sourceMissing.ts';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -22,26 +23,71 @@ const monthBounds = (year, month) => {
 };
 
 const normKey = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+// Keeps a missing value missing: null stays null (it is left out of the write).
+const r2 = (v) => (v == null ? null : round2(v));
+
+// Record fields Base44 manages; never copied from an old row into a new one.
+const SYSTEM_FIELDS = new Set(['id', 'created_date', 'updated_date', 'created_by', 'created_by_id', 'is_sample', 'app_id', 'period_id']);
+const hasValue = (v) => v !== null && v !== undefined && v !== '';
 
 // Reconcile a desired child-entity list against what already exists for the
 // period. `keyOf` yields a stable natural key. Returns create / update / delete
 // buckets; delete ids are always rows that belong to THIS period only.
+//
+// Every payload is null-free (Base44 rejects null). A missing value is left
+// out -- but leaving a field out of an update keeps its old value, so when a
+// re-import turns a stored value into a missing one the row is REPLACED
+// (deleted and re-created) instead; fields the import does not own (admin
+// notes, overrides, ...) are carried over to the new row.
 function reconcileChildren(existing, desired, keyOf) {
   const byKey = new Map();
   for (const row of existing || []) byKey.set(keyOf(row), row);
   const toCreate = [];
   const toUpdate = [];
+  const replaced = [];
   const seen = new Set();
   for (const d of desired) {
     const k = keyOf(d);
     seen.add(k);
     const match = byKey.get(k);
-    if (match) toUpdate.push({ id: match.id, data: d });
-    else toCreate.push(d);
+    const data = withoutNulls(d);
+    if (!match) {
+      toCreate.push(data);
+      continue;
+    }
+    const cleared = Object.keys(d).filter((f) => d[f] == null && hasValue(match[f]));
+    if (!cleared.length) {
+      toUpdate.push({ id: match.id, data });
+      continue;
+    }
+    const carried = Object.fromEntries(Object.entries(match).filter(([f, v]) => !SYSTEM_FIELDS.has(f) && !(f in d) && hasValue(v)));
+    toCreate.push({ ...carried, ...data });
+    replaced.push({ id: match.id, cleared });
   }
-  const toDelete = (existing || []).filter((row) => !seen.has(keyOf(row))).map((row) => row.id);
-  return { toCreate, toUpdate, toDelete };
+  const toDelete = [
+    ...(existing || []).filter((row) => !seen.has(keyOf(row))).map((row) => row.id),
+    ...replaced.map((x) => x.id),
+  ];
+  return { toCreate, toUpdate, toDelete, replaced };
 }
+
+// Numeric period fields the import writes. A missing one is listed in the
+// period's source_missing_fields (see base44/shared/sourceMissing.ts).
+export const IMPORT_NUMERIC_FIELDS = [
+  'total_cash', 'ytd_income', 'ytd_expenses', 'month_income', 'month_expenses', 'annual_budgeted_income',
+  'annual_budgeted_income_workbook', 'annual_budgeted_expenses', 'distributions_ytd', 'months_elapsed',
+];
+const IMPORT_TEXT_FIELDS = ['reporting_cutoff_date', 'source_filename', 'imported_by'];
+
+// Stable key for a budget line: detail rows by account code, the three
+// expense-group summaries by group (so "FIXED" and "FIXED COSTS" are the same
+// line), income lines by code or name.
+const lineKey = (l) =>
+  l.bva_detail
+    ? `d:${normKey(l.qb_code || l.category)}`
+    : ['fixed', 'variable', 'discretionary'].includes(l.budget_group)
+      ? `s:group:${l.budget_group}`
+      : `s:${normKey(l.qb_code || l.category)}`;
 
 /**
  * @param {object} args
@@ -63,11 +109,12 @@ export function planBvaImport(args) {
   const match = existingPeriods.find((p) => Number(p.month) === month && Number(p.year) === year) || null;
   const action = match ? 'update' : 'create';
   const { start, end } = monthBounds(year, month);
-  const elapsedMonths = elapsedMonthsFromCutoff(cutoffDate) || month;
+  // Pace comes only from the confirmed cutoff date; without one it is missing
+  // (never guessed from the reporting month).
+  const elapsedMonths = cutoffDate ? elapsedMonthsFromCutoff(cutoffDate) : null;
 
-  const incomeBudgetCalc = round2(R.income.budgetTotal);
-  const incomeBudgetWorkbook =
-    parsed?.income?.reportedBudgetTotal != null ? round2(parsed.income.reportedBudgetTotal) : null;
+  const incomeBudgetCalc = r2(R.income.budgetTotal);
+  const incomeBudgetWorkbook = r2(parsed?.income?.reportedBudgetTotal);
 
   const periodData = {
     label: `${MONTH_NAMES[month - 1]} ${year}`,
@@ -80,24 +127,24 @@ export function planBvaImport(args) {
     source_filename: confirm.filename || parsed?.meta?.titleText || null,
     imported_at: new Date().toISOString(),
     imported_by: confirm.importedBy || null,
-    // scalars
-    total_cash: round2(R.cash.total),
-    ytd_income: round2(R.income.actualTotal),
-    ytd_expenses: round2(R.expenses.actualTotal),
+    // scalars (null = missing in the workbook; never 0)
+    total_cash: r2(R.cash.total),
+    ytd_income: r2(R.income.actualTotal),
+    ytd_expenses: r2(R.expenses.actualTotal),
     // Current-month totals are written as null when the workbook's month
     // column was blank — the dashboard then shows "Source value missing"
     // rather than a fabricated $0.00. A present-but-zero column stores 0.
-    month_income: R.income.monthActualTotal == null ? null : round2(R.income.monthActualTotal),
-    month_expenses: R.expenses.monthActualTotal == null ? null : round2(R.expenses.monthActualTotal),
+    month_income: r2(R.income.monthActualTotal),
+    month_expenses: r2(R.expenses.monthActualTotal),
     annual_budgeted_income: incomeBudgetCalc,
     annual_budgeted_income_workbook: incomeBudgetWorkbook,
-    annual_budgeted_expenses: round2(R.expenses.budgetTotal),
+    annual_budgeted_expenses: r2(R.expenses.budgetTotal),
     // Distributions YTD is the sum of each entity's own quarters — always
     // authoritative. The workbook's displayed grand total is a manually-typed
     // cell range that has been wrong before; it is retained only inside
     // bva_parsed_source (below) for BVA Review's audit trail, never stored
     // here as the dashboard figure.
-    distributions_ytd: round2(R.distributions.entitySum),
+    distributions_ytd: r2(R.distributions.entitySum),
     bva_validation_warnings: validation.warnings,
     bva_parsed_source: parsed,
     // No state fields (status / published / bva_import_status / finalized_*):
@@ -116,8 +163,8 @@ export function planBvaImport(args) {
       bva_detail: false,
       group_confirmed: true,
       month_actual: g.monthActual == null ? null : round2(n(g.monthActual)),
-      ytd_actual: round2(g.actual),
-      annual_budget: round2(g.annual),
+      ytd_actual: r2(g.actual),
+      annual_budget: r2(g.annual),
       pace_method: 'even',
       drilldown_enabled: true,
     });
@@ -130,8 +177,8 @@ export function planBvaImport(args) {
       bva_detail: false,
       group_confirmed: true,
       month_actual: c.monthActual == null ? null : round2(n(c.monthActual)),
-      ytd_actual: round2(c.actualYtd),
-      annual_budget: round2(c.annualBudget),
+      ytd_actual: r2(c.actualYtd),
+      annual_budget: r2(c.annualBudget),
       pace_method: 'even',
       drilldown_enabled: true,
     });
@@ -148,25 +195,21 @@ export function planBvaImport(args) {
       bva_detail: true,
       group_confirmed: !!mapped,
       month_actual: d.monthActual == null ? null : round2(n(d.monthActual)),
-      ytd_actual: round2(d.actual),
-      annual_budget: round2(d.annual),
+      ytd_actual: r2(d.actual),
+      annual_budget: r2(d.annual),
       pace_method: 'even',
       drilldown_enabled: true,
     });
   }
 
-  const budgetLines = reconcileChildren(
-    existing.budgetLines,
-    desiredLines,
-    (l) => `${l.bva_detail ? 'd' : 's'}:${normKey(l.qb_code || l.category)}`
-  );
+  const budgetLines = reconcileChildren(existing.budgetLines, desiredLines, lineKey);
 
   // --- Cash accounts ------------------------------------------------
   const cashAccounts = reconcileChildren(
     existing.cashAccounts,
     R.cash.accounts.map((a, i) => ({
       name: a.name,
-      balance: round2(a.balance),
+      balance: r2(a.balance),
       as_of_date: cutoffDate,
       sort_order: i + 1,
       account_type: /trade|schwab|merrill|brokerage|invest/i.test(a.name) ? 'investment' : 'bank',
@@ -179,10 +222,10 @@ export function planBvaImport(args) {
     existing.distributions,
     R.distributions.entities.map((e) => ({
       entity_name: e.name,
-      q1: round2(e.q1),
-      q2: round2(e.q2),
-      q3: round2(e.q3),
-      q4: round2(e.q4),
+      q1: r2(e.q1),
+      q2: r2(e.q2),
+      q3: r2(e.q3),
+      q4: r2(e.q4),
     })),
     (e) => normKey(e.entity_name)
   );
@@ -191,18 +234,27 @@ export function planBvaImport(args) {
   const transfers = reconcileChildren(
     existing.transfers,
     R.transfers.items.map((t) => ({
-      amount: round2(t.amount),
+      amount: r2(t.amount),
       source: t.source || null,
       purpose: t.purpose || null,
       visible_to_client: true,
     })),
-    (t) => `${round2(t.amount)}:${normKey(t.purpose || t.source)}`
+    (t) => `${t.amount == null ? 'missing' : round2(t.amount)}:${normKey(t.purpose || t.source)}`
   );
+
+  // The period write: null-free, with the missing numeric fields listed by
+  // name. Text fields the import owns are cleared with '' (Base44 accepts it).
+  const periodWrite = {
+    ...withoutNulls(periodData),
+    ...Object.fromEntries(IMPORT_TEXT_FIELDS.map((f) => [f, periodData[f] == null ? '' : periodData[f]])),
+    [MISSING_MARKER]: nextMissingList(match, IMPORT_NUMERIC_FIELDS, periodData),
+  };
 
   return {
     action,
     periodId: match ? match.id : null,
     periodData,
+    periodWrite,
     budgetLines,
     cashAccounts,
     distributions,

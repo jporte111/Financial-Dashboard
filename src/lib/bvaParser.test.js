@@ -66,7 +66,8 @@ describe('parseBvaWorkbook', () => {
   it('parses distribution entities with quarters and the reported per-entity YTD', () => {
     expect(parsed.distributions.entities).toHaveLength(2);
     const beta = parsed.distributions.entities[1];
-    expect(beta).toMatchObject({ name: 'Beta', q1: 40, q2: 0, q3: 0, q4: 0, reportedYtd: 10 });
+    // Blank quarter cells stay blank (null) -- never a manufactured 0.
+    expect(beta).toMatchObject({ name: 'Beta', q1: 40, q2: null, q3: null, q4: null, reportedYtd: 10 });
     expect(parsed.distributions.reportedTotal).toBe(40);
   });
 

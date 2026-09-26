@@ -18,6 +18,7 @@ import {
   flagsForCategory,
   MONTHS_IN_YEAR,
 } from './bva.js';
+import { effectiveRecord } from '../../base44/shared/sourceMissing.ts';
 
 const EXPENSE_GROUPS = ['fixed', 'variable', 'discretionary'];
 const GROUP_LABEL = { fixed: 'Fixed', variable: 'Variable', discretionary: 'Discretionary' };
@@ -117,7 +118,8 @@ function pickState({ imported = false, needsReview = false, discrepancy = false,
  * @param {object} opts { month?: boolean }  // false = Year to Date, true = This Month
  */
 export function buildBvaDashboard(data, opts = {}) {
-  const period = data.period || {};
+  // Fields listed in source_missing_fields are missing, whatever is stored.
+  const period = effectiveRecord(data.period || {});
   const monthMode = !!opts.month;
   const mode = monthMode ? 'month' : 'ytd';
   const lines = Array.isArray(data.budgetLines) ? data.budgetLines : [];

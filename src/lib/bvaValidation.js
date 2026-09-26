@@ -20,6 +20,11 @@
 //     source spreadsheet's formula can be fixed.
 //   - A period cannot be marked Final while a required reconciliation fails
 //     unless an explicit override is recorded for it.
+//   - Missing vs zero: a blank source value stays null all the way through.
+//     A total with a missing part is itself missing (null), never a partial
+//     sum. A missing Actual YTD / Annual Budget / balance / amount blocks
+//     finalization and cannot be overridden -- the workbook must be corrected.
+//   - Warnings carry `overridable`: false means no reason can clear it.
 
 import { n, round2, expectedPacePct, computeYtd, elapsedMonthsFromCutoff } from './bva.js';
 
@@ -28,6 +33,35 @@ export const SEVERITY = { ERROR: 'error', WARNING: 'warning' };
 const eq = (a, b) => round2(a) === round2(b);
 const money = (v) => `$${Math.abs(round2(v)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const QUARTER_LABEL = { q1: 'Q1', q2: 'Q2', q3: 'Q3', q4: 'Q4' };
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+const r2 = (v) => (v == null ? null : round2(v));
+
+// Sum of values; null when any part is missing (a partial sum is not a total).
+const sumOrNull = (values) => (values.some((v) => v == null) ? null : round2(values.reduce((s, v) => s + n(v), 0)));
+
+// YTD figures for one line, or all-null figures when a primary value is missing.
+function ytdOrNull(actualYtd, annualBudget, elapsedMonths) {
+  if (actualYtd == null || annualBudget == null) {
+    return {
+      mode: 'ytd',
+      actual: actualYtd == null ? null : n(actualYtd),
+      annual: annualBudget == null ? null : n(annualBudget),
+      remaining: null,
+      percentUsed: null,
+      pacePct: expectedPacePct(elapsedMonths),
+      expectedYtdBudget: null,
+      varianceToPace: null,
+      variancePct: null,
+      favorable: null,
+      status: null,
+      missing: true,
+    };
+  }
+  return computeYtd({ actualYtd, annualBudget }, elapsedMonths);
+}
 
 // When the workbook's displayed quarterly column subtotals are available,
 // pinpoint exactly which quarter disagrees with the independently-summed
@@ -58,6 +92,7 @@ function warn(list, w) {
   list.push({
     requiresAdminReview: false,
     blocksFinalize: false,
+    overridable: true,
     severity: SEVERITY.WARNING,
     ...w,
     sourceValue: w.sourceValue == null ? null : round2(w.sourceValue),
@@ -67,31 +102,151 @@ function warn(list, w) {
   });
 }
 
+// Months between the reporting period and the month its cutoff date falls in.
+const monthIndex = (year, month) => Number(year) * 12 + (Number(month) - 1);
+function isMonthEnd(iso) {
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return false;
+  const next = new Date(d.getTime() + 86400000);
+  return next.getUTCDate() === 1;
+}
+const cutoffYm = (iso) => {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? { year: Number(m[1]), month: Number(m[2]) } : null;
+};
+const ymLabel = (ym) => `${MONTH_NAMES[ym.month - 1]} ${ym.year}`;
+
 /**
  * @param {object} parsed  output of parseBvaWorkbook()
- * @param {object} opts     { elapsedMonths?, cutoffDate?, overrides? }
- *   overrides: { [warningCode]: { reason, by, at } } — clears blocksFinalize.
+ * @param {object} opts     { elapsedMonths?, cutoffDate?, overrides?, period?, previous? }
+ *   overrides: { [warningCode]: { reason, by, at } } — clears blocksFinalize
+ *              for overridable warnings only.
+ *   period:    { month, year } — the reporting period being imported into.
+ *   previous:  { month, year, label?, cutoffDate?, detailCodes?, transferCount? } —
+ *              the latest earlier BVA period, which sets what this import is
+ *              expected to contain.
  */
 export function validateBva(parsed, opts = {}) {
   const warnings = [];
   const overrides = opts.overrides || {};
-  const elapsedMonths =
-    opts.elapsedMonths != null ? opts.elapsedMonths : elapsedMonthsFromCutoff(opts.cutoffDate || parsed?.meta?.cutoffDate);
+  const cleared = (code) => !!overrides[code];
+  const cutoffDate = opts.cutoffDate || parsed?.meta?.cutoffDate || null;
+  const elapsedMonths = opts.elapsedMonths != null ? opts.elapsedMonths : cutoffDate ? elapsedMonthsFromCutoff(cutoffDate) : null;
   const pacePct = expectedPacePct(elapsedMonths);
+  const sections = parsed?.sections || null; // absent on parses stored before the multi-sheet parser
 
   // Carry through any structural problems the parser reported.
   for (const pw of parsed?.parseWarnings || []) {
+    const overridable = pw.overridable !== false;
     warn(warnings, {
       code: pw.code || 'parse_warning',
       section: pw.section || 'workbook',
       message: pw.message,
       requiresAdminReview: true,
+      overridable,
+      blocksFinalize: !!pw.blocksFinalize && !(overridable && cleared(pw.code || 'parse_warning')),
     });
   }
+  const has = (code) => warnings.some((w) => w.code === code);
+  const block = (w) => warn(warnings, { requiresAdminReview: true, ...w, blocksFinalize: w.overridable === false ? true : !cleared(w.code) });
+
+  // ---- Cutoff date and reporting month -----------------------------------
+  if (!cutoffDate) {
+    if (!has('cutoff_date_conflict')) {
+      block({ code: 'cutoff_date_required', section: 'meta', message: 'No reporting cutoff date is set. Confirm it before finalizing; pace is not calculated without it.', overridable: false });
+    }
+  } else if (!isMonthEnd(cutoffDate)) {
+    block({ code: 'cutoff_not_month_end', section: 'meta', message: `The cutoff date ${cutoffDate} is not the last day of a month; elapsed-month pace assumes it is.` });
+  }
+  const cutYm = cutoffYm(cutoffDate);
+  const period = opts.period && opts.period.month && opts.period.year ? { month: Number(opts.period.month), year: Number(opts.period.year) } : null;
+  if (period && cutYm) {
+    const offset = monthIndex(period.year, period.month) - monthIndex(cutYm.year, cutYm.month);
+    if (offset === 0) {
+      warn(warnings, { code: 'period_is_cutoff_month', section: 'meta', message: `${ymLabel(period)} reports data through ${cutoffDate} (the same month).`, requiresAdminReview: true });
+    } else if (offset === 1) {
+      warn(warnings, { code: 'period_follows_cutoff_month', section: 'meta', message: `${ymLabel(period)} is the report month; its data runs through ${cutoffDate} (the previous month end).`, requiresAdminReview: true });
+    } else {
+      block({ code: 'reporting_month_mismatch', section: 'meta', message: `The reporting period ${ymLabel(period)} does not match the cutoff date ${cutoffDate}: it must be the cutoff month or the month after it.`, overridable: false });
+    }
+    const t = parsed?.meta?.titleMonth ? { month: parsed.meta.titleMonth, year: parsed.meta.titleYear } : null;
+    if (t && (t.month !== period.month || t.year !== period.year)) {
+      block({ code: 'title_month_mismatch', section: 'meta', message: `The workbook title names ${ymLabel(t)}, but it is being imported as ${ymLabel(period)}.` });
+    }
+    const prev = opts.previous;
+    const prevCut = prev && cutoffYm(prev.cutoffDate);
+    if (prev && prevCut) {
+      const prevOffset = monthIndex(prev.year, prev.month) - monthIndex(prevCut.year, prevCut.month);
+      if (prev.cutoffDate === cutoffDate) {
+        block({ code: 'cutoff_already_reported', section: 'meta', message: `${prev.label || 'The previous period'} already reports data through ${cutoffDate}.` });
+      } else if ((offset === 0 || offset === 1) && prevOffset !== offset) {
+        block({
+          code: 'reporting_convention_changed',
+          section: 'meta',
+          message: `${prev.label || 'The previous period'} used a cutoff ${prevOffset === 1 ? 'one month before' : 'in'} its reporting month; this import uses a cutoff ${offset === 1 ? 'one month before' : 'in'} it.`,
+        });
+      }
+    }
+  }
+
+  // ---- Sections: expected but absent, empty or unreadable ----------------
+  const prev = opts.previous || null;
+  const status = (key) => (sections && sections[key] ? sections[key].status : null);
+  if (sections) {
+    for (const [key, label] of [['cash', 'cash'], ['income', 'income'], ['expenseSummary', 'expense summary']]) {
+      if (status(key) === 'absent' || status(key) === 'empty') {
+        block({ code: `section_missing:${key}`, section: key, message: `The workbook has no ${label} figures; this section is required.`, overridable: false });
+      }
+    }
+    if (status('distributions') === 'absent' || status('distributions') === 'empty') {
+      block({ code: 'section_missing:distributions', section: 'distributions', message: 'The workbook has no distributions block; Distributions YTD is required.', overridable: false });
+    }
+    const expectDetail = !!(prev && Array.isArray(prev.detailCodes) && prev.detailCodes.length);
+    if (status('detail') === 'absent') {
+      if (expectDetail) {
+        block({ code: 'detail_section_expected', section: 'detail', message: `No DETAIL (watch-list) section was found, but ${prev.label || 'the previous period'} had ${prev.detailCodes.length} watch-list categories. Correct the workbook, or record why the watch list is intentionally absent.` });
+      } else {
+        warn(warnings, { code: 'detail_section_absent', section: 'detail', message: 'This workbook has no DETAIL (watch-list) section, and none is expected from the previous period.', requiresAdminReview: true });
+      }
+    } else if (status('detail') === 'empty') {
+      block({ code: 'detail_section_empty', section: 'detail', message: 'The DETAIL (watch-list) section was found but has no category rows.' });
+    }
+    const expectTransfers = !!(prev && prev.transferCount > 0);
+    if (status('transfers') === 'absent') {
+      if (expectTransfers) {
+        block({ code: 'transfers_section_expected', section: 'transfers', message: `No recurring transfers were found, but ${prev.label || 'the previous period'} had ${prev.transferCount}. Correct the workbook, or record why there are none this month.` });
+      } else {
+        warn(warnings, { code: 'transfers_section_absent', section: 'transfers', message: 'This workbook has no recurring transfers section, and none is expected from the previous period.', requiresAdminReview: true });
+      }
+    } else if (status('transfers') === 'empty') {
+      block({ code: 'transfers_section_empty', section: 'transfers', message: 'The recurring transfers section was found but has no rows with an amount.' });
+    }
+  }
+  // Watch-list categories that were present last period but are missing now.
+  const detailNow = new Set((parsed?.detail?.categories || []).map((d) => d.code).filter(Boolean));
+  if (prev && Array.isArray(prev.detailCodes) && detailNow.size) {
+    const gone = prev.detailCodes.filter((c) => c && !detailNow.has(c));
+    if (gone.length) {
+      block({ code: 'detail_rows_missing_vs_prior', section: 'detail', message: `Watch-list categories present in ${prev.label || 'the previous period'} are missing from this workbook: ${gone.join(', ')}.` });
+    }
+  }
+
+  // ---- Missing primary values (never read as $0.00) ----------------------
+  const missingIn = (key, label, rows, fields) => {
+    const bad = rows.filter((x) => fields.some((f) => x[f] == null));
+    if (bad.length) {
+      block({
+        code: `source_value_missing:${key}`,
+        section: key,
+        message: `${label}: ${bad.map((x) => x.name || x.code || 'unnamed row').join(', ')} ${bad.length > 1 ? 'have' : 'has'} a blank ${fields.join(' / ')} in the workbook. A blank is not $0.00; correct the workbook.`,
+        overridable: false,
+      });
+    }
+  };
 
   // ---- Pace sanity: elapsed-months pace vs the workbook's proxy ----------
   const proxy = parsed?.expenseSummary?.pacePctProxy;
-  if (proxy != null && Math.abs(n(proxy) - pacePct) > 0.005) {
+  if (proxy != null && elapsedMonths != null && Math.abs(n(proxy) - pacePct) > 0.005) {
     warn(warnings, {
       code: 'pace_proxy_divergence',
       section: 'expenses',
@@ -105,9 +260,10 @@ export function validateBva(parsed, opts = {}) {
 
   // ---- Cash: accounts sum to Total Cash --------------------------------
   const cashAccounts = parsed?.cash?.accounts || [];
-  const cashSum = round2(cashAccounts.reduce((s, a) => s + n(a.balance), 0));
+  missingIn('cash', 'Cash', cashAccounts.map((a) => ({ name: a.name, balance: a.balance })), ['balance']);
+  const cashSum = cashAccounts.length ? sumOrNull(cashAccounts.map((a) => a.balance)) : null;
   const cashReported = parsed?.cash?.reportedTotal;
-  if (cashReported != null && !eq(cashSum, cashReported)) {
+  if (cashReported != null && cashSum != null && !eq(cashSum, cashReported)) {
     warn(warnings, {
       code: 'cash_total_mismatch',
       section: 'cash',
@@ -121,8 +277,9 @@ export function validateBva(parsed, opts = {}) {
 
   // ---- Income: categories sum to Total Income; budget total recalculated
   const incomeCats = parsed?.income?.categories || [];
-  const incomeActualSum = round2(incomeCats.reduce((s, c) => s + n(c.actualYtd), 0));
-  const incomeBudgetSum = round2(incomeCats.reduce((s, c) => s + n(c.annualBudget), 0));
+  missingIn('income', 'Income', incomeCats, ['actualYtd', 'annualBudget']);
+  const incomeActualSum = incomeCats.length ? sumOrNull(incomeCats.map((c) => c.actualYtd)) : null;
+  const incomeBudgetSum = incomeCats.length ? sumOrNull(incomeCats.map((c) => c.annualBudget)) : null;
   // Current-month total is null when the workbook's month column was blank —
   // "unknown", not a confirmed $0. Only a present-but-zero column yields 0.
   const incomeMonthPresent = parsed?.income?.hasMonthColumn === true || incomeCats.some((c) => c.monthActual != null);
@@ -132,7 +289,7 @@ export function validateBva(parsed, opts = {}) {
   const incomeActualReported = parsed?.income?.reportedActualTotal;
   const incomeBudgetReported = parsed?.income?.reportedBudgetTotal;
 
-  if (incomeActualReported != null && !eq(incomeActualSum, incomeActualReported)) {
+  if (incomeActualReported != null && incomeActualSum != null && !eq(incomeActualSum, incomeActualReported)) {
     warn(warnings, {
       code: 'income_actual_mismatch',
       section: 'income',
@@ -143,7 +300,7 @@ export function validateBva(parsed, opts = {}) {
       blocksFinalize: !overrides.income_actual_mismatch,
     });
   }
-  if (incomeBudgetReported != null && !eq(incomeBudgetSum, incomeBudgetReported)) {
+  if (incomeBudgetReported != null && incomeBudgetSum != null && !eq(incomeBudgetSum, incomeBudgetReported)) {
     warn(warnings, {
       code: 'income_budget_workbook_mismatch',
       section: 'income',
@@ -157,19 +314,23 @@ export function validateBva(parsed, opts = {}) {
     });
   }
 
-  const incomeRemaining = round2(incomeBudgetSum - incomeActualSum);
-  const incomePercentUsed = incomeBudgetSum !== 0 ? incomeActualSum / incomeBudgetSum : 0;
+  const incomeRemaining = incomeActualSum == null || incomeBudgetSum == null ? null : round2(incomeBudgetSum - incomeActualSum);
+  const incomePercentUsed = incomeActualSum == null || incomeBudgetSum == null ? null : incomeBudgetSum !== 0 ? incomeActualSum / incomeBudgetSum : 0;
 
   // ---- Expenses: Fixed + Variable + Discretionary ---------------------
   const groupsRaw = parsed?.expenseSummary?.groups || [];
+  missingIn('expenses', 'Expense groups', groupsRaw, ['actualYtd', 'annualBudget']);
+  if (groupsRaw.length && ['fixed', 'variable', 'discretionary'].some((k) => !groupsRaw.some((g) => g.key === k))) {
+    block({ code: 'expense_group_missing', section: 'expenses', message: 'The expense summary does not have all three groups (Fixed, Variable, Discretionary).', overridable: false });
+  }
   const groups = groupsRaw.map((g) => ({
     key: g.key,
     name: g.name || g.key,
     monthActual: g.monthActual == null ? null : n(g.monthActual),
-    ...computeYtd({ actualYtd: g.actualYtd, annualBudget: g.annualBudget }, elapsedMonths),
+    ...ytdOrNull(g.actualYtd, g.annualBudget, elapsedMonths),
   }));
-  const expActualSum = round2(groups.reduce((s, g) => s + g.actual, 0));
-  const expBudgetSum = round2(groups.reduce((s, g) => s + g.annual, 0));
+  const expActualSum = groups.length ? sumOrNull(groups.map((g) => g.actual)) : null;
+  const expBudgetSum = groups.length ? sumOrNull(groups.map((g) => g.annual)) : null;
   const expenseMonthPresent = parsed?.expenseSummary?.hasMonthColumn === true || groups.some((g) => g.monthActual != null);
   const expenseMonthSum = expenseMonthPresent
     ? round2(groups.reduce((s, g) => s + n(g.monthActual), 0))
@@ -177,7 +338,7 @@ export function validateBva(parsed, opts = {}) {
   const expActualReported = parsed?.expenseSummary?.reportedActualTotal;
   const expBudgetReported = parsed?.expenseSummary?.reportedBudgetTotal;
 
-  if (expActualReported != null && !eq(expActualSum, expActualReported)) {
+  if (expActualReported != null && expActualSum != null && !eq(expActualSum, expActualReported)) {
     warn(warnings, {
       code: 'expense_actual_mismatch',
       section: 'expenses',
@@ -188,7 +349,7 @@ export function validateBva(parsed, opts = {}) {
       blocksFinalize: !overrides.expense_actual_mismatch,
     });
   }
-  if (expBudgetReported != null && !eq(expBudgetSum, expBudgetReported)) {
+  if (expBudgetReported != null && expBudgetSum != null && !eq(expBudgetSum, expBudgetReported)) {
     warn(warnings, {
       code: 'expense_budget_mismatch',
       section: 'expenses',
@@ -201,7 +362,7 @@ export function validateBva(parsed, opts = {}) {
     });
   }
 
-  const overall = computeYtd({ actualYtd: expActualSum, annualBudget: expBudgetSum }, elapsedMonths);
+  const overall = ytdOrNull(expActualSum, expBudgetSum, elapsedMonths);
 
   // ---- Distributions: entity-quarter sum is authoritative --------------
   // Each entity's own quarters (q1+q2+q3+q4) are always independently
@@ -209,24 +370,39 @@ export function validateBva(parsed, opts = {}) {
   // says. The workbook's grand-total cell is retained only as an audit
   // source value; when it disagrees, the calculated sum wins outright and no
   // override is required — this is an arithmetic correction, not an open
-  // question.
-  const distEntities = (parsed?.distributions?.entities || []).map((e) => {
+  // question. A blank quarter cell means no distribution was entered for it:
+  // it adds nothing, stays blank (never stored as $0.00), and is pointed out
+  // when the quarter has already begun.
+  const rawEntities = parsed?.distributions?.entities || [];
+  const distEntities = rawEntities.map((e) => {
     const calculatedYtd = round2(n(e.q1) + n(e.q2) + n(e.q3) + n(e.q4));
     return {
       name: e.name,
-      q1: n(e.q1),
-      q2: n(e.q2),
-      q3: n(e.q3),
-      q4: n(e.q4),
+      q1: e.q1 == null ? null : n(e.q1),
+      q2: e.q2 == null ? null : n(e.q2),
+      q3: e.q3 == null ? null : n(e.q3),
+      q4: e.q4 == null ? null : n(e.q4),
       calculatedYtd,
       reportedYtd: e.reportedYtd == null ? null : round2(e.reportedYtd),
       matches: e.reportedYtd == null ? null : eq(calculatedYtd, e.reportedYtd),
     };
   });
-  const distEntitySum = round2(distEntities.reduce((s, e) => s + e.calculatedYtd, 0));
+  if (cutYm) {
+    const begun = ['q1', 'q2', 'q3', 'q4'].filter((q, i) => cutYm.month >= i * 3 + 1);
+    const blanks = distEntities.flatMap((e) => begun.filter((q) => e[q] == null).map((q) => `${e.name} ${QUARTER_LABEL[q]}`));
+    if (blanks.length) {
+      warn(warnings, {
+        code: 'distribution_quarter_blank',
+        section: 'distributions',
+        message: `Blank distribution cells for quarters that have begun: ${blanks.join(', ')}. They add nothing to Distributions YTD; confirm none was received.`,
+        requiresAdminReview: true,
+      });
+    }
+  }
+  const distEntitySum = distEntities.length ? round2(distEntities.reduce((s, e) => s + e.calculatedYtd, 0)) : null;
   const distWorkbookTotal = parsed?.distributions?.reportedTotal ?? null;
   let distributionsReconciled = false;
-  if (distWorkbookTotal != null) {
+  if (distWorkbookTotal != null && distEntitySum != null) {
     distributionsReconciled = eq(distEntitySum, distWorkbookTotal) && distEntities.every((e) => e.matches !== false);
     if (!distributionsReconciled) {
       const gapExplanation = explainDistributionGap(distEntities, parsed?.distributions?.reportedQuarterTotals);
@@ -247,9 +423,10 @@ export function validateBva(parsed, opts = {}) {
 
   // ---- Recurring transfers: their amounts define the total -----------
   const transferItems = parsed?.transfers?.items || [];
-  const transfersTotal = round2(transferItems.reduce((s, t) => s + n(t.amount), 0));
+  missingIn('transfers', 'Recurring transfers', transferItems.map((t) => ({ name: t.purpose || t.source, amount: t.amount })), ['amount']);
+  const transfersTotal = sumOrNull(transferItems.map((t) => t.amount));
   const transfersReported = parsed?.transfers?.reportedTotal;
-  if (transfersReported != null && !eq(transfersTotal, transfersReported)) {
+  if (transfersReported != null && transfersTotal != null && !eq(transfersTotal, transfersReported)) {
     warn(warnings, {
       code: 'transfers_total_mismatch',
       section: 'transfers',
@@ -261,13 +438,17 @@ export function validateBva(parsed, opts = {}) {
   }
 
   // ---- Detail: recompute every monitored category (ignore workbook E/F/G/H)
-  const detailCategories = (parsed?.detail?.categories || []).map((d) => ({
+  const detailRaw = parsed?.detail?.categories || [];
+  // A watch-list row needs both figures once it has either (rows with none
+  // are not imported by the parser).
+  missingIn('detail', 'Watch-list categories', detailRaw.filter((d) => (d.actualYtd == null) !== (d.annualBudget == null)), ['actualYtd', 'annualBudget']);
+  const detailCategories = detailRaw.map((d) => ({
     code: d.code || null,
     name: d.name,
     group: d.group || 'unassigned',
     groupConfirmed: !!d.groupConfirmed,
     monthActual: d.monthActual == null ? null : n(d.monthActual),
-    ...computeYtd({ actualYtd: d.actualYtd, annualBudget: d.annualBudget }, elapsedMonths),
+    ...ytdOrNull(d.actualYtd, d.annualBudget, elapsedMonths),
   }));
 
   const blocksFinalize = warnings.some((w) => w.blocksFinalize);
@@ -280,16 +461,16 @@ export function validateBva(parsed, opts = {}) {
     blocksFinalize,
     openReconciliations,
     reconciled: {
-      cash: { accounts: cashAccounts.map((a) => ({ name: a.name, balance: round2(a.balance) })), total: cashSum },
+      cash: { accounts: cashAccounts.map((a) => ({ name: a.name, balance: r2(a.balance) })), total: cashSum },
       income: {
         categories: incomeCats.map((c) => ({
           code: c.code || null,
           name: c.name,
           monthActual: c.monthActual == null ? null : round2(c.monthActual),
-          actualYtd: round2(c.actualYtd),
-          annualBudget: round2(c.annualBudget),
-          remaining: round2(n(c.annualBudget) - n(c.actualYtd)),
-          percentUsed: n(c.annualBudget) !== 0 ? n(c.actualYtd) / n(c.annualBudget) : 0,
+          actualYtd: r2(c.actualYtd),
+          annualBudget: r2(c.annualBudget),
+          remaining: c.actualYtd == null || c.annualBudget == null ? null : round2(n(c.annualBudget) - n(c.actualYtd)),
+          percentUsed: c.actualYtd == null || c.annualBudget == null ? null : n(c.annualBudget) !== 0 ? n(c.actualYtd) / n(c.annualBudget) : 0,
         })),
         actualTotal: incomeActualSum,
         budgetTotal: incomeBudgetSum, // calculated wins
@@ -304,8 +485,8 @@ export function validateBva(parsed, opts = {}) {
         groups,
         actualTotal: expActualSum,
         budgetTotal: expBudgetSum,
-        remaining: round2(expBudgetSum - expActualSum),
-        percentUsed: expBudgetSum !== 0 ? expActualSum / expBudgetSum : 0,
+        remaining: expActualSum == null || expBudgetSum == null ? null : round2(expBudgetSum - expActualSum),
+        percentUsed: expActualSum == null || expBudgetSum == null ? null : expBudgetSum !== 0 ? expActualSum / expBudgetSum : 0,
         overall,
         // null = the workbook carried no current-month expense figures.
         monthActualTotal: expenseMonthSum,
@@ -322,7 +503,7 @@ export function validateBva(parsed, opts = {}) {
         workbookReportedTotal: distWorkbookTotal,
         reconciled: distributionsReconciled,
       },
-      transfers: { items: transferItems.map((t) => ({ ...t, amount: round2(t.amount) })), total: transfersTotal },
+      transfers: { items: transferItems.map((t) => ({ ...t, amount: r2(t.amount) })), total: transfersTotal },
       detail: { categories: detailCategories },
     },
   };

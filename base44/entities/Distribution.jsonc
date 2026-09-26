@@ -19,20 +19,16 @@
       "type": "string"
     },
     "q1": {
-      "type": "number",
-      "default": 0
+      "type": "number"
     },
     "q2": {
-      "type": "number",
-      "default": 0
+      "type": "number"
     },
     "q3": {
-      "type": "number",
-      "default": 0
+      "type": "number"
     },
     "q4": {
-      "type": "number",
-      "default": 0
+      "type": "number"
     }
   },
   "required": [

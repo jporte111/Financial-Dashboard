@@ -53,10 +53,38 @@ pipeline:
 - `buildBvaDashboard` yields `null` (with matching `*Missing` booleans) rather than 0 when
   a value is unknown; the This-Month section state is `MISSING` (whole month column blank)
   distinct from `NO_MONTH_ACTUAL_ACTIVITY`/`NO_MONTH_ACTIVITY` (a real imported 0).
-- `PeriodTotalsForm` saves a blank input as `null`, not `0`.
+- `PeriodTotalsForm` saves a blank input as missing, not `0` (see below).
+- The parser keeps every blank cell `null` (YTD, budget, balances, quarters, amounts).
+  A total with a missing part is `null`, not a partial sum. A missing Actual YTD /
+  Annual Budget / balance / transfer amount blocks finalization and cannot be
+  overridden. A watch-list row with no figures at all is not imported (notice only).
 
-Tests for this behavior live in `src/lib/bvaMissingVsZero.test.js` — extend it, don't
-bypass it, when touching any of the above.
+**Never write `null`.** Base44 rejects `null` in number / string fields (HTTP 422) and
+has no nullable schema type. So a missing value is written by *omission*: import
+payloads go through `withoutNulls` (`base44/shared/sourceMissing.ts`), and the fields
+that can be missing have **no schema default** (a `"default": 0` would silently turn
+an omitted value into $0.00). Because an omitted field cannot clear an older stored
+value, a `ReportingPeriod` also lists its missing numeric fields in
+`source_missing_fields`; every reader (publish gate, dashboard model, public period,
+Admin totals form) goes through `effectiveRecord`, which treats a listed field as
+missing. Child rows whose value becomes missing on re-import are replaced (delete +
+create, carrying admin-owned fields) by `bvaImport.js`.
+
+Tests for this behavior live in `src/lib/bvaMissingVsZero.test.js` and
+`src/lib/bvaMissingValues.test.js` — extend them, don't bypass them, when touching any
+of the above. `scripts/verify-local-missing-values.mjs` checks it against a local
+`base44 dev` server.
+
+## Workbook layout and sections
+
+The parser scans **every sheet** and finds each block by its label (the watch list and
+transfers have been moved to a second sheet before). Header-less fallbacks run only in
+the simplified layout (no EXPENSE header). Every numeric cell must be read by a section
+or recognized as informational (over/under, off-balance accounts, notes); anything else
+is reported as `unrecognized_content` and blocks until reviewed. Duplicate sections that
+disagree are never combined or chosen between. A section that is absent is a notice only
+when the previous validated period did not have it either. The workbook title names the
+report month; the period must be the cutoff month or the month after it.
 
 ## Distributions YTD — entity-quarter sum is authoritative
 

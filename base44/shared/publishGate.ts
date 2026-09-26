@@ -14,6 +14,8 @@
 // stays published and readable; if it is reopened, it must pass these rules
 // (including having a validated BVA import) before it can be published again.
 
+import { effectiveRecord } from './sourceMissing.ts';
+
 const MONTHS_IN_YEAR = 12;
 
 // Period totals that must come from the workbook. A missing value blocks.
@@ -78,21 +80,41 @@ function dataBlockers(period, lines, overrides) {
   } else if (expected !== null && Number(period.months_elapsed) !== expected) {
     out.push(blocker('pace_inconsistent', `Elapsed months (${period.months_elapsed ?? 'missing'}) do not match the cutoff date (${expected}).`));
   }
+  // A period reports either its own month's data or the previous month's
+  // (the workbook is titled by report month); any other gap is an error.
+  if (expected !== null && period.month && period.year) {
+    const d = new Date(period.reporting_cutoff_date);
+    const offset = (Number(period.year) * 12 + Number(period.month) - 1) - (d.getUTCFullYear() * 12 + d.getUTCMonth());
+    if (offset !== 0 && offset !== 1) {
+      out.push(blocker('cutoff_period_mismatch', 'The reporting cutoff date is neither in this reporting month nor the month before it.'));
+    }
+  }
 
   const summaries = lines.filter((l) => !l.bva_detail);
   const missingGroups = EXPENSE_GROUPS.filter((g) => !summaries.some((l) => l.budget_group === g));
   if (missingGroups.length || !summaries.some((l) => l.budget_group === 'income')) {
     out.push(blocker('import_incomplete', `Imported budget lines are incomplete (missing: ${[...missingGroups, ...(summaries.some((l) => l.budget_group === 'income') ? [] : ['income'])].join(', ')}).`));
   }
-  for (const l of summaries) {
-    for (const f of ['ytd_actual', 'annual_budget']) {
-      if (isMissing(l[f])) out.push(blocker(`required_line_value_missing:${l.id}:${f}`, `"${l.category}" is missing ${f}.`));
-    }
+  // Primary figures: a blank is missing, never $0.00, and cannot be
+  // overridden. Summary lines need both. A watch-list DETAIL row with no
+  // figures at all is not material; one with only one of the two is missing
+  // the other.
+  for (const l of lines) {
+    const missing = ['ytd_actual', 'annual_budget'].filter((f) => isMissing(l[f]));
+    if (l.bva_detail && missing.length !== 1) continue;
+    for (const f of missing) out.push(blocker(`required_line_value_missing:${l.id}:${f}`, `"${l.category}" is missing ${f}.`));
   }
 
   for (const w of Array.isArray(period.bva_validation_warnings) ? period.bva_validation_warnings : []) {
-    if (!w || !w.blocksFinalize || w.overridden) continue;
+    if (!w || !w.blocksFinalize) continue;
     const code = `open_reconciliation:${w.code}`;
+    // A warning marked not overridable (a missing value, a conflicting
+    // section, a wrong reporting month) must be fixed in the workbook.
+    if (w.overridable === false) {
+      out.push(blocker(code, w.message || `Validation ${w.code} must be corrected in the workbook.`, false));
+      continue;
+    }
+    if (w.overridden) continue;
     if (!hasReason(overrides[code]) && !hasReason(overrides[w.code])) {
       out.push(blocker(code, w.message || `Reconciliation ${w.code} is open.`, true));
     }
@@ -115,7 +137,9 @@ function dataBlockers(period, lines, overrides) {
 export const hasInitializedState = (p) =>
   !!p && typeof p.status === 'string' && p.status !== '' && typeof p.published === 'boolean';
 
-export function evaluateFinalize(period, lines = [], overrides = {}) {
+export function evaluateFinalize(rawPeriod, lines = [], overrides = {}) {
+  // Fields listed as missing are missing, whatever number is stored.
+  const period = effectiveRecord(rawPeriod);
   if (!period) return { ok: false, blockers: [blocker('period_not_found', 'Reporting period not found.')] };
   if (!hasInitializedState(period)) return { ok: false, blockers: [blocker('state_uninitialized', 'This period was not initialized by the server; it cannot be finalized. Re-create it through the import.')] };
   const out = [];
@@ -128,7 +152,8 @@ export function evaluateFinalize(period, lines = [], overrides = {}) {
   return { ok: out.length === 0, blockers: out };
 }
 
-export function evaluatePublish(period, lines = []) {
+export function evaluatePublish(rawPeriod, lines = []) {
+  const period = effectiveRecord(rawPeriod);
   if (!period) return { ok: false, blockers: [blocker('period_not_found', 'Reporting period not found.')] };
   if (!hasInitializedState(period)) return { ok: false, blockers: [blocker('state_uninitialized', 'This period was not initialized by the server; it cannot be published.')] };
   const out = [];

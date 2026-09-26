@@ -47,8 +47,7 @@
       "default": "draft"
     },
     "months_elapsed": {
-      "type": "number",
-      "default": 1
+      "type": "number"
     },
     "published": {
       // Only the periodTransition function (service role) writes this field.
@@ -68,16 +67,13 @@
       "format": "date"
     },
     "total_cash": {
-      "type": "number",
-      "default": 0
+      "type": "number"
     },
     "ytd_income": {
-      "type": "number",
-      "default": 0
+      "type": "number"
     },
     "ytd_expenses": {
-      "type": "number",
-      "default": 0
+      "type": "number"
     },
     "month_income": {
       "type": "number",
@@ -88,8 +84,7 @@
       "description": "Current-month expenses. Null / absent means not provided by the BVA workbook (dashboard shows 'Source value missing'); an explicit 0 is a confirmed zero."
     },
     "distributions_ytd": {
-      "type": "number",
-      "default": 0
+      "type": "number"
     },
     "savings_in_ytd": {
       "type": "number",
@@ -176,7 +171,6 @@
     },
     "annual_budgeted_income": {
       "type": "number",
-      "default": 0,
       "description": "Independently calculated total annual income budget (sum of income line budgets)"
     },
     "annual_budgeted_income_workbook": {
@@ -185,7 +179,6 @@
     },
     "annual_budgeted_expenses": {
       "type": "number",
-      "default": 0,
       "description": "Total annual expense budget (Fixed + Variable + Discretionary)"
     },
     "monthly_income_budget": {
@@ -198,6 +191,13 @@
         "type": "object"
       },
       "description": "Independent-validation warnings for this period: { code, section, message, sourceValue, calculatedValue, requiresAdminReview, blocksFinalize, overridden, override }"
+    },
+    "source_missing_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Names of numeric fields whose source value is missing (blank in the workbook or left blank in Admin). Readers treat a listed field as missing whatever is stored: Base44 cannot store null, and a missing value must never read as $0.00. See base44/shared/sourceMissing.ts."
     },
     "reopen_log": {
       // Only the periodTransition function (service role) writes this field.
