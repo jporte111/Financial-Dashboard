@@ -203,6 +203,10 @@
       // Only the periodTransition function (service role) writes this field.
       "rls": { "write": false },
       "type": "array",
+      // Hosted Base44 treats undeclared array items as strings; each entry is an object.
+      "items": {
+        "type": "object"
+      },
       "description": "Audit trail of exceptional reopen operations: { at, by, reason, was_published }. Written only by the periodTransition function."
     },
     "bva_overrides": {
