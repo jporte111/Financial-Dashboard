@@ -23,7 +23,7 @@ describe('fmtVariance wording — "Over Budget" / "Under Budget" / "On pace"', (
   });
 
   it('respects the cents option', () => {
-    expect(fmtVariance(-54321.09, { cents: false })).toBe('$48,301 Over Budget');
+    expect(fmtVariance(-54321.09, { cents: false })).toBe('$54,321 Over Budget');
   });
 });
 
