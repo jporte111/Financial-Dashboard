@@ -5,8 +5,9 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const DIR = path.resolve(__dirname, '../../base44/entities');
+const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../base44/entities');
 const load = (name) => JSON.parse(fs.readFileSync(path.join(DIR, `${name}.jsonc`), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
 const ADMIN = { user_condition: { role: 'admin' } };
 

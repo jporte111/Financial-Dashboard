@@ -6,8 +6,9 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(__dirname, '../..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 const walk = (dir) =>
   fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((e) =>

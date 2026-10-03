@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Static checks on the Base44 entity schemas (base44/entities/*.jsonc).
 //
@@ -10,7 +11,7 @@ import path from 'node:path';
 // emulator accepts anything, so only a static check catches it. This is what
 // refused the exceptional reopen of a published period in production, which
 // appends { at, by, reason, was_published } objects to ReportingPeriod.reopen_log.
-const DIR = path.resolve(__dirname, '../../base44/entities');
+const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../base44/entities');
 const load = (file) => JSON.parse(fs.readFileSync(path.join(DIR, file), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
 const files = fs.readdirSync(DIR).filter((f) => f.endsWith('.jsonc'));
 

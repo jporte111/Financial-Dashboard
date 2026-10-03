@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   PUBLIC_PERIOD_FIELDS,
   buildPublicDashboard,
@@ -227,7 +228,7 @@ describe('categoryTransactions (signed in): admins full access, others public ru
 });
 
 describe('structural: anonymous-facing code never reads entities directly', () => {
-  const ROOT = path.resolve(__dirname, '../..');
+  const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
   const clientFiles = [
     'src/pages/ClientView.jsx',
