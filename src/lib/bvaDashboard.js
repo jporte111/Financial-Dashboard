@@ -10,7 +10,6 @@ import {
   round2,
   computeYtd,
   computeMonth,
-  aggregateYtd,
   expectedPacePct,
   elapsedMonthsFromCutoff,
   paceStatus,
@@ -25,6 +24,63 @@ import { overridesFromCorrections, WARNING_SOURCE_PATHS } from './bvaCorrections
 import { effectiveRecord } from '../../base44/shared/sourceMissing.ts';
 
 const EXPENSE_GROUPS = ['fixed', 'variable', 'discretionary'];
+
+// ---- Missing vs zero --------------------------------------------------------
+// A missing figure (null / absent / blank) is UNKNOWN: it is carried as null and
+// rendered as "—" / "Source value missing", never as a fabricated $0.00. A
+// stored 0 is an explicit, confirmed zero and stays 0.
+const num = (v) =>
+  v === null || v === undefined || (typeof v === 'string' && v.trim() === '') || !Number.isFinite(Number(v)) ? null : Number(v);
+const r2n = (v) => (v == null ? null : round2(v));
+// Sum of the known values. `complete` is false when any part is missing, so a
+// total that leaves parts out is never presented as complete.
+function known(values) {
+  const vals = values.map(num);
+  const present = vals.filter((v) => v != null);
+  return {
+    value: present.length ? round2(present.reduce((acc, v) => acc + v, 0)) : null,
+    complete: present.length === vals.length,
+    missingCount: vals.length - present.length,
+  };
+}
+const missingYtd = (actual, annual, elapsedMonths) => ({
+  mode: 'ytd',
+  actual,
+  annual,
+  remaining: null,
+  percentUsed: null,
+  pacePct: expectedPacePct(elapsedMonths),
+  expectedYtdBudget: null,
+  varianceToPace: null,
+  variancePct: null,
+  favorable: null,
+  status: null,
+  missing: true,
+});
+const ytdOrMissing = (actual, annual, elapsedMonths) =>
+  actual == null || annual == null ? missingYtd(actual, annual, elapsedMonths) : computeYtd({ actualYtd: actual, annualBudget: annual }, elapsedMonths);
+const missingMonth = (monthlyBudget) => ({
+  mode: 'month',
+  actual: null,
+  monthlyBudget: monthlyBudget ?? null,
+  remaining: null,
+  percentUsed: null,
+  varianceToBudget: null,
+  variancePct: null,
+  favorable: null,
+  hasActivity: false,
+  missing: true,
+});
+const monthOrMissing = (monthActual, annualBudget, monthlyBudget) =>
+  monthActual == null || (annualBudget == null && num(monthlyBudget) == null)
+    ? missingMonth(num(monthlyBudget))
+    : computeMonth({ monthActual, annualBudget: annualBudget ?? 0, monthlyBudget });
+
+// Distribution quarters: a quarter that starts after the report's cutoff date
+// is not yet applicable (shown "—", not missing and not $0.00).
+const QUARTERS = ['q1', 'q2', 'q3', 'q4'];
+const QUARTER_START = { q1: 1, q2: 4, q3: 7, q4: 10 };
+export const QUARTER_STATE = { VALUE: 'value', MISSING: 'missing', NOT_YET: 'not_yet_applicable' };
 const GROUP_LABEL = { fixed: 'Fixed', variable: 'Variable', discretionary: 'Discretionary' };
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -239,33 +295,43 @@ export function buildBvaDashboard(data, opts = {}) {
 
   // ---- Groups (Fixed / Variable / Discretionary) --------------------
   // A line's month_actual is null when the workbook's month column was blank.
-  // "Missing" (no line carries a figure) is kept distinct from a real zero.
-  const anyLineHasMonth = (ls) => ls.some((l) => l.month_actual != null);
+  // "Missing" (no line carries a figure) is kept distinct from a real zero, and
+  // a group whose lines are only partly known is marked partial.
+  const lineMonthly = (l) => (num(l.monthly_budget) ?? (num(l.annual_budget) != null ? num(l.annual_budget) / MONTHS_IN_YEAR : null));
   const groups = EXPENSE_GROUPS.map((key) => {
     const gl = expenseLines.filter((l) => l.budget_group === key);
-    const monthActualPresent = anyLineHasMonth(gl);
-    const monthActual = monthActualPresent ? round2(gl.reduce((s, l) => s + n(l.month_actual), 0)) : null;
-    const ytd = aggregateYtd(gl, elapsedMonths);
-    const monthly = round2(gl.reduce((s, l) => s + (n(l.monthly_budget) || n(l.annual_budget) / MONTHS_IN_YEAR), 0));
-    const monthC = computeMonth({ monthActual, annualBudget: ytd.annual, monthlyBudget: monthly });
+    const gM = known(gl.map((l) => l.month_actual));
+    const gY = known(gl.map((l) => l.ytd_actual));
+    const gB = known(gl.map((l) => l.annual_budget));
+    const monthActual = gM.value;
+    const ytd = {
+      ...ytdOrMissing(gY.complete ? gY.value : null, gB.complete ? gB.value : null, elapsedMonths),
+      count: gl.length,
+      partial: gl.length > 0 && !(gY.complete && gB.complete),
+    };
+    const monthly = known(gl.map(lineMonthly)).value;
+    const monthC = {
+      ...monthOrMissing(monthActual, ytd.annual, monthly),
+      partial: monthActual != null && !gM.complete,
+    };
     // Per-line rows for this group's category breakdown (used by the public
     // client view's group cards). Shape matches the detail rows so CategoryTable
     // and the drill-down render them unchanged.
     const lineRows = gl.map((l) => {
-      const lineC = computeYtd({ actualYtd: n(l.ytd_actual), annualBudget: n(l.annual_budget) }, elapsedMonths);
-      const lineM = computeMonth({ monthActual: n(l.month_actual), annualBudget: n(l.annual_budget), monthlyBudget: l.monthly_budget });
+      const lineC = ytdOrMissing(num(l.ytd_actual), num(l.annual_budget), elapsedMonths);
+      const lineM = monthOrMissing(num(l.month_actual), num(l.annual_budget), l.monthly_budget);
       return {
         id: l.id,
         category: l.category,
         code: l.qb_code || null,
         group: key,
         qb_account_names: Array.isArray(l.qb_account_names) ? l.qb_account_names : [],
-        annual_budget: n(l.annual_budget),
-        ytd_actual: n(l.ytd_actual),
-        month_actual: l.month_actual == null ? null : n(l.month_actual),
+        annual_budget: num(l.annual_budget),
+        ytd_actual: num(l.ytd_actual),
+        month_actual: num(l.month_actual),
         has_snapshot: true,
-        monthActual: l.month_actual == null ? null : round2(n(l.month_actual)),
-        monthActualMissing: l.month_actual == null,
+        monthActual: r2n(num(l.month_actual)),
+        monthActualMissing: num(l.month_actual) == null,
         ytd: lineC,
         month: lineM,
         view: monthMode ? lineM : lineC,
@@ -277,6 +343,7 @@ export function buildBvaDashboard(data, opts = {}) {
       key,
       label: GROUP_LABEL[key],
       monthActual,
+      monthActualPartial: monthC.partial,
       ytd,
       month: monthC,
       view: monthMode ? monthC : ytd,
@@ -285,64 +352,55 @@ export function buildBvaDashboard(data, opts = {}) {
     };
   });
 
-  const expenseMonthPresent = expenseLines.length > 0 && anyLineHasMonth(expenseLines);
-  const expTotals = groups.reduce(
-    (acc, g) => {
-      acc.actualYtd += g.ytd.actual;
-      acc.annualBudget += g.ytd.annual;
-      acc.monthActual += n(g.monthActual);
-      return acc;
-    },
-    { actualYtd: 0, annualBudget: 0, monthActual: 0 }
-  );
+  const eM = known(expenseLines.map((l) => l.month_actual));
+  const eY = known(expenseLines.map((l) => l.ytd_actual));
+  const eB = known(expenseLines.map((l) => l.annual_budget));
+  const expenseMonthPresent = expenseLines.length > 0 && eM.value != null;
   // The overall expense figure is computed from the group lines when present
   // (calculated wins); it falls back to the stored period scalars only when no
   // expense lines have been imported. It is NEVER the discretionary group alone.
   const overallExpenses = expenseLines.length
-    ? computeYtd({ actualYtd: expTotals.actualYtd, annualBudget: expTotals.annualBudget }, elapsedMonths)
-    : computeYtd(
-        { actualYtd: n(period.ytd_expenses), annualBudget: n(period.annual_budgeted_expenses) },
-        elapsedMonths
-      );
+    ? ytdOrMissing(eY.complete ? eY.value : null, eB.complete ? eB.value : null, elapsedMonths)
+    : ytdOrMissing(num(period.ytd_expenses), num(period.annual_budgeted_expenses), elapsedMonths);
   // Current-month expenses — null ("Source value missing") when no source
-  // carries a figure; a present zero still renders as $0.00.
-  const monthExpenses = expenseLines.length
-    ? (expenseMonthPresent ? round2(expTotals.monthActual) : null)
-    : (period.month_expenses != null ? round2(n(period.month_expenses)) : null);
+  // carries a figure; a present zero still renders as $0.00; a total that
+  // leaves out lines without a figure is marked partial.
+  const monthExpenses = expenseLines.length ? eM.value : r2n(num(period.month_expenses));
+  const monthExpensesPartial = expenseLines.length > 0 && eM.value != null && !eM.complete;
 
   // ---- Income ------------------------------------------------------
-  const incomeYtdFromLines = round2(incomeLines.reduce((s, l) => s + n(l.ytd_actual), 0));
-  const incomeBudgetFromLines = round2(incomeLines.reduce((s, l) => s + n(l.annual_budget), 0));
-  const ytdIncome = incomeLines.length ? incomeYtdFromLines : n(period.ytd_income);
-  // Independently calculated budget wins over any stored workbook figure.
-  const annualBudgetedIncome = incomeLines.length
-    ? incomeBudgetFromLines
-    : n(period.annual_budgeted_income);
-  const remainingIncomeBudget = round2(annualBudgetedIncome - ytdIncome);
-  const incomeBudgetUsedPct = annualBudgetedIncome ? ytdIncome / annualBudgetedIncome : 0;
+  const iY = known(incomeLines.map((l) => l.ytd_actual));
+  const iB = known(incomeLines.map((l) => l.annual_budget));
+  const iM = known(incomeLines.map((l) => l.month_actual));
+  const ytdIncome = incomeLines.length ? (iY.complete ? iY.value : null) : r2n(num(period.ytd_income));
+  // Independently calculated budget wins over any stored workbook figure. A
+  // legacy period without lines or a stored budget shows it as missing.
+  const annualBudgetedIncome = incomeLines.length ? (iB.complete ? iB.value : null) : r2n(num(period.annual_budgeted_income));
+  const remainingIncomeBudget = annualBudgetedIncome == null || ytdIncome == null ? null : round2(annualBudgetedIncome - ytdIncome);
+  const incomeBudgetUsedPct =
+    annualBudgetedIncome == null || ytdIncome == null ? null : annualBudgetedIncome ? ytdIncome / annualBudgetedIncome : 0;
   // Current-month income is null ("Source value missing") when neither the
   // imported income lines nor the stored period scalar carry a figure — the
   // BVA workbook's month column is routinely blank and must never be read as
   // a confirmed $0. A present-but-zero source still shows $0.00.
-  const incomeMonthPresent = incomeLines.length > 0 ? anyLineHasMonth(incomeLines) : period.month_income != null;
-  const monthIncome = incomeLines.length
-    ? (anyLineHasMonth(incomeLines) ? round2(incomeLines.reduce((s, l) => s + n(l.month_actual), 0)) : null)
-    : (period.month_income != null ? round2(n(period.month_income)) : null);
+  const monthIncome = incomeLines.length ? iM.value : r2n(num(period.month_income));
+  const monthIncomePartial = incomeLines.length > 0 && iM.value != null && !iM.complete;
   const incomeWorkbookBudget = period.annual_budgeted_income_workbook ?? null;
 
   const incomeRows = incomeLines.map((l) => {
-    const annual = n(l.annual_budget);
-    const ytd = n(l.ytd_actual);
+    const annual = num(l.annual_budget);
+    const ytd = num(l.ytd_actual);
+    const both = annual != null && ytd != null;
     return {
       id: l.id,
       category: l.category,
       code: l.qb_code || null,
       // null = the workbook had no current-month figure for this line.
-      monthActual: l.month_actual == null ? null : round2(n(l.month_actual)),
-      actualYtd: round2(ytd),
-      annualBudget: round2(annual),
-      remaining: round2(annual - ytd),
-      percentUsed: annual ? ytd / annual : 0,
+      monthActual: r2n(num(l.month_actual)),
+      actualYtd: r2n(ytd),
+      annualBudget: r2n(annual),
+      remaining: both ? round2(annual - ytd) : null,
+      percentUsed: both ? (annual ? ytd / annual : 0) : null,
       drilldownEnabled: l.drilldown_enabled !== false,
     };
   });
@@ -352,25 +410,24 @@ export function buildBvaDashboard(data, opts = {}) {
     const key = (l.qb_code || l.category || '').toString().toLowerCase();
     const catWarnings = warnings.byCategory[key] || [];
     const hasUnresolvedWarning = catWarnings.some((w) => w.resolution === 'unresolved');
+    const ytdV = num(l.ytd_actual);
+    const annV = num(l.annual_budget);
+    const valuesMissing = ytdV == null || annV == null;
     // A savings line (e.g. MONTHLY SAVINGS) is a TARGET, not an expense: the
     // pace math is the same, but the tone inverts (saving less than expected is
     // the unfavorable outcome) and the labels speak of the savings target.
     const isSavingsLine = l.budget_group === 'savings';
     const savingsC = isSavingsLine
-      ? savingsStatus({ actualYtd: n(l.ytd_actual), annualBudget: n(l.annual_budget) }, elapsedMonths)
+      ? valuesMissing
+        ? missingYtd(ytdV, annV, elapsedMonths)
+        : savingsStatus({ actualYtd: ytdV, annualBudget: annV }, elapsedMonths)
       : null;
     const f = isSavingsLine
       ? null
-      : flagsForCategory(
-          { actualYtd: n(l.ytd_actual), annualBudget: n(l.annual_budget) },
-          elapsedMonths,
-          hasUnresolvedWarning
-        );
-    const monthC = computeMonth({
-      monthActual: n(l.month_actual),
-      annualBudget: n(l.annual_budget),
-      monthlyBudget: l.monthly_budget,
-    });
+      : valuesMissing
+        ? { computed: missingYtd(ytdV, annV, elapsedMonths), flagged: hasUnresolvedWarning, reasons: hasUnresolvedWarning ? [FLAG.UNRESOLVED_WARNING] : [] }
+        : flagsForCategory({ actualYtd: ytdV, annualBudget: annV }, elapsedMonths, hasUnresolvedWarning);
+    const monthC = monthOrMissing(num(l.month_actual), annV, l.monthly_budget);
     const hasFvdGroup = !!(l.group_confirmed && EXPENSE_GROUPS.includes(l.budget_group));
     return {
       id: l.id,
@@ -379,9 +436,9 @@ export function buildBvaDashboard(data, opts = {}) {
       // raw passthrough so the drilldown sheet can resolve transactions + budget context
       account_id: l.account_id || null,
       qb_account_names: Array.isArray(l.qb_account_names) ? l.qb_account_names : [],
-      annual_budget: n(l.annual_budget),
-      ytd_actual: n(l.ytd_actual),
-      month_actual: l.month_actual == null ? null : n(l.month_actual),
+      annual_budget: annV,
+      ytd_actual: ytdV,
+      month_actual: num(l.month_actual),
       has_snapshot: true,
       // Savings lines carry their own classification; other detail rows count
       // as grouped ONLY when an admin has confirmed a valid
@@ -390,8 +447,9 @@ export function buildBvaDashboard(data, opts = {}) {
       groupConfirmed: isSavingsLine ? true : hasFvdGroup,
       groupLabel: isSavingsLine ? 'Savings' : hasFvdGroup ? GROUP_LABEL[l.budget_group] : 'Unassigned',
       // null = the workbook had no current-month figure for this line.
-      monthActual: l.month_actual == null ? null : round2(n(l.month_actual)),
-      monthActualMissing: l.month_actual == null,
+      monthActual: r2n(num(l.month_actual)),
+      monthActualMissing: num(l.month_actual) == null,
+      valuesMissing,
       ytd: isSavingsLine ? savingsC : f.computed,
       month: monthC,
       view: monthMode ? monthC : isSavingsLine ? savingsC : f.computed,
@@ -413,7 +471,7 @@ export function buildBvaDashboard(data, opts = {}) {
   // Over Budget dollar variance first (most negative variance-to-pace).
   const attention = detail
     .filter((d) => d.flagged)
-    .sort((a, b) => a.ytd.varianceToPace - b.ytd.varianceToPace);
+    .sort((a, b) => (a.ytd.varianceToPace ?? 0) - (b.ytd.varianceToPace ?? 0));
 
   // ---- Cash ---------------------------------------------------
   const cashRows = [...cashAccounts]
@@ -421,39 +479,74 @@ export function buildBvaDashboard(data, opts = {}) {
     .map((a) => ({
       id: a.id,
       name: a.name,
-      balance: round2(n(a.balance)),
+      balance: r2n(num(a.balance)),
+      balanceMissing: num(a.balance) == null,
       accountType: a.account_type === 'investment' ? 'investment' : 'bank',
       asOf: a.as_of_date ? fmtDate(a.as_of_date) : labels.reportingCutoffDate,
     }));
-  const cashCalculated = round2(cashRows.reduce((s, a) => s + a.balance, 0));
-  const cashReported = period.total_cash != null ? round2(n(period.total_cash)) : null;
-  const cashReconciles = cashReported == null ? null : cashCalculated === cashReported;
+  const cK = known(cashRows.map((a) => a.balance));
+  const cashCalculated = cK.value;
+  const cashPartial = cashRows.length > 0 && !cK.complete;
+  const cashReported = r2n(num(period.total_cash));
+  const cashReconciles = cashReported == null || cashPartial || cashCalculated == null ? null : cashCalculated === cashReported;
   const totalCash = cashRows.length ? cashCalculated : cashReported;
 
   // ---- Distributions -----------------------------------------
+  // Quarter applicability comes from the REPORT's cutoff date (never today):
+  // a quarter that starts after the cutoff is not yet applicable.
+  const cutoffMonth = (() => {
+    const c = period.reporting_cutoff_date;
+    if (c) {
+      const d = new Date(c);
+      if (!Number.isNaN(d.getTime())) return d.getUTCMonth() + 1;
+    }
+    return elapsedMonths || null;
+  })();
+  const quarterApplicable = Object.fromEntries(QUARTERS.map((q) => [q, cutoffMonth == null || cutoffMonth >= QUARTER_START[q]]));
   const distEntities = distributions.map((d) => {
-    const ytd = round2(n(d.q1) + n(d.q2) + n(d.q3) + n(d.q4));
-    return { id: d.id, name: d.entity_name, q1: n(d.q1), q2: n(d.q2), q3: n(d.q3), q4: n(d.q4), ytd };
+    const values = {};
+    const quarterState = {};
+    for (const q of QUARTERS) {
+      values[q] = r2n(num(d[q]));
+      quarterState[q] = values[q] != null ? QUARTER_STATE.VALUE : quarterApplicable[q] ? QUARTER_STATE.MISSING : QUARTER_STATE.NOT_YET;
+    }
+    const counted = QUARTERS.filter((q) => quarterState[q] !== QUARTER_STATE.NOT_YET);
+    const k = known(counted.map((q) => values[q]));
+    return {
+      id: d.id,
+      name: d.entity_name,
+      ...values,
+      quarterState,
+      // Sum of the applicable quarters; partial when a begun quarter is blank.
+      ytd: k.value,
+      ytdPartial: !k.complete,
+    };
   });
-  const distEntitySum = round2(distEntities.reduce((s, e) => s + e.ytd, 0));
+  const dK = known(distEntities.map((e) => e.ytd));
+  const distPartial = distEntities.some((e) => e.ytdPartial) || !dK.complete;
+  const distEntitySum = dK.value;
   // The stored total (set at import time from the sum of each entity's own
   // quarters — see bvaImport.js) is what the dashboard shows. This check
   // flags any drift between that stored value and a fresh recompute from the
   // current Distribution records — e.g. a manual edit after import, or a
-  // legacy period stored before this calculation was corrected.
-  const distributionsYtd = period.distributions_ytd != null ? round2(n(period.distributions_ytd)) : distEntitySum;
-  const distReconciles = period.distributions_ytd == null ? null : distEntitySum === distributionsYtd;
+  // legacy period stored before this calculation was corrected. A partial
+  // recompute cannot confirm or contradict it.
+  const storedDistributions = r2n(num(period.distributions_ytd));
+  const distributionsYtd = storedDistributions != null ? storedDistributions : distEntitySum;
+  const distReconciles = storedDistributions == null || distPartial || distEntitySum == null ? null : distEntitySum === storedDistributions;
 
   // ---- Savings & Distributions cards ------------------------
-  const savingsIn = period.savings_in_ytd != null ? round2(n(period.savings_in_ytd)) : null;
-  const savingsSpend = period.savings_spend_ytd != null ? round2(n(period.savings_spend_ytd)) : null;
+  const savingsIn = r2n(num(period.savings_in_ytd));
+  const savingsSpend = r2n(num(period.savings_spend_ytd));
   const netSavings = savingsIn != null && savingsSpend != null ? round2(savingsIn - savingsSpend) : null;
 
   // ---- Recurring transfers ---------------------------------
   const transferRows = transfers
     .filter((t) => t.visible_to_client !== false)
-    .map((t) => ({ id: t.id, amount: round2(n(t.amount)), source: t.source || null, purpose: t.purpose || null }));
-  const transfersTotal = round2(transferRows.reduce((s, t) => s + t.amount, 0));
+    .map((t) => ({ id: t.id, amount: r2n(num(t.amount)), amountMissing: num(t.amount) == null, source: t.source || null, purpose: t.purpose || null }));
+  const tK = known(transferRows.map((t) => t.amount));
+  const transfersTotal = tK.value;
+  const transfersPartial = transferRows.length > 0 && !tK.complete;
 
   // ---- Section states -------------------------------------
   // In This Month mode, distinguish "the workbook carried no month figures"
@@ -508,24 +601,30 @@ export function buildBvaDashboard(data, opts = {}) {
       totalCash,
       cashReconciles,
       cashSource: cashRows.length ? 'accounts' : 'reported',
+      cashPartial,
       ytdIncome,
+      ytdIncomeMissing: ytdIncome == null,
       annualBudgetedIncome,
+      annualBudgetedIncomeMissing: annualBudgetedIncome == null,
       remainingIncomeBudget,
       incomeBudgetUsedPct,
       incomeWorkbookBudget,
       monthIncome,
       monthIncomeMissing,
-      ytdExpenses: round2(overallExpenses.actual),
-      annualExpenseBudget: round2(overallExpenses.annual),
-      remainingAnnualBudget: round2(overallExpenses.remaining),
+      monthIncomePartial,
+      ytdExpenses: r2n(overallExpenses.actual),
+      annualExpenseBudget: r2n(overallExpenses.annual),
+      annualExpenseBudgetMissing: overallExpenses.annual == null,
+      remainingAnnualBudget: r2n(overallExpenses.remaining),
       expenseBudgetUsedPct: overallExpenses.percentUsed,
       monthExpenses,
       monthExpensesMissing,
+      monthExpensesPartial,
       expectedPacePct: pacePct,
-      overallVarianceAmount: round2(overallExpenses.varianceToPace),
+      overallVarianceAmount: r2n(overallExpenses.varianceToPace),
       overallVariancePct: overallExpenses.variancePct,
-      favorable: overallExpenses.varianceToPace > 0,
-      onPace: round2(overallExpenses.varianceToPace) === 0,
+      favorable: overallExpenses.varianceToPace != null && overallExpenses.varianceToPace > 0,
+      onPace: overallExpenses.varianceToPace != null && round2(overallExpenses.varianceToPace) === 0,
       status: overallExpenses.status,
     },
     groups,
@@ -537,12 +636,16 @@ export function buildBvaDashboard(data, opts = {}) {
       calculatedTotal: cashCalculated,
       reportedTotal: cashReported,
       reconciles: cashReconciles,
+      partial: cashPartial,
       accounts: cashRows,
     },
     distributions: {
       total: distributionsYtd,
       entitySum: distEntitySum,
       reconciles: distReconciles,
+      partial: distPartial,
+      quarterApplicable,
+      cutoffMonth,
       entities: distEntities,
     },
     savingsDistributions: {
@@ -556,9 +659,9 @@ export function buildBvaDashboard(data, opts = {}) {
       netSavingsMissing: netSavings == null,
       savingsInVerified: false,
       savingsSpendVerified: false,
-      savingsSpendCategories: savingsSpends.map((s) => ({ id: s.id, category: s.category, ytdAmount: round2(n(s.ytd_amount)) })),
+      savingsSpendCategories: savingsSpends.map((s) => ({ id: s.id, category: s.category, ytdAmount: r2n(num(s.ytd_amount)) })),
     },
-    transfers: { items: transferRows, total: transfersTotal },
+    transfers: { items: transferRows, total: transfersTotal, partial: transfersPartial },
     overallExpenses,
     hasUnresolvedWarnings: warnings.hasUnresolved,
     STATUS,

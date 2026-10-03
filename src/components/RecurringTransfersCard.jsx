@@ -1,17 +1,22 @@
 import React, { useState } from 'react';
-import { fmtCurrency } from '@/lib/finance';
+import { fmtCurrency, isMissingNumber } from '@/lib/finance';
 import { ChevronDown } from 'lucide-react';
 
 export default function RecurringTransfersCard({ transfers }) {
   const [open, setOpen] = useState(false);
   const list = transfers || [];
+  // Missing amounts stay missing; a total that leaves them out says so.
+  const missing = list.filter((t) => isMissingNumber(t.amount)).length;
+  const knownAmounts = list.filter((t) => !isMissingNumber(t.amount));
+  const total = knownAmounts.length ? knownAmounts.reduce((s, t) => s + Number(t.amount), 0) : null;
   return (
     <div className="rounded-2xl border border-stone-200 bg-white">
       <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between px-6 py-5 text-left">
         <div>
           <p className="font-display text-lg">Recurring Transfers</p>
           <p className="text-sm text-stone-500">
-            {list.length} items · {fmtCurrency(list.reduce((s, t) => s + Number(t.amount || 0), 0))} monthly
+            {list.length} items · {fmtCurrency(total)} monthly
+            {missing > 0 && total != null ? ` (partial — ${missing} without an amount)` : ''}
           </p>
         </div>
         <ChevronDown className={`h-4 w-4 text-stone-400 transition ${open ? 'rotate-180' : ''}`} />

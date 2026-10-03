@@ -11,6 +11,10 @@ const r2 = (v) => Math.round((Number(v) + Number.EPSILON) * 100) / 100;
 // the tone inverted (saving less than expected is the unfavorable outcome).
 export default function PaceComparison({ view, savings = false, emphasized = false }) {
   if (!view || view.mode !== 'ytd') return null;
+  // Without both figures there is no comparison — never an implied "On pace".
+  if (view.varianceToPace == null || view.actual == null || view.annual == null) {
+    return <p className="text-xs text-stone-400">Comparison unavailable — source value missing</p>;
+  }
   const rows = [];
   if (savings) {
     const v = r2(view.varianceToPace); // expected − actual
@@ -18,7 +22,7 @@ export default function PaceComparison({ view, savings = false, emphasized = fal
     else if (v > 0) rows.push({ label: 'Below savings target', amount: v, tone: 'over' });
     else rows.push({ label: 'Above savings target', amount: -v, tone: 'under' });
   } else {
-    const overAnnual = r2((view.actual || 0) - (view.annual || 0));
+    const overAnnual = r2(view.actual - view.annual);
     if (overAnnual > 0) rows.push({ label: 'Above full annual budget', amount: overAnnual, tone: 'over' });
     const v = r2(view.varianceToPace);
     if (v === 0) rows.push({ label: 'On expected YTD pace', amount: 0, tone: 'onpace' });

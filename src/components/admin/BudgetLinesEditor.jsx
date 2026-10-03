@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { numericInput, BLANK_INPUT_HINT } from '@/lib/finance';
 import { base44 } from '@/api/base44Client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -51,9 +52,9 @@ export default function BudgetLinesEditor({ periodId, lines, reload }) {
                   <p className="mt-1 text-[10px] uppercase tracking-[0.1em] text-amber-600">Group mapping required</p>
                 )}
               </div>
-              <Input className="md:col-span-2 bg-white" type="number" step="0.01" defaultValue={l.month_actual} placeholder="Month" onBlur={(e) => patch(l.id, { month_actual: Number(e.target.value || 0) })} />
-              <Input className="md:col-span-1 bg-white" type="number" step="0.01" defaultValue={l.ytd_actual} placeholder="YTD" onBlur={(e) => patch(l.id, { ytd_actual: Number(e.target.value || 0) })} />
-              <Input className="md:col-span-1 bg-white" type="number" step="0.01" defaultValue={l.annual_budget} placeholder="Annual" onBlur={(e) => patch(l.id, { annual_budget: Number(e.target.value || 0) })} />
+              <Input className="md:col-span-2 bg-white" type="number" step="0.01" defaultValue={l.month_actual} placeholder="Month" title={BLANK_INPUT_HINT} onBlur={(e) => { const v = numericInput(e.target.value); if (v != null && v !== l.month_actual) patch(l.id, { month_actual: v }); }} />
+              <Input className="md:col-span-1 bg-white" type="number" step="0.01" defaultValue={l.ytd_actual} placeholder="YTD" title={BLANK_INPUT_HINT} onBlur={(e) => { const v = numericInput(e.target.value); if (v != null && v !== l.ytd_actual) patch(l.id, { ytd_actual: v }); }} />
+              <Input className="md:col-span-1 bg-white" type="number" step="0.01" defaultValue={l.annual_budget} placeholder="Annual" title={BLANK_INPUT_HINT} onBlur={(e) => { const v = numericInput(e.target.value); if (v != null && v !== l.annual_budget) patch(l.id, { annual_budget: v }); }} />
               <button onClick={() => remove(l.id)} className="justify-self-end p-2 text-stone-400 hover:text-rose-600">
                 <Trash2 className="h-4 w-4" />
               </button>

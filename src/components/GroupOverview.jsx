@@ -1,5 +1,5 @@
 import React from 'react';
-import { fmtCurrency, fmtPct, PACE_VARIANCE_TOOLTIP } from '@/lib/finance';
+import { fmtCurrency, fmtPct, PACE_VARIANCE_TOOLTIP, pct100 } from '@/lib/finance';
 import BudgetBar from '@/components/BudgetBar';
 import StatusPill from '@/components/StatusPill';
 import InfoHint from '@/components/InfoHint';
@@ -37,8 +37,8 @@ export default function GroupOverview({ groups, monthMode, expectedPacePct }) {
             </p>
 
             <div className="mt-4">
-              <BudgetBar pct={c.percentUsed * 100} status={monthMode ? 'under' : c.status} />
-              <p className="mt-2 text-xs text-stone-500">{fmtPct(c.percentUsed * 100)} {monthMode ? 'of monthly budget' : 'of budget used'}</p>
+              <BudgetBar pct={pct100(c.percentUsed)} status={monthMode ? 'under' : c.status} />
+              <p className="mt-2 text-xs text-stone-500">{fmtPct(pct100(c.percentUsed))} {monthMode ? 'of monthly budget' : 'of budget used'}</p>
             </div>
 
             <div className="mt-4 divide-y divide-stone-100 border-t border-stone-100 pt-2">
@@ -53,8 +53,8 @@ export default function GroupOverview({ groups, monthMode, expectedPacePct }) {
                   <Row label="Actual YTD" value={fmtCurrency(c.actual)} />
                   <Row label="Annual Budget" value={fmtCurrency(c.annual)} />
                   <Row label="Remaining" value={fmtCurrency(c.remaining)} />
-                  <Row label="Percent Used" value={fmtPct(c.percentUsed * 100)} />
-                  <Row label="Expected Pace" value={fmtPct((expectedPacePct ?? c.pacePct) * 100)} />
+                  <Row label="Percent Used" value={fmtPct(pct100(c.percentUsed))} />
+                  <Row label="Expected Pace" value={fmtPct(pct100(expectedPacePct ?? c.pacePct))} />
                   <Row label="Variance to Expected Pace" hint={PACE_VARIANCE_TOOLTIP} value={<Variance amount={c.varianceToPace} />} />
                   <Row label="Variance Percentage" value={<VariancePct pct={c.variancePct} amount={c.varianceToPace} />} />
                 </>

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { usePeriodContext } from '@/lib/usePeriod';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
 import { useBvaDashboard } from '@/lib/useBvaDashboard';
-import { bvaSavingsStatus, fmtCurrency, fmtPct } from '@/lib/finance';
+import { bvaSavingsStatus, fmtCurrency, fmtPct, pct100 } from '@/lib/finance';
 import StatusPill from '@/components/StatusPill';
 import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import SectionHeading from '@/components/SectionHeading';
@@ -64,7 +64,7 @@ export default function Budget() {
               <span className="tabular-nums md:text-right">{l.monthActual == null ? <span className="text-stone-400">—</span> : fmtCurrency(l.monthActual)}</span>
               <span className="tabular-nums md:text-right">{fmtCurrency(l.actualYtd)}</span>
               <span className="tabular-nums md:text-right">{fmtCurrency(l.annualBudget)}</span>
-              <span className="tabular-nums md:text-right">{fmtCurrency(l.remaining)} · {fmtPct(l.percentUsed * 100)}</span>
+              <span className="tabular-nums md:text-right">{fmtCurrency(l.remaining)} · {fmtPct(pct100(l.percentUsed))}</span>
             </div>
           ))}
           <div className="grid gap-2 bg-stone-50 px-6 py-4 text-sm font-medium md:grid-cols-6 md:gap-4">
@@ -74,7 +74,7 @@ export default function Budget() {
             </span>
             <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.ytdIncome)}</span>
             <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.annualBudgetedIncome)}</span>
-            <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.remainingIncomeBudget)} · {fmtPct(incomeUsed * 100)}</span>
+            <span className="tabular-nums md:text-right">{fmtCurrency(vm.snapshot.remainingIncomeBudget)} · {fmtPct(pct100(incomeUsed))}</span>
           </div>
         </div>
         {vm.snapshot.monthIncomeMissing && (
@@ -104,10 +104,10 @@ export default function Budget() {
                   </div>
                   <p className="mt-3 font-display text-2xl tabular-nums">{fmtCurrency(c.actual)}</p>
                   <p className="text-sm text-stone-500">of {fmtCurrency(c.annual)} annual target</p>
-                  <div className="mt-4"><BudgetBar pct={c.percentUsed * 100} status={c.status} /></div>
+                  <div className="mt-4"><BudgetBar pct={pct100(c.percentUsed)} status={c.status} /></div>
                   <div className="mt-3 flex justify-between text-sm text-stone-500">
                     <span>Current month {l.month_actual == null ? '—' : fmtCurrency(l.month_actual)}</span>
-                    <span>{fmtPct(c.percentUsed * 100)} of goal</span>
+                    <span>{fmtPct(pct100(c.percentUsed))} of goal</span>
                   </div>
                 </div>
               );

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { fmtCurrency, fmtPct } from '@/lib/finance';
+import { fmtCurrency, fmtPct, pct100 } from '@/lib/finance';
 import CategoryTable from '@/components/CategoryTable';
 import BudgetBar from '@/components/BudgetBar';
 import StatusPill from '@/components/StatusPill';
@@ -30,11 +30,11 @@ function GroupCard({ group, pacePct, onSelect }) {
       </button>
 
       <div className="px-6 pb-6">
-        <BudgetBar pct={c.percentUsed * 100} status={c.status} />
+        <BudgetBar pct={pct100(c.percentUsed)} status={c.status} />
         <p className="mt-2 text-sm tabular-nums">
           <Variance amount={c.varianceToPace} cents={false} />{' '}
           <span className="text-stone-500">
-            · <VariancePct pct={c.variancePct} amount={c.varianceToPace} showLabel={false} /> vs expected pace ({fmtPct(pacePct * 100)})
+            · <VariancePct pct={c.variancePct} amount={c.varianceToPace} showLabel={false} /> vs expected pace ({fmtPct(pct100(pacePct))})
           </span>
         </p>
       </div>

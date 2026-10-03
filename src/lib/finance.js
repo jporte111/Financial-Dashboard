@@ -1,5 +1,12 @@
+// Missing vs zero: a missing value (null / undefined / blank / not a number)
+// renders as "—" — never as a fabricated $0.00. A real 0 still shows $0.00.
+export const MISSING_TEXT = '—';
+export const isMissingNumber = (n) =>
+  n === null || n === undefined || (typeof n === 'string' && n.trim() === '') || !Number.isFinite(Number(n));
+
 export const fmtCurrency = (n, opts = {}) => {
-  const v = Number(n || 0);
+  if (isMissingNumber(n)) return MISSING_TEXT;
+  const v = Number(n);
   return v.toLocaleString('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -8,7 +15,15 @@ export const fmtCurrency = (n, opts = {}) => {
   });
 };
 
-export const fmtPct = (n) => `${Number(n || 0).toFixed(2)}%`;
+export const fmtPct = (n) => (isMissingNumber(n) ? MISSING_TEXT : `${Number(n).toFixed(2)}%`);
+// Ratio -> percent, keeping a missing ratio missing (null * 100 would be 0).
+export const pct100 = (v) => (isMissingNumber(v) ? null : Number(v) * 100);
+
+// A numeric editor input: the number entered, or null for a blank / invalid
+// entry. Callers write nothing for null — a blank never becomes a fabricated
+// 0, and a stored value is never silently cleared. Enter 0 for a confirmed zero.
+export const numericInput = (raw) => (isMissingNumber(raw) ? null : Number(raw));
+export const BLANK_INPUT_HINT = 'Blank keeps the current value; enter 0 for a confirmed zero.';
 
 // --- BVA calculation core -------------------------------------------------
 // The BVA workbook is the only financial-data source for this app; there is
@@ -40,7 +55,8 @@ export {
 // "$1,234.56 Under Budget" / "$1,234.56 Over Budget" / "On pace"
 // (positive variance = spending below the expected pace; negative = above)
 export function fmtVariance(amount, { cents = true } = {}) {
-  const v = Number(amount || 0);
+  if (isMissingNumber(amount)) return MISSING_TEXT;
+  const v = Number(amount);
   const rounded = Math.round(v * 100) / 100;
   if (rounded === 0) return 'On pace';
   const label = rounded > 0 ? 'Under Budget' : 'Over Budget';
@@ -49,7 +65,8 @@ export function fmtVariance(amount, { cents = true } = {}) {
 
 // "+2.91%" / "-0.65%" with an explicit sign
 export const fmtSignedPct = (n) => {
-  const v = Number(n || 0) * 100;
+  if (isMissingNumber(n)) return MISSING_TEXT;
+  const v = Number(n) * 100;
   const sign = v > 0 ? '+' : v < 0 ? '-' : '';
   return `${sign}${Math.abs(v).toFixed(2)}%`;
 };

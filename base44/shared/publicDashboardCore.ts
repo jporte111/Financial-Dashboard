@@ -14,8 +14,8 @@
 //   - drill-downs resolve the budget line on the server and use its stored
 //     account names, never names supplied by the caller.
 //
-// Numeric handling is intentionally unchanged here (missing-vs-zero is a
-// separate, later change) so this module alters no figure the client sees.
+// Missing vs zero: a missing figure is served as null (unknown) — never as a
+// fabricated 0. A stored 0 (an explicit, confirmed zero) is served as 0.
 
 import { transactionsForCategory } from './categoryTransactionsCore.ts';
 import { effectiveRecord } from './sourceMissing.ts';
@@ -29,7 +29,9 @@ export const PUBLIC_PERIOD_FIELDS = [
   'annual_budgeted_income', 'annual_budgeted_expenses', 'monthly_income_budget',
 ];
 
-const numOrNull = (v) => (v != null ? Number(v) : null);
+// null / blank / non-numeric -> null (unknown); a stored 0 stays 0.
+const numOrNull = (v) =>
+  v === null || v === undefined || (typeof v === 'string' && v.trim() === '') || !Number.isFinite(Number(v)) ? null : Number(v);
 
 // A field listed in source_missing_fields is served as missing (null), never
 // as the stale number behind it. The list itself is not served.
@@ -67,9 +69,9 @@ export const publicBudgetLine = (l) => ({
   category: l.category,
   qb_code: l.qb_code || null,
   budget_group: l.budget_group,
-  month_actual: Number(l.month_actual || 0),
-  ytd_actual: Number(l.ytd_actual || 0),
-  annual_budget: Number(l.annual_budget || 0),
+  month_actual: numOrNull(l.month_actual),
+  ytd_actual: numOrNull(l.ytd_actual),
+  annual_budget: numOrNull(l.annual_budget),
   monthly_budget: numOrNull(l.monthly_budget),
   bva_detail: !!l.bva_detail,
   group_confirmed: !!l.group_confirmed,
@@ -79,7 +81,7 @@ export const publicBudgetLine = (l) => ({
 export const publicCashAccount = (a) => ({
   id: a.id,
   name: a.name,
-  balance: Number(a.balance || 0),
+  balance: numOrNull(a.balance),
   account_type: a.account_type === 'investment' ? 'investment' : 'bank',
   as_of_date: a.as_of_date || null,
   sort_order: Number(a.sort_order || 0),
@@ -88,13 +90,13 @@ export const publicCashAccount = (a) => ({
 export const publicDistribution = (d) => ({
   id: d.id,
   entity_name: d.entity_name || '',
-  q1: Number(d.q1 || 0),
-  q2: Number(d.q2 || 0),
-  q3: Number(d.q3 || 0),
-  q4: Number(d.q4 || 0),
+  q1: numOrNull(d.q1),
+  q2: numOrNull(d.q2),
+  q3: numOrNull(d.q3),
+  q4: numOrNull(d.q4),
 });
 
-export const publicSavingsSpend = (s) => ({ id: s.id, category: s.category, ytd_amount: Number(s.ytd_amount || 0) });
+export const publicSavingsSpend = (s) => ({ id: s.id, category: s.category, ytd_amount: numOrNull(s.ytd_amount) });
 
 // Any run of 3+ digits in a transfer's source label is treated as an account
 // number and replaced with "••••". If two different labels become identical
@@ -120,7 +122,7 @@ export function maskTransferSources(sources) {
 export function publicTransfers(transfers) {
   const visible = transfers.filter((t) => t.visible_to_client !== false);
   const label = maskTransferSources(visible.map((t) => t.source));
-  return visible.map((t) => ({ id: t.id, amount: Number(t.amount || 0), source: label(t.source || null), purpose: t.purpose || null }));
+  return visible.map((t) => ({ id: t.id, amount: numOrNull(t.amount), source: label(t.source || null), purpose: t.purpose || null }));
 }
 
 const EMPTY = { periods: [], period: null, budgetLines: [], cashAccounts: [], distributions: [], transfers: [], savingsSpends: [] };

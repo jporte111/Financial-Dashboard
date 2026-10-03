@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { fmtCurrency } from '@/lib/finance';
+import { fmtCurrency, isMissingNumber } from '@/lib/finance';
 import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 
@@ -10,7 +10,8 @@ function normalize({ accounts, rows }) {
   return (accounts || []).map((a) => ({
     id: a.id,
     name: a.name,
-    balance: Number(a.balance || 0),
+    // A missing balance stays missing (shown as a dash), never a fabricated $0.00.
+    balance: isMissingNumber(a.balance) ? null : Number(a.balance),
     type: a.account_type === 'investment' ? 'investment' : 'bank',
     asOf: a.as_of_date ? format(new Date(a.as_of_date), 'MMM d, yyyy') : null,
   }));
@@ -19,15 +20,22 @@ function normalize({ accounts, rows }) {
 export default function CashCard({ total, accounts = null, rows = null, reconciles = null, reportedTotal = null, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   const list = normalize({ accounts, rows });
+  const missingCount = list.filter((a) => a.balance == null).length;
+  const knownSum = list.reduce((s, a) => s + (a.balance == null ? 0 : a.balance), 0);
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs uppercase tracking-[0.14em] text-stone-500">Total Cash</p>
           <p className="mt-2 font-display text-3xl tracking-tight">{fmtCurrency(total)}</p>
+          {missingCount > 0 && total != null && (
+            <p className="mt-1 text-xs text-amber-700" data-testid="cash-partial">
+              Partial total — {missingCount} account{missingCount > 1 ? 's have' : ' has'} no balance in the source; only known balances are included.
+            </p>
+          )}
           {reconciles === false && (
             <p className="mt-1 text-xs text-rose-700">
-              Calculation discrepancy — accounts total {fmtCurrency(list.reduce((s, a) => s + a.balance, 0))}
+              Calculation discrepancy — accounts total {fmtCurrency(knownSum)}
               {reportedTotal != null ? `, workbook reported ${fmtCurrency(reportedTotal)}` : ''}. The calculated total is shown.
             </p>
           )}

@@ -4,12 +4,15 @@ import { usePeriodContext } from '@/lib/usePeriod';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
 import SectionHeading from '@/components/SectionHeading';
 import { fmtCurrency } from '@/lib/finance';
-import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
+import { SECTION_STATE, SECTION_STATE_TEXT, QUARTER_STATE, buildBvaDashboard } from '@/lib/bvaDashboard';
+import { effectiveRecord } from '../../base44/shared/sourceMissing.ts';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { format } from 'date-fns';
 
 export default function SavingsDistributions() {
-  const { period, periodId } = usePeriodContext();
+  const { period: rawPeriod, periodId } = usePeriodContext();
+  // Fields listed as missing are missing, whatever number is stored.
+  const period = effectiveRecord(rawPeriod || {});
   const { items: dists } = useEntityByPeriod('Distribution', periodId);
   const { items: spends } = useEntityByPeriod('SavingsSpend', periodId);
   const [drill, setDrill] = useState(null);
@@ -26,8 +29,26 @@ export default function SavingsDistributions() {
   };
 
   const list = dists || [];
-  const q = (k) => list.reduce((s, d) => s + Number(d[k] || 0), 0);
-  const ytdOf = (d) => Number(d.q1 || 0) + Number(d.q2 || 0) + Number(d.q3 || 0) + Number(d.q4 || 0);
+  // Quarter states come from the REPORT's cutoff date: a quarter that starts
+  // after it is not yet applicable; a begun quarter with no figure is missing;
+  // a stored 0 is a confirmed $0.00.
+  const dv = buildBvaDashboard({ period, distributions: list }).distributions;
+  const QS = ['q1', 'q2', 'q3', 'q4'];
+  const colTotal = (k) => {
+    if (!dv.quarterApplicable[k] && dv.entities.every((e) => e.quarterState[k] !== QUARTER_STATE.VALUE)) return { value: null, notYet: true };
+    const counted = dv.entities.filter((e) => e.quarterState[k] !== QUARTER_STATE.NOT_YET);
+    const knownVals = counted.filter((e) => e[k] != null).map((e) => e[k]);
+    return { value: knownVals.length ? knownVals.reduce((s, v) => s + v, 0) : null, partial: knownVals.length < counted.length };
+  };
+  const cell = (e, k) =>
+    e.quarterState[k] === QUARTER_STATE.NOT_YET
+      ? { text: '—', title: 'Not yet applicable — this quarter starts after the report cutoff' }
+      : e.quarterState[k] === QUARTER_STATE.MISSING
+        ? { text: '—', title: SECTION_STATE_TEXT[SECTION_STATE.MISSING] }
+        : { text: fmtCurrency(e[k]), title: undefined };
+  const anyNotYet = QS.some((k) => !dv.quarterApplicable[k]);
+  const anyMissing = dv.entities.some((e) => QS.some((k) => e.quarterState[k] === QUARTER_STATE.MISSING));
+  const grand = dv.entitySum;
   // A missing / never-entered scalar stays null — it is not a confirmed $0.
   // (These two fields are not in the BVA workbook; they are entered in Admin.)
   const savingsIn = period.savings_in_ytd == null ? null : Number(period.savings_in_ytd);
@@ -95,25 +116,48 @@ export default function SavingsDistributions() {
               </tr>
             </thead>
             <tbody>
-              {list.map((d) => (
-                <tr key={d.id} className="border-b border-stone-100 last:border-0">
-                  <td className="px-6 py-3 font-medium">{d.entity_name}</td>
-                  {['q1', 'q2', 'q3', 'q4'].map((k) => (
-                    <td key={k} className="px-6 py-3 text-right tabular-nums">{fmtCurrency(d[k])}</td>
-                  ))}
-                  <td className="px-6 py-3 text-right font-medium tabular-nums">{fmtCurrency(ytdOf(d))}</td>
+              {dv.entities.map((e) => (
+                <tr key={e.id} className="border-b border-stone-100 last:border-0">
+                  <td className="px-6 py-3 font-medium">{e.name}</td>
+                  {QS.map((k) => {
+                    const c = cell(e, k);
+                    return (
+                      <td key={k} className={`px-6 py-3 text-right tabular-nums ${c.title ? 'text-stone-400' : ''}`} title={c.title}>
+                        {c.text}
+                      </td>
+                    );
+                  })}
+                  <td className="px-6 py-3 text-right font-medium tabular-nums">
+                    {fmtCurrency(e.ytd)}
+                    {e.ytdPartial && e.ytd != null && <span className="ml-1 text-xs font-normal text-amber-700">partial</span>}
+                  </td>
                 </tr>
               ))}
               <tr className="bg-stone-50 font-medium">
                 <td className="px-6 py-3">Total</td>
-                {['q1', 'q2', 'q3', 'q4'].map((k) => (
-                  <td key={k} className="px-6 py-3 text-right tabular-nums">{fmtCurrency(q(k))}</td>
-                ))}
-                <td className="px-6 py-3 text-right tabular-nums">{fmtCurrency(q('q1') + q('q2') + q('q3') + q('q4'))}</td>
+                {QS.map((k) => {
+                  const t = colTotal(k);
+                  return (
+                    <td key={k} className={`px-6 py-3 text-right tabular-nums ${t.notYet ? 'text-stone-400' : ''}`} title={t.notYet ? 'Not yet applicable' : undefined}>
+                      {t.notYet ? '—' : fmtCurrency(t.value)}
+                      {t.partial && t.value != null && <span className="ml-1 text-xs font-normal text-amber-700">partial</span>}
+                    </td>
+                  );
+                })}
+                <td className="px-6 py-3 text-right tabular-nums">
+                  {fmtCurrency(grand)}
+                  {dv.partial && grand != null && <span className="ml-1 text-xs font-normal text-amber-700">partial</span>}
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
+        {(anyNotYet || anyMissing) && (
+          <p className="mt-3 text-xs text-stone-500" data-testid="distribution-legend">
+            {anyNotYet && <>— in {QS.filter((k) => !dv.quarterApplicable[k]).map((k) => k.toUpperCase()).join(', ')}: not yet applicable (the report covers data through its cutoff date). </>}
+            {anyMissing && <>— in a quarter that has begun: source value missing; totals marked “partial” leave it out.</>}
+          </p>
+        )}
       </section>
 
       <Sheet open={!!drill} onOpenChange={(o) => !o && setDrill(null)}>

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useBvaDashboard } from '@/lib/useBvaDashboard';
-import { fmtCurrency, fmtPct, FLAG_TEXT } from '@/lib/finance';
+import { fmtCurrency, fmtPct, FLAG_TEXT, pct100 } from '@/lib/finance';
 import PaceComparison from '@/components/PaceComparison';
 import WarningStatusPanel from '@/components/WarningStatusPanel';
 import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
@@ -119,7 +119,7 @@ export default function Dashboard() {
                 </div>
                 <div className="mt-4 space-y-1 text-sm text-stone-500">
                   <p>{fmtCurrency(d.ytd.actual)} of {fmtCurrency(d.ytd.annual)}</p>
-                  <p>{fmtPct(d.ytd.percentUsed * 100)} of annual budget used</p>
+                  <p>{fmtPct(pct100(d.ytd.percentUsed))} of annual budget used</p>
                 </div>
                 <p className="mt-4 text-xs text-stone-400">
                   {d.reasons.map((r) => FLAG_TEXT[r]).filter(Boolean).join(' · ')}

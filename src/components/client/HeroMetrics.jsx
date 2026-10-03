@@ -1,5 +1,5 @@
 import React from 'react';
-import { fmtCurrency, fmtPct } from '@/lib/finance';
+import { fmtCurrency, fmtPct, pct100 } from '@/lib/finance';
 import StatusPill from '@/components/StatusPill';
 
 function Metric({ label, value, children }) {
@@ -31,7 +31,7 @@ export default function HeroMetrics({ vm }) {
         {vm.labels.cashAsOf ? <Tag>{vm.labels.cashAsOf}</Tag> : null}
       </Metric>
       <Metric label="Total Income (YTD)" value={fmtCurrency(s.ytdIncome)}>
-        <Tag>{fmtPct(s.incomeBudgetUsedPct * 100)} of annual budget</Tag>
+        <Tag>{fmtPct(pct100(s.incomeBudgetUsedPct))} of annual budget</Tag>
       </Metric>
       <Metric label="Total Expenses (YTD)" value={fmtCurrency(s.ytdExpenses)}>
         <StatusPill status={s.status} />

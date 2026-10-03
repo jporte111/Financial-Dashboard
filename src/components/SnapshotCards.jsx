@@ -1,5 +1,5 @@
 import React from 'react';
-import { fmtCurrency, fmtPct } from '@/lib/finance';
+import { fmtCurrency, fmtPct, pct100 } from '@/lib/finance';
 import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import StatusPill from '@/components/StatusPill';
 import InfoHint from '@/components/InfoHint';
@@ -36,9 +36,9 @@ export default function SnapshotCards({ vm }) {
     // Three distinct states per current-month figure:
     //   missing  — the BVA workbook carried no month column ("Source value missing")
     //   zero     — a real imported $0 ("No current-month activity imported.")
-    //   value    — an actual figure
-    const monthCard = (label, amount, missing) => {
-      const zero = !missing && Math.round(Number(amount || 0) * 100) / 100 === 0;
+    //   value    — an actual figure (marked partial when some lines had none)
+    const monthCard = (label, amount, missing, partial) => {
+      const zero = !missing && !partial && Math.round(Number(amount) * 100) / 100 === 0;
       return (
         <Card
           label={label}
@@ -46,7 +46,9 @@ export default function SnapshotCards({ vm }) {
           subtitle={
             missing
               ? 'Not provided by the BVA workbook'
-              : zero
+              : partial
+                ? 'Partial — excludes lines with no current-month figure in the workbook'
+                : zero
                 ? SECTION_STATE_TEXT[SECTION_STATE.NO_MONTH_ACTIVITY]
                 : `${vm.labels.displayMonth}`
           }
@@ -57,12 +59,12 @@ export default function SnapshotCards({ vm }) {
     return (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card label="Total Cash" value={fmtCurrency(s.totalCash)} subtitle={vm.labels.cashAsOf} />
-        {monthCard('Current-Month Income', s.monthIncome, s.monthIncomeMissing)}
-        {monthCard('Current-Month Expenses', s.monthExpenses, s.monthExpensesMissing)}
+        {monthCard('Current-Month Income', s.monthIncome, s.monthIncomeMissing, s.monthIncomePartial)}
+        {monthCard('Current-Month Expenses', s.monthExpenses, s.monthExpensesMissing, s.monthExpensesPartial)}
         <Card
           label="Expected Monthly Expense Budget"
-          value={fmtCurrency(s.annualExpenseBudget / 12)}
-          subtitle="Annual expense budget ÷ 12"
+          value={fmtCurrency(s.annualExpenseBudget == null ? null : s.annualExpenseBudget / 12)}
+          subtitle={s.annualExpenseBudget == null ? 'Annual expense budget not stored for this period' : 'Annual expense budget ÷ 12'}
         />
       </div>
     );
@@ -77,13 +79,21 @@ export default function SnapshotCards({ vm }) {
       </Card>
 
       <Card label="YTD Income" value={fmtCurrency(s.ytdIncome)} subtitle={vm.labels.incomeThrough} />
-      <Card label="Total Annual Budgeted Income" value={fmtCurrency(s.annualBudgetedIncome)} subtitle={`${fmtPct(s.incomeBudgetUsedPct * 100)} received`} />
+      <Card
+        label="Total Annual Budgeted Income"
+        value={fmtCurrency(s.annualBudgetedIncome)}
+        subtitle={s.annualBudgetedIncome == null ? 'Not stored for this period' : `${fmtPct(pct100(s.incomeBudgetUsedPct))} received`}
+      />
       <Card label="Remaining Income Budget" value={fmtCurrency(s.remainingIncomeBudget)} />
 
       <Card label="YTD Expenses" value={fmtCurrency(s.ytdExpenses)} subtitle={vm.labels.expensesThrough} />
-      <Card label="Total Annual Budgeted Expenses" value={fmtCurrency(s.annualExpenseBudget)} subtitle={`${fmtPct(s.expenseBudgetUsedPct * 100)} used`} />
+      <Card
+        label="Total Annual Budgeted Expenses"
+        value={fmtCurrency(s.annualExpenseBudget)}
+        subtitle={s.annualExpenseBudget == null ? 'Not stored for this period' : `${fmtPct(pct100(s.expenseBudgetUsedPct))} used`}
+      />
       <Card label="Remaining Annual Expense Budget" value={fmtCurrency(s.remainingAnnualBudget)} />
-      <Card label="Expected Pace" value={fmtPct(s.expectedPacePct * 100)} subtitle={vm.labels.elapsedLabel} />
+      <Card label="Expected Pace" value={fmtPct(pct100(s.expectedPacePct))} subtitle={vm.labels.elapsedLabel} />
 
       <div className="rounded-2xl border border-stone-200 bg-white p-6 sm:col-span-2 lg:col-span-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

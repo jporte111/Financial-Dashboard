@@ -1,4 +1,5 @@
 import React from 'react';
+import { numericInput, BLANK_INPUT_HINT } from '@/lib/finance';
 import { base44 } from '@/api/base44Client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -27,7 +28,12 @@ export default function SupportingDataEditor({ title, entityName, periodId, item
                 step={f.type === 'number' ? '0.01' : undefined}
                 placeholder={f.label}
                 defaultValue={it[f.key] ?? ''}
-                onBlur={(e) => patch(it.id, { [f.key]: f.type === 'number' ? Number(e.target.value || 0) : e.target.value })}
+                title={f.type === 'number' ? BLANK_INPUT_HINT : undefined}
+                onBlur={(e) => {
+                  if (f.type !== 'number') return patch(it.id, { [f.key]: e.target.value });
+                  const v = numericInput(e.target.value);
+                  if (v != null && v !== it[f.key]) patch(it.id, { [f.key]: v });
+                }}
               />
             ))}
             <button onClick={() => remove(it.id)} className="p-2 text-stone-400 hover:text-rose-600"><Trash2 className="h-4 w-4" /></button>

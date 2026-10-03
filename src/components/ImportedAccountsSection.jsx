@@ -46,7 +46,7 @@ export default function ImportedAccountsSection() {
                 <span className="font-medium md:col-span-4">{a.account_name}</span>
                 <span className="truncate text-stone-500 md:col-span-3">{a.full_account_path || '—'}</span>
                 <span className="text-stone-500 md:col-span-2">{GROUP_LABELS[a.top_level_group] || a.top_level_group || '—'}</span>
-                <span className="tabular-nums md:col-span-1 md:text-right">{fmtCurrency(a.annual_budget || 0, { cents: false })}</span>
+                <span className="tabular-nums md:col-span-1 md:text-right">{fmtCurrency(a.annual_budget, { cents: false })}</span>
               </div>
             ))}
           </div>

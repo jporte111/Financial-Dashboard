@@ -1,18 +1,26 @@
 import React from 'react';
 import { usePeriodContext } from '@/lib/usePeriod';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
-import { fmtCurrency } from '@/lib/finance';
+import { fmtCurrency, isMissingNumber } from '@/lib/finance';
+import { effectiveRecord } from '../../base44/shared/sourceMissing.ts';
+
+// A missing month is a gap in the chart (null), never a plotted $0.
+const figure = (v) => (isMissingNumber(v) ? null : Number(v));
 
 export default function TrendCharts() {
   const { periods } = usePeriodContext();
   const data = [...periods]
     .sort((a, b) => a.year - b.year || a.month - b.month)
-    .map((p) => ({
-      name: p.label.split(' ')[0].slice(0, 3),
-      Income: Number(p.month_income || 0),
-      Expenses: Number(p.month_expenses || 0),
-      Cash: Number(p.total_cash || 0),
-    }));
+    .map((raw) => {
+      // Fields listed in source_missing_fields are missing, whatever is stored.
+      const p = effectiveRecord(raw);
+      return {
+        name: p.label.split(' ')[0].slice(0, 3),
+        Income: figure(p.month_income),
+        Expenses: figure(p.month_expenses),
+        Cash: figure(p.total_cash),
+      };
+    });
 
   if (data.length < 2)
     return <p className="rounded-2xl border border-stone-200 bg-white p-10 text-center text-sm text-stone-500">Trends appear once several months are finalized.</p>;

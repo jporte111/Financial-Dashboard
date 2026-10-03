@@ -1,5 +1,5 @@
 import React from 'react';
-import { fmtCurrency, fmtPct } from '@/lib/finance';
+import { fmtCurrency, fmtPct, pct100 } from '@/lib/finance';
 import BudgetBar from '@/components/BudgetBar';
 
 const CARD = 'rounded-2xl border border-stone-300 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]';
@@ -56,9 +56,9 @@ export default function ClientSidePanel({ vm }) {
           <div>
             <div className="mb-1.5 flex justify-between text-xs text-stone-500">
               <span>Share of savings retained</span>
-              <span className="tabular-nums">{fmtPct(retainedPct * 100)}</span>
+              <span className="tabular-nums">{fmtPct(pct100(retainedPct))}</span>
             </div>
-            <BudgetBar pct={retainedPct * 100} status="under" />
+            <BudgetBar pct={pct100(retainedPct)} status="under" />
           </div>
         )}
         {sd.savingsSpendCategories.length > 0 && (

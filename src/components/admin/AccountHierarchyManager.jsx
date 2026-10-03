@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { numericInput, BLANK_INPUT_HINT } from '@/lib/finance';
 import { base44 } from '@/api/base44Client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -50,7 +51,7 @@ function Row({ account, accounts, depth, childrenOf, onPatch, onDelete, onToggle
           </Select>
         </div>
         <div className="md:col-span-1">
-          <Input className="bg-white h-8 text-xs" type="number" step="0.01" defaultValue={account.annual_budget || 0} onBlur={(e) => onPatch(account.id, { annual_budget: Number(e.target.value || 0) })} />
+          <Input className="bg-white h-8 text-xs" type="number" step="0.01" defaultValue={account.annual_budget ?? ''} title={BLANK_INPUT_HINT} onBlur={(e) => { const v = numericInput(e.target.value); if (v != null && v !== account.annual_budget) onPatch(account.id, { annual_budget: v }); }} />
         </div>
         <div className="md:col-span-1 flex items-center gap-2">
           <button

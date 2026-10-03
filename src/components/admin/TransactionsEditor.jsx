@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Trash2, Plus } from 'lucide-react';
-import { fmtCurrency } from '@/lib/finance';
+import { fmtCurrency, numericInput, BLANK_INPUT_HINT } from '@/lib/finance';
 
 const TREATMENTS = [
   ['personal', 'Personal'],
@@ -52,7 +52,7 @@ export default function TransactionsEditor({ periodId, lines }) {
             <Input className="md:col-span-2 bg-white" type="date" defaultValue={t.date || ''} onBlur={(e) => patch(t.id, { date: e.target.value })} />
             <Input className="md:col-span-2 bg-white" placeholder="Vendor" defaultValue={t.vendor || ''} onBlur={(e) => patch(t.id, { vendor: e.target.value })} />
             <Input className="md:col-span-3 bg-white" placeholder="Description" defaultValue={t.description || ''} onBlur={(e) => patch(t.id, { description: e.target.value })} />
-            <Input className="md:col-span-1 bg-white" type="number" step="0.01" placeholder="Amount" defaultValue={t.amount} onBlur={(e) => patch(t.id, { amount: Number(e.target.value || 0) })} />
+            <Input className="md:col-span-1 bg-white" type="number" step="0.01" placeholder="Amount" defaultValue={t.amount} title={BLANK_INPUT_HINT} onBlur={(e) => { const v = numericInput(e.target.value); if (v != null && v !== t.amount) patch(t.id, { amount: v }); }} />
             <div className="md:col-span-2">
               <Select value={t.category || ''} onValueChange={(v) => patch(t.id, { category: v })}>
                 <SelectTrigger className="bg-white"><SelectValue placeholder="Category" /></SelectTrigger>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { fmtCurrency, fmtPct } from '@/lib/finance';
+import { fmtCurrency, fmtPct, pct100 } from '@/lib/finance';
 import Variance, { VariancePct } from '@/components/Variance';
 import PaceComparison from '@/components/PaceComparison';
 import BudgetBar from '@/components/BudgetBar';
@@ -52,16 +52,16 @@ export default function CategoryTable({ rows, monthMode = false, onSelect }) {
                 {fmtCurrency(c.actual)} <span className="text-stone-400">/ {fmtCurrency(monthMode ? c.monthlyBudget : c.annual)}</span>
               </p>
               <div className="mt-2">
-                <BudgetBar pct={c.percentUsed * 100} status={monthMode ? 'under' : c.status} />
+                <BudgetBar pct={pct100(c.percentUsed)} status={monthMode ? 'under' : c.status} />
               </div>
               <p className="mt-1.5 text-xs text-stone-500">
                 {monthMode ? (
-                  <>{fmtPct(c.percentUsed * 100)} of monthly budget</>
+                  <>{fmtPct(pct100(c.percentUsed))} of monthly budget</>
                 ) : r.group === 'savings' ? (
-                  <>{fmtPct(c.percentUsed * 100)} of savings target · expected {fmtCurrency(c.expectedYtdBudget)} by now</>
+                  <>{fmtPct(pct100(c.percentUsed))} of savings target · expected {fmtCurrency(c.expectedYtdBudget)} by now</>
                 ) : (
                   <>
-                    {fmtPct(c.percentUsed * 100)} used · {fmtCurrency(c.remaining)} remaining · expected {fmtCurrency(c.expectedYtdBudget)}
+                    {fmtPct(pct100(c.percentUsed))} used · {fmtCurrency(c.remaining)} remaining · expected {fmtCurrency(c.expectedYtdBudget)}
                   </>
                 )}
               </p>
