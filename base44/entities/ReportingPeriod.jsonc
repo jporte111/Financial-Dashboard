@@ -1,17 +1,45 @@
 {
   "name": "ReportingPeriod",
   "type": "object",
-  // Direct entity access is admin-only for every operation. Anonymous visitors
-  // (the no-login client view) get published data only through the backend
-  // functions, which read with the service role and enforce publication and
-  // field rules server-side (base44/shared/publicDashboardCore.ts).
   "rls": {
-    "create": { "user_condition": { "role": "admin" } },
-    "read": { "user_condition": { "role": "admin" } },
-    // A published period is read-only for direct writes, even for admins.
-    // State changes go through the periodTransition function (service role).
-    "update": { "$and": [{ "user_condition": { "role": "admin" } }, { "data.published": { "$ne": true } }] },
-    "delete": { "$and": [{ "user_condition": { "role": "admin" } }, { "data.published": { "$ne": true } }] }
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "$and": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "data.published": {
+            "$ne": true
+          }
+        }
+      ]
+    },
+    "delete": {
+      "$and": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "data.published": {
+            "$ne": true
+          }
+        }
+      ]
+    }
   },
   "properties": {
     "label": {
@@ -33,8 +61,9 @@
       "format": "date"
     },
     "status": {
-      // Only the periodTransition function (service role) writes this field.
-      "rls": { "write": false },
+      "rls": {
+        "write": false
+      },
       "type": "string",
       "enum": [
         "draft",
@@ -50,8 +79,9 @@
       "type": "number"
     },
     "published": {
-      // Only the periodTransition function (service role) writes this field.
-      "rls": { "write": false },
+      "rls": {
+        "write": false
+      },
       "type": "boolean",
       "default": false
     },
@@ -88,11 +118,11 @@
     },
     "savings_in_ytd": {
       "type": "number",
-      "description": "Savings / Distributions In (YTD). Not present in the BVA workbook — a manually entered value. Null / absent means it has not been entered and mapping is unverified (dashboard shows 'Mapping requires review'); an explicit 0 is a confirmed zero. No 0 default."
+      "description": "Savings / Distributions In (YTD). Not present in the BVA workbook \u2014 a manually entered value. Null / absent means it has not been entered and mapping is unverified (dashboard shows 'Mapping requires review'); an explicit 0 is a confirmed zero. No 0 default."
     },
     "savings_spend_ytd": {
       "type": "number",
-      "description": "Expenses Paid From Savings (YTD). Not present in the BVA workbook — a manually entered value. Null / absent means not entered / mapping unverified; an explicit 0 is a confirmed zero. No 0 default."
+      "description": "Expenses Paid From Savings (YTD). Not present in the BVA workbook \u2014 a manually entered value. Null / absent means not entered / mapping unverified; an explicit 0 is a confirmed zero. No 0 default."
     },
     "checklist": {
       "type": "object",
@@ -148,19 +178,22 @@
       "description": "User (email / name) who ran the most recent BVA import"
     },
     "finalized_at": {
-      // Only the periodTransition function (service role) writes this field.
-      "rls": { "write": false },
+      "rls": {
+        "write": false
+      },
       "type": "string",
       "description": "ISO timestamp when the period was marked Final"
     },
     "finalized_by": {
-      // Only the periodTransition function (service role) writes this field.
-      "rls": { "write": false },
+      "rls": {
+        "write": false
+      },
       "type": "string"
     },
     "bva_import_status": {
-      // Only the periodTransition function (service role) writes this field.
-      "rls": { "write": false },
+      "rls": {
+        "write": false
+      },
       "type": "string",
       "enum": [
         "draft",
@@ -200,24 +233,32 @@
       "description": "Names of numeric fields whose source value is missing (blank in the workbook or left blank in Admin). Readers treat a listed field as missing whatever is stored: Base44 cannot store null, and a missing value must never read as $0.00. See base44/shared/sourceMissing.ts."
     },
     "reopen_log": {
-      // Only the periodTransition function (service role) writes this field.
-      "rls": { "write": false },
+      "rls": {
+        "write": false
+      },
       "type": "array",
-      // Hosted Base44 treats undeclared array items as strings; each entry is an object.
       "items": {
         "type": "object"
       },
       "description": "Audit trail of exceptional reopen operations: { at, by, reason, was_published }. Written only by the periodTransition function."
     },
     "bva_overrides": {
-      // Only the periodTransition function (service role) writes this field.
-      "rls": { "write": false },
+      "rls": {
+        "write": false
+      },
       "type": "object",
       "description": "Map of warning code -> { reason, by, at } recorded when an authorized user accepts a discrepancy"
     },
     "bva_parsed_source": {
       "type": "object",
-      "description": "Raw parsed values from the last workbook import, retained for the Admin review view"
+      "description": "Raw parsed values from the last workbook import, retained for the Admin review view. NEVER modified by corrections \u2014 the Import screen's corrections live in bva_corrections and are applied as a layer over this."
+    },
+    "bva_corrections": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "Corrections and override reasons recorded in the BVA Import screen, persisted to the import draft so they survive refreshes and failed finalization: { id, kind (source|zero_confirm|transfer|group|savings|override), target, path, original_value, value, reason, by, at }. Applied as a layer over bva_parsed_source (which is never modified) and carried through Apply and Finalize."
     }
   },
   "required": [

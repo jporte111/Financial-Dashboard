@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { validateBva } from '@/lib/bvaValidation';
+import { groupMapFromLines } from '@/lib/bvaImport';
 import { fmtCurrency, fmtPct } from '@/lib/finance';
 import { ChevronDown } from 'lucide-react';
 
@@ -46,8 +47,9 @@ function BvaReviewRow({ period, open, onToggle, budgetLines }) {
     return validateBva(period.bva_parsed_source, {
       cutoffDate: period.reporting_cutoff_date || period.end_date,
       overrides: period.bva_overrides || {},
+      groupMap: groupMapFromLines(budgetLines || []),
     });
-  }, [period]);
+  }, [period, budgetLines]);
 
   const warnings = period.bva_validation_warnings || validation?.warnings || [];
   const overrides = period.bva_overrides || {};
@@ -124,7 +126,9 @@ function BvaReviewRow({ period, open, onToggle, budgetLines }) {
                       <p className="font-medium">{w.code} {ov ? <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">overridden</span> : w.blocksFinalize ? <span className="ml-2 rounded-full bg-rose-50 px-2 py-0.5 text-xs text-rose-700">blocks finalize</span> : null}</p>
                       <p className="text-stone-600">{w.message}</p>
                       {w.sourceValue != null && (
-                        <p className="text-xs tabular-nums text-stone-500">workbook {fmtCurrency(w.sourceValue)} · calculated {fmtCurrency(w.calculatedValue)}</p>
+                        <p className="text-xs tabular-nums text-stone-500">
+                          workbook {w.code === 'pace_proxy_divergence' ? `${Number(w.sourceValue).toFixed(2)}%` : fmtCurrency(w.sourceValue)} · calculated {w.code === 'pace_proxy_divergence' ? `${Number(w.calculatedValue).toFixed(2)}%` : fmtCurrency(w.calculatedValue)}
+                        </p>
                       )}
                       {ov && <p className="mt-1 text-xs text-stone-500">Override: “{ov.reason}”{ov.by ? ` — ${ov.by}` : ''}{ov.at ? ` (${new Date(ov.at).toLocaleString()})` : ''}</p>}
                     </div>
@@ -154,6 +158,29 @@ function BvaReviewRow({ period, open, onToggle, budgetLines }) {
               manually entered and are flagged for Admin review.
             </p>
           </div>
+
+          {(period.bva_corrections || []).length > 0 && (
+            <div>
+              <p className="mb-2 text-xs uppercase tracking-[0.12em] text-stone-400">
+                Adjustments ({period.bva_corrections.length})
+              </p>
+              <ul className="space-y-1 text-xs text-stone-600">
+                {period.bva_corrections.map((c) => (
+                  <li key={c.id || `${c.kind}-${c.at}`}>
+                    <span className="font-medium">{String(c.kind || '').replace(/_/g, ' ')}</span>
+                    {c.target ? ` · ${c.target}` : ''}
+                    {c.kind !== 'override'
+                      ? ` · was ${c.original_value == null ? 'blank' : fmtCurrency(c.original_value)} → ${typeof c.value === 'number' ? fmtCurrency(c.value) : String(c.value == null || c.value === '' ? '—' : c.value)}`
+                      : ''}
+                    {c.reason ? ` · ${c.reason}` : ''}
+                    {c.by ? ` · ${c.by}` : ''}
+                    {c.at ? ` · ${new Date(c.at).toLocaleString()}` : ''}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-xs text-stone-400">Applied over the preserved workbook; carried through Apply and Finalize.</p>
+            </div>
+          )}
         </div>
       )}
     </div>

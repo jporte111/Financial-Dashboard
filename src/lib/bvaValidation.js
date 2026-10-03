@@ -129,6 +129,10 @@ const ymLabel = (ym) => `${MONTH_NAMES[ym.month - 1]} ${ym.year}`;
 export function validateBva(parsed, opts = {}) {
   const warnings = [];
   const overrides = opts.overrides || {};
+  // Confirmed group mappings (saved BudgetLine rows or import corrections),
+  // keyed by normalized category code. The parsed workbook itself carries no
+  // group for watch-list rows.
+  const groupMap = opts.groupMap || {};
   const cleared = (code) => !!overrides[code];
   const cutoffDate = opts.cutoffDate || parsed?.meta?.cutoffDate || null;
   const elapsedMonths = opts.elapsedMonths != null ? opts.elapsedMonths : cutoffDate ? elapsedMonthsFromCutoff(cutoffDate) : null;
@@ -442,14 +446,17 @@ export function validateBva(parsed, opts = {}) {
   // A watch-list row needs both figures once it has either (rows with none
   // are not imported by the parser).
   missingIn('detail', 'Watch-list categories', detailRaw.filter((d) => (d.actualYtd == null) !== (d.annualBudget == null)), ['actualYtd', 'annualBudget']);
-  const detailCategories = detailRaw.map((d) => ({
-    code: d.code || null,
-    name: d.name,
-    group: d.group || 'unassigned',
-    groupConfirmed: !!d.groupConfirmed,
-    monthActual: d.monthActual == null ? null : n(d.monthActual),
-    ...ytdOrNull(d.actualYtd, d.annualBudget, elapsedMonths),
-  }));
+  const detailCategories = detailRaw.map((d) => {
+    const mapped = d.code ? groupMap[String(d.code).trim().toLowerCase().replace(/\s+/g, ' ')] || null : null;
+    return {
+      code: d.code || null,
+      name: d.name,
+      group: mapped || d.group || 'unassigned',
+      groupConfirmed: !!mapped || !!d.groupConfirmed,
+      monthActual: d.monthActual == null ? null : n(d.monthActual),
+      ...ytdOrNull(d.actualYtd, d.annualBudget, elapsedMonths),
+    };
+  });
 
   const blocksFinalize = warnings.some((w) => w.blocksFinalize);
   const openReconciliations = warnings.filter((w) => w.blocksFinalize).map((w) => w.code);
