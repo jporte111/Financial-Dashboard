@@ -1,11 +1,12 @@
 import React from 'react';
 import { fmtCurrency, fmtPct } from '@/lib/finance';
 import Variance, { VariancePct } from '@/components/Variance';
+import PaceComparison from '@/components/PaceComparison';
 import BudgetBar from '@/components/BudgetBar';
 import StatusPill from '@/components/StatusPill';
 import { ChevronRight, AlertTriangle } from 'lucide-react';
 
-const GROUP_LABEL = { fixed: 'Fixed', variable: 'Variable', discretionary: 'Discretionary', unassigned: 'Unassigned' };
+const GROUP_LABEL = { fixed: 'Fixed', variable: 'Variable', discretionary: 'Discretionary', savings: 'Savings', unassigned: 'Unassigned' };
 
 // Spending Detail table, fed by pre-computed BVA detail rows (see
 // buildBvaDashboard). No QuickBooks data is read here.
@@ -56,6 +57,8 @@ export default function CategoryTable({ rows, monthMode = false, onSelect }) {
               <p className="mt-1.5 text-xs text-stone-500">
                 {monthMode ? (
                   <>{fmtPct(c.percentUsed * 100)} of monthly budget</>
+                ) : r.group === 'savings' ? (
+                  <>{fmtPct(c.percentUsed * 100)} of savings target · expected {fmtCurrency(c.expectedYtdBudget)} by now</>
                 ) : (
                   <>
                     {fmtPct(c.percentUsed * 100)} used · {fmtCurrency(c.remaining)} remaining · expected {fmtCurrency(c.expectedYtdBudget)}
@@ -65,12 +68,18 @@ export default function CategoryTable({ rows, monthMode = false, onSelect }) {
             </div>
 
             <div className="md:col-span-2 text-sm">
-              <p className="tabular-nums"><Variance amount={monthMode ? c.varianceToBudget : c.varianceToPace} cents={false} /></p>
-              {!monthMode && (
-                <p className="text-xs tabular-nums"><VariancePct pct={c.variancePct} amount={c.varianceToPace} showLabel={false} /></p>
+              {!monthMode && r.group === 'savings' ? (
+                <PaceComparison view={c} savings />
+              ) : (
+                <>
+                  <p className="tabular-nums"><Variance amount={monthMode ? c.varianceToBudget : c.varianceToPace} cents={false} /></p>
+                  {!monthMode && (
+                    <p className="text-xs tabular-nums"><VariancePct pct={c.variancePct} amount={c.varianceToPace} showLabel={false} /></p>
+                  )}
+                </>
               )}
               {!monthMode && r.currentMonthShown !== false && (
-                <p className="mt-1 text-xs text-stone-400">This month {fmtCurrency(r.monthActual)}</p>
+                <p className="mt-1 text-xs text-stone-400">This month {r.monthActual == null ? '—' : fmtCurrency(r.monthActual)}</p>
               )}
             </div>
 

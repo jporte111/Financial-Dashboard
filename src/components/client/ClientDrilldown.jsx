@@ -3,7 +3,7 @@ import { base44 } from '@/api/base44Client';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { bvaComputeYtd, fmtCurrency, fmtPct, PACE_VARIANCE_TOOLTIP } from '@/lib/finance';
+import { bvaComputeYtd, bvaSavingsStatus, fmtCurrency, fmtPct, PACE_VARIANCE_TOOLTIP } from '@/lib/finance';
 import StatusPill from '@/components/StatusPill';
 import InfoHint from '@/components/InfoHint';
 import Variance, { VariancePct } from '@/components/Variance';
@@ -45,7 +45,9 @@ function DrilldownBody({ line, periodId, monthsElapsed }) {
     };
   }, [line, periodId]);
 
-  const c = bvaComputeYtd({ actualYtd: line.ytd_actual, annualBudget: line.annual_budget }, monthsElapsed);
+  const c = line.group === 'savings'
+    ? bvaSavingsStatus({ actualYtd: line.ytd_actual, annualBudget: line.annual_budget }, monthsElapsed)
+    : bvaComputeYtd({ actualYtd: line.ytd_actual, annualBudget: line.annual_budget }, monthsElapsed);
 
   return (
     <>
@@ -60,7 +62,7 @@ function DrilldownBody({ line, periodId, monthsElapsed }) {
         <Stat label="Expected YTD Budget" value={fmtCurrency(c.expectedYtdBudget)} />
         <Stat label="Variance to Expected Pace" hint={PACE_VARIANCE_TOOLTIP} value={<Variance amount={c.varianceToPace} />} />
         <Stat label="Variance Percentage" value={<VariancePct pct={c.variancePct} amount={c.varianceToPace} showLabel={false} />} />
-        <Stat label="Current Month" value={fmtCurrency(line.month_actual)} />
+        <Stat label="Current Month" value={line.month_actual == null ? '—' : fmtCurrency(line.month_actual)} />
       </div>
 
       <div className="mt-8 flex items-center justify-between">

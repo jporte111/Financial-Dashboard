@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { bvaComputeYtd, fmtCurrency, fmtPct, PACE_VARIANCE_TOOLTIP } from '@/lib/finance';
+import { bvaComputeYtd, bvaSavingsStatus, fmtCurrency, fmtPct, PACE_VARIANCE_TOOLTIP } from '@/lib/finance';
 import StatusPill from '@/components/StatusPill';
 import InfoHint from '@/components/InfoHint';
 import Variance, { VariancePct } from '@/components/Variance';
@@ -47,7 +47,9 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
 
   const hasBudgetContext = line && (line.has_snapshot || (line.annual_budget && Number(line.annual_budget) > 0));
   const c = hasBudgetContext
-    ? bvaComputeYtd({ actualYtd: line.ytd_actual, annualBudget: line.annual_budget }, monthsElapsed)
+    ? line.group === 'savings'
+      ? bvaSavingsStatus({ actualYtd: line.ytd_actual, annualBudget: line.annual_budget }, monthsElapsed)
+      : bvaComputeYtd({ actualYtd: line.ytd_actual, annualBudget: line.annual_budget }, monthsElapsed)
     : null;
 
   return (
@@ -72,7 +74,7 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
                   <Stat label="Expected YTD Budget" value={fmtCurrency(c.expectedYtdBudget)} />
                   <Stat label="Variance to Expected Pace" hint={PACE_VARIANCE_TOOLTIP} value={<Variance amount={c.varianceToPace} />} />
                   <Stat label="Variance Percentage" value={<VariancePct pct={c.variancePct} amount={c.varianceToPace} showLabel={false} />} />
-                  <Stat label="Current Month" value={fmtCurrency(line.month_actual)} />
+                  <Stat label="Current Month" value={line.month_actual == null ? '—' : fmtCurrency(line.month_actual)} />
                 </div>
               </>
             )}

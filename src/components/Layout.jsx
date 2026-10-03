@@ -4,7 +4,7 @@ import { base44 } from '@/api/base44Client';
 import { PeriodProvider, usePeriodData } from '@/lib/usePeriod';
 import PeriodSelector from '@/components/PeriodSelector';
 import { Eye, LogOut } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatDateOnly } from '@/lib/finance';
 
 const NAV = [
   { to: '/', label: 'Dashboard' },
@@ -33,7 +33,7 @@ export default function Layout() {
                 <h1 className="font-display text-2xl md:text-3xl tracking-tight">Sonia Financial Dashboard</h1>
                 {ctx.period && (
                   <p className="mt-2 text-xs uppercase tracking-[0.14em] text-stone-500">
-                    Last Updated {ctx.period.last_updated ? format(new Date(ctx.period.last_updated), 'MMMM d, yyyy') : '—'}
+                    Last Updated {ctx.period.last_updated ? formatDateOnly(ctx.period.last_updated) : '—'}
                     <span className="mx-2 text-stone-300">|</span>
                     Reporting Status: {ctx.period.status === 'final' ? 'Final' : 'Preliminary'}
                   </p>

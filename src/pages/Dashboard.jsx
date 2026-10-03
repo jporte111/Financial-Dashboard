@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useBvaDashboard } from '@/lib/useBvaDashboard';
 import { fmtCurrency, fmtPct, FLAG_TEXT } from '@/lib/finance';
-import Variance, { VariancePct } from '@/components/Variance';
+import PaceComparison from '@/components/PaceComparison';
+import WarningStatusPanel from '@/components/WarningStatusPanel';
 import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import SnapshotCards from '@/components/SnapshotCards';
 import GroupOverview from '@/components/GroupOverview';
@@ -19,6 +20,7 @@ const DETAIL_FILTERS = [
   ['fixed', 'Fixed'],
   ['variable', 'Variable'],
   ['discretionary', 'Discretionary'],
+  ['savings', 'Savings'],
   ['unassigned', 'Unassigned'],
   ['attention', 'Needs Attention'],
 ];
@@ -72,20 +74,12 @@ export default function Dashboard() {
         </div>
       )}
 
-      {vm.hasUnresolvedWarnings && (
-        <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>
-            This period has {vm.warnings.unresolved.length} unresolved validation warning
-            {vm.warnings.unresolved.length === 1 ? '' : 's'}. Figures shown are the independently calculated values.
-          </p>
-        </div>
-      )}
+      {vm.warnings.list.length > 0 && <WarningStatusPanel warnings={vm.warnings} />}
 
       <section>
         <SectionHeading
           title="Financial Snapshot"
-          subtitle={`${vm.labels.displayMonth}${vm.labels.reportingCutoffDate ? ` · through ${vm.labels.reportingCutoffDate}` : ''} · ${
+          subtitle={`${vm.labels.reportHeading}${vm.labels.dataThrough ? ` · ${vm.labels.dataThrough}` : ''} · ${
             vm.provenance.isBvaValidated ? 'BVA-validated' : vm.provenance.isLegacy ? 'Legacy — not BVA-validated' : 'Draft BVA import'
           }`}
         />
@@ -121,12 +115,7 @@ export default function Dashboard() {
                   <StatusPill status={d.ytd.status} />
                 </div>
                 <div className="mt-4">
-                  <p className="font-display text-xl tabular-nums">
-                    <Variance amount={d.ytd.varianceToPace} cents={false} />
-                  </p>
-                  <p className="mt-1 text-xs tabular-nums">
-                    <VariancePct pct={d.ytd.variancePct} amount={d.ytd.varianceToPace} showLabel={false} />
-                  </p>
+                  <PaceComparison view={d.ytd} savings={d.group === 'savings'} emphasized />
                 </div>
                 <div className="mt-4 space-y-1 text-sm text-stone-500">
                   <p>{fmtCurrency(d.ytd.actual)} of {fmtCurrency(d.ytd.annual)}</p>
@@ -179,7 +168,7 @@ export default function Dashboard() {
             <div key={label} className="rounded-2xl border border-stone-200 bg-white p-6">
               <p className="text-xs uppercase tracking-[0.14em] text-stone-500">{label}</p>
               <p className={`mt-3 font-display tracking-tight tabular-nums ${value == null ? 'text-lg text-stone-400' : 'text-2xl'}`}>
-                {value == null ? SECTION_STATE_TEXT[missingState] : fmtCurrency(value)}
+                {value == null ? 'Not provided' : fmtCurrency(value)}
               </p>
               {note && <p className="mt-2 text-xs text-stone-400">{note}</p>}
             </div>

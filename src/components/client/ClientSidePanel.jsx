@@ -5,11 +5,13 @@ import BudgetBar from '@/components/BudgetBar';
 const CARD = 'rounded-2xl border border-stone-300 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]';
 const LABEL = 'text-xs uppercase tracking-[0.14em] text-stone-500';
 
-function Stat({ label, value }) {
+function Stat({ label, value, missingText = '—' }) {
   return (
     <div>
       <p className={LABEL}>{label}</p>
-      <p className="mt-1 font-display text-2xl tracking-tight tabular-nums">{value == null ? '—' : fmtCurrency(value)}</p>
+      <p className="mt-1 font-display text-2xl tracking-tight tabular-nums">
+        {value == null ? missingText : fmtCurrency(value)}
+      </p>
     </div>
   );
 }
@@ -45,9 +47,9 @@ export default function ClientSidePanel({ vm }) {
       <div className={`${CARD} space-y-5`}>
         <p className={LABEL}>Savings Allocation</p>
         <div className="grid grid-cols-2 gap-4">
-          <Stat label="Distributions In" value={sd.savingsIn} />
-          <Stat label="Net Savings" value={sd.netSavings} />
-          <Stat label="Expenses From Savings" value={sd.savingsSpend} />
+          <Stat label="Distributions In" value={sd.savingsIn} missingText="Not provided" />
+          <Stat label="Net Savings" value={sd.netSavings} missingText="Not provided" />
+          <Stat label="Expenses From Savings" value={sd.savingsSpend} missingText="Not provided" />
           <Stat label="Distributions YTD" value={sd.distributionsYtd} />
         </div>
         {retainedPct != null && (

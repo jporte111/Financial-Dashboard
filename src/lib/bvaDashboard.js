@@ -16,8 +16,12 @@ import {
   paceStatus,
   STATUS,
   flagsForCategory,
+  savingsStatus,
+  SAVINGS_STATUS,
+  FLAG,
   MONTHS_IN_YEAR,
 } from './bva.js';
+import { overridesFromCorrections, WARNING_SOURCE_PATHS } from './bvaCorrections.js';
 import { effectiveRecord } from '../../base44/shared/sourceMissing.ts';
 
 const EXPENSE_GROUPS = ['fixed', 'variable', 'discretionary'];
@@ -76,6 +80,8 @@ function reportingLabels(period, elapsedMonths) {
     incomeThrough: monthWord ? `Income received through ${monthWord} ${year}` : null,
     expensesThrough: monthWord ? `Expenses through ${monthWord} ${year}` : null,
     cashAsOf: cutoff ? `As of ${fmtDate(cutoff)}` : null,
+    reportHeading: displayMonth ? `${displayMonth} report` : period?.label || '',
+    dataThrough: cutoff ? `Data through ${fmtDate(cutoff)}` : null,
     lastUpdated: period?.last_updated ? fmtDate(period.last_updated) : null,
     statusLabel: isFinal ? 'Final' : 'Draft',
     isFinal,
@@ -84,19 +90,95 @@ function reportingLabels(period, elapsedMonths) {
   };
 }
 
-function warningIndex(period) {
+// How each stored validation warning stands against what has since been
+// confirmed in Admin. The stored warning list is never rewritten — resolution
+// status is derived at read time from the audit trail (override reasons,
+// source corrections) and the period's own child records, so the history is
+// preserved and a warning re-emerges automatically if its basis changes.
+const INFORMATIONAL_CODES = new Set(['period_follows_cutoff_month', 'period_is_cutoff_month']);
+
+// "Blank distribution cells for quarters that have begun: Sample Bank Q1, Sample Bank Q2."
+//   → [{ entity: 'Sample Bank', quarter: 'q1' }, { entity: 'Sample Bank', quarter: 'q2' }]
+function parseBlankQuarters(message) {
+  const m = /:\s*(.+?)(?:\.\s|\.$)/.exec(String(message || '').trim());
+  if (!m) return [];
+  return m[1]
+    .split(',')
+    .map((s) => s.trim())
+    .map((s) => {
+      const mm = /^(.*)\s+Q([1-4])$/i.exec(s);
+      return mm ? { entity: mm[1].trim(), quarter: `q${mm[2]}` } : null;
+    })
+    .filter(Boolean);
+}
+
+function warningIndex(period, { distributions = [], transfers = [] } = {}) {
   const list = Array.isArray(period?.bva_validation_warnings) ? period.bva_validation_warnings : [];
+  const corrections = Array.isArray(period?.bva_corrections) ? period.bva_corrections : [];
+  const overrides = { ...(period?.bva_overrides || {}), ...overridesFromCorrections(corrections) };
+  const correctedPaths = new Set(
+    corrections.filter((c) => c && c.kind === 'source' && c.path).map((c) => c.path)
+  );
+
+  const classified = list.map((w) => {
+    const entry = { ...w, overridden: w.overridden || w.override != null };
+    let resolution = 'unresolved';
+    let note = null;
+    const o = overrides[w.code];
+    if (o) {
+      resolution = 'accepted';
+      note = o.reason;
+    } else if (WARNING_SOURCE_PATHS[w.code] && correctedPaths.has(WARNING_SOURCE_PATHS[w.code])) {
+      resolution = 'resolved';
+      const corr = corrections.find((c) => c.kind === 'source' && c.path === WARNING_SOURCE_PATHS[w.code]);
+      note = corr ? `Corrected in the BVA Import screen: ${corr.reason || 'value corrected'}` : 'Corrected in the BVA Import screen.';
+    } else if (w.code === 'transfer_labels_misaligned') {
+      if (transfers.length > 0 && transfers.every((t) => t.source && t.purpose)) {
+        resolution = 'resolved';
+        note = `All ${transfers.length} recurring transfers carry confirmed source and purpose labels.`;
+      }
+    } else if (w.code === 'distribution_quarter_blank') {
+      const blanks = parseBlankQuarters(w.message);
+      if (blanks.length) {
+        const stillBlank = blanks.filter(({ entity, quarter }) => {
+          const d = distributions.find(
+            (x) => String(x.entity_name || '').trim().toLowerCase() === entity.toLowerCase()
+          );
+          return !d || d[quarter] == null;
+        });
+        if (!stillBlank.length) {
+          resolution = 'resolved';
+          note = 'Each blank distribution quarter has since been confirmed.';
+        }
+      }
+    } else if (INFORMATIONAL_CODES.has(w.code)) {
+      resolution = 'informational';
+      note = 'The BVA report month intentionally follows its data-cutoff month; the cutoff is confirmed in Admin.';
+    }
+    return { ...entry, resolution, note };
+  });
+
   const bySection = {};
   const byCategory = {};
-  for (const w of list) {
-    const overridden = w.overridden || w.override != null;
-    const entry = { ...w, overridden };
-    if (w.section) (bySection[w.section] = bySection[w.section] || []).push(entry);
+  for (const w of classified) {
+    if (w.section) (bySection[w.section] = bySection[w.section] || []).push(w);
     const key = (w.category || w.account_number || '').toString().toLowerCase();
-    if (key) (byCategory[key] = byCategory[key] || []).push(entry);
+    if (key) (byCategory[key] = byCategory[key] || []).push(w);
   }
-  const unresolved = list.filter((w) => !(w.overridden || w.override != null));
-  return { list, bySection, byCategory, unresolved, hasUnresolved: unresolved.length > 0 };
+  const unresolved = classified.filter((w) => w.resolution === 'unresolved');
+  return {
+    list: classified,
+    bySection,
+    byCategory,
+    unresolved,
+    hasUnresolved: unresolved.length > 0,
+    resolution: {
+      resolved: classified.filter((w) => w.resolution === 'resolved'),
+      accepted: classified.filter((w) => w.resolution === 'accepted'),
+      informational: classified.filter((w) => w.resolution === 'informational'),
+      unresolved,
+    },
+  };
 }
 
 function pickState({ imported = false, needsReview = false, discrepancy = false, monthMode = false, hasMonthActivity = false }) {
@@ -134,7 +216,7 @@ export function buildBvaDashboard(data, opts = {}) {
       : elapsedMonthsFromCutoff(period.reporting_cutoff_date || period.end_date);
   const pacePct = expectedPacePct(elapsedMonths);
   const labels = reportingLabels(period, elapsedMonths);
-  const warnings = warningIndex(period);
+  const warnings = warningIndex(period, { distributions, transfers });
 
   // A period is "BVA-validated" only when it has a finalized BVA import.
   // Everything else is legacy data or an in-progress draft import — it is
@@ -269,17 +351,27 @@ export function buildBvaDashboard(data, opts = {}) {
   const detail = detailLines.map((l) => {
     const key = (l.qb_code || l.category || '').toString().toLowerCase();
     const catWarnings = warnings.byCategory[key] || [];
-    const hasUnresolvedWarning = catWarnings.some((w) => !w.overridden);
-    const f = flagsForCategory(
-      { actualYtd: n(l.ytd_actual), annualBudget: n(l.annual_budget) },
-      elapsedMonths,
-      hasUnresolvedWarning
-    );
+    const hasUnresolvedWarning = catWarnings.some((w) => w.resolution === 'unresolved');
+    // A savings line (e.g. MONTHLY SAVINGS) is a TARGET, not an expense: the
+    // pace math is the same, but the tone inverts (saving less than expected is
+    // the unfavorable outcome) and the labels speak of the savings target.
+    const isSavingsLine = l.budget_group === 'savings';
+    const savingsC = isSavingsLine
+      ? savingsStatus({ actualYtd: n(l.ytd_actual), annualBudget: n(l.annual_budget) }, elapsedMonths)
+      : null;
+    const f = isSavingsLine
+      ? null
+      : flagsForCategory(
+          { actualYtd: n(l.ytd_actual), annualBudget: n(l.annual_budget) },
+          elapsedMonths,
+          hasUnresolvedWarning
+        );
     const monthC = computeMonth({
       monthActual: n(l.month_actual),
       annualBudget: n(l.annual_budget),
       monthlyBudget: l.monthly_budget,
     });
+    const hasFvdGroup = !!(l.group_confirmed && EXPENSE_GROUPS.includes(l.budget_group));
     return {
       id: l.id,
       category: l.category,
@@ -291,20 +383,26 @@ export function buildBvaDashboard(data, opts = {}) {
       ytd_actual: n(l.ytd_actual),
       month_actual: l.month_actual == null ? null : n(l.month_actual),
       has_snapshot: true,
-      // A detail row counts as grouped ONLY when an admin has confirmed a valid
+      // Savings lines carry their own classification; other detail rows count
+      // as grouped ONLY when an admin has confirmed a valid
       // Fixed/Variable/Discretionary group. Anything else is 'unassigned'.
-      group: l.group_confirmed && EXPENSE_GROUPS.includes(l.budget_group) ? l.budget_group : 'unassigned',
-      groupConfirmed: !!(l.group_confirmed && EXPENSE_GROUPS.includes(l.budget_group)),
-      groupLabel:
-        l.group_confirmed && EXPENSE_GROUPS.includes(l.budget_group) ? GROUP_LABEL[l.budget_group] : 'Unassigned',
+      group: isSavingsLine ? 'savings' : hasFvdGroup ? l.budget_group : 'unassigned',
+      groupConfirmed: isSavingsLine ? true : hasFvdGroup,
+      groupLabel: isSavingsLine ? 'Savings' : hasFvdGroup ? GROUP_LABEL[l.budget_group] : 'Unassigned',
       // null = the workbook had no current-month figure for this line.
       monthActual: l.month_actual == null ? null : round2(n(l.month_actual)),
       monthActualMissing: l.month_actual == null,
-      ytd: f.computed,
+      ytd: isSavingsLine ? savingsC : f.computed,
       month: monthC,
-      view: monthMode ? monthC : f.computed,
-      flagged: f.flagged,
-      reasons: f.reasons,
+      view: monthMode ? monthC : isSavingsLine ? savingsC : f.computed,
+      flagged: isSavingsLine
+        ? savingsC.status === SAVINGS_STATUS.BELOW || hasUnresolvedWarning
+        : f.flagged,
+      reasons: isSavingsLine
+        ? savingsC.status === SAVINGS_STATUS.BELOW
+          ? [FLAG.SAVINGS_BELOW]
+          : []
+        : f.reasons,
       hasUnresolvedWarning,
       warnings: catWarnings,
       drilldownEnabled: l.drilldown_enabled !== false,

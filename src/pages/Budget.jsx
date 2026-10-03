@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { usePeriodContext } from '@/lib/usePeriod';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
 import { useBvaDashboard } from '@/lib/useBvaDashboard';
-import { bvaComputeYtd, fmtCurrency, fmtPct } from '@/lib/finance';
+import { bvaComputeYtd, bvaSavingsStatus, fmtCurrency, fmtPct } from '@/lib/finance';
+import StatusPill from '@/components/StatusPill';
 import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import SectionHeading from '@/components/SectionHeading';
 import GroupOverview from '@/components/GroupOverview';
@@ -94,15 +95,18 @@ export default function Budget() {
           <SectionHeading title="Planned Monthly Savings" subtitle="Separate from savings-funded spending and entity distributions" />
           <div className="grid gap-4 sm:grid-cols-2">
             {savingsLines.map((l) => {
-              const c = bvaComputeYtd({ actualYtd: l.ytd_actual, annualBudget: l.annual_budget }, vm.elapsedMonths);
+              const c = bvaSavingsStatus({ actualYtd: l.ytd_actual, annualBudget: l.annual_budget }, vm.elapsedMonths);
               return (
                 <div key={l.id} className="rounded-2xl border border-stone-200 bg-white p-6">
-                  <p className="font-medium">{l.category}</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="font-medium">{l.category}</p>
+                    <StatusPill status={c.status} />
+                  </div>
                   <p className="mt-3 font-display text-2xl tabular-nums">{fmtCurrency(c.actual)}</p>
                   <p className="text-sm text-stone-500">of {fmtCurrency(c.annual)} annual target</p>
-                  <div className="mt-4"><BudgetBar pct={c.percentUsed * 100} status="under" /></div>
+                  <div className="mt-4"><BudgetBar pct={c.percentUsed * 100} status={c.status} /></div>
                   <div className="mt-3 flex justify-between text-sm text-stone-500">
-                    <span>Current month {fmtCurrency(l.month_actual)}</span>
+                    <span>Current month {l.month_actual == null ? '—' : fmtCurrency(l.month_actual)}</span>
                     <span>{fmtPct(c.percentUsed * 100)} of goal</span>
                   </div>
                 </div>

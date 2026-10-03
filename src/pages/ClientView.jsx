@@ -83,8 +83,8 @@ export default function ClientView() {
             </div>
 
             <footer className="mt-16 border-t border-stone-200 py-8 text-xs text-stone-400">
-              Prepared by Namaste Financial Management · {vm.labels.displayMonth}
-              {vm.labels.reportingCutoffDate ? ` · through ${vm.labels.reportingCutoffDate}` : ''}
+              Prepared by Namaste Financial Management · {vm.labels.reportHeading}
+              {vm.labels.dataThrough ? ` · ${vm.labels.dataThrough}` : ''}
             </footer>
           </>
         )}
