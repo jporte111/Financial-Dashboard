@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildBvaDashboard, SECTION_STATE } from './bvaDashboard.js';
+import { buildBvaDashboard, SECTION_STATE, parseBlankQuarters } from './bvaDashboard.js';
 import { round2 } from './bva.js';
 
 // Fully synthetic fixture. Names and numbers are invented; no client data.
@@ -304,5 +304,11 @@ describe('period provenance: legacy vs BVA-validated', () => {
     expect(vm.provenance.isBvaValidated).toBe(true);
     expect(vm.provenance.isLegacy).toBe(false);
     expect(vm.provenance.label).toBe(null);
+  });
+
+  it('parses the blank entity-quarters named in a warning message', () => {
+    expect(parseBlankQuarters('Blank distribution cells for quarters that have begun: Sample Bank Q1, Sample Bank Q2. They add nothing to Distributions YTD; confirm none was received.'))
+      .toEqual([{ entity: 'Sample Bank', quarter: 'q1' }, { entity: 'Sample Bank', quarter: 'q2' }]);
+    expect(parseBlankQuarters('no quarters named here')).toEqual([]);
   });
 });
