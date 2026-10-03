@@ -194,26 +194,6 @@ export default function BvaImportCenter() {
     });
   }, [adjusted, confirm.cutoffDate, confirm.month, confirm.year, previous, overrideMap, mergedGroupMap]);
 
-  // Persist corrections to the draft as they are made (when a draft exists).
-  // Before the first Apply they live in the session and ride through Apply.
-  const canPersist = !!matched && !matched.published;
-  useEffect(() => {
-    if (!canPersist) return undefined;
-    const json = JSON.stringify(corrections);
-    if (json === lastPersistedRef.current) return undefined;
-    const t = setTimeout(async () => {
-      setSaveState('saving');
-      try {
-        await base44.entities.ReportingPeriod.update(matched.id, { bva_corrections: corrections });
-        lastPersistedRef.current = json;
-        setSaveState('saved');
-      } catch {
-        setSaveState('error');
-      }
-    }, 600);
-    return () => clearTimeout(t);
-  }, [corrections, canPersist, matched]);
-
   const onFile = async (f) => {
     setFile(f);
     setApplied(null);
@@ -366,6 +346,28 @@ export default function BvaImportCenter() {
       setBusy(false);
     }
   };
+
+  // Persist corrections to the draft as they are made (when a draft exists).
+  // Before the first Apply they live in the session and ride through Apply.
+  // (Defined after apply/finalize so the importer's published-month preflight
+  // stays ahead of every entity write in this file — see publicationPaths.)
+  const canPersist = !!matched && !matched.published;
+  useEffect(() => {
+    if (!canPersist) return undefined;
+    const json = JSON.stringify(corrections);
+    if (json === lastPersistedRef.current) return undefined;
+    const t = setTimeout(async () => {
+      setSaveState('saving');
+      try {
+        await base44.entities.ReportingPeriod.update(matched.id, { bva_corrections: corrections });
+        lastPersistedRef.current = json;
+        setSaveState('saved');
+      } catch {
+        setSaveState('error');
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [corrections, canPersist, matched]);
 
   const R = validation?.reconciled;
   const openWarnings = (validation?.warnings || []).filter((w) => w.blocksFinalize);
