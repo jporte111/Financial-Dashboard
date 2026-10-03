@@ -41,7 +41,7 @@ function StateNote({ state, className = '' }) {
 }
 
 export default function Dashboard() {
-  const { vm, loading, periodId } = useBvaDashboard();
+  const { vm, loading, periodId, period } = useBvaDashboard();
   const [selected, setSelected] = useState(null);
   const [detailFilter, setDetailFilter] = useState('all');
 
@@ -74,7 +74,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {vm.warnings.list.length > 0 && <WarningStatusPanel warnings={vm.warnings} />}
+      {vm.warnings.list.length > 0 && <WarningStatusPanel warnings={vm.warnings} period={period} />}
 
       <section>
         <SectionHeading

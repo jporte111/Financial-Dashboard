@@ -1,5 +1,6 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle2, Info, Scale } from 'lucide-react';
+import WarningDecision from '@/components/WarningDecision';
 
 // Classified validation warnings. Every warning stays listed — its resolution
 // status and the recorded reason / audit note are shown alongside it rather
@@ -11,7 +12,7 @@ const GROUPS = [
   { key: 'informational', label: 'Informational', icon: Info, badge: 'border-stone-200 bg-stone-100 text-stone-600' },
 ];
 
-export default function WarningStatusPanel({ warnings }) {
+export default function WarningStatusPanel({ warnings, period = null }) {
   if (!warnings || !Array.isArray(warnings.list) || warnings.list.length === 0) return null;
   const { resolution, list, unresolved } = warnings;
   return (
@@ -36,9 +37,10 @@ export default function WarningStatusPanel({ warnings }) {
                     className="flex items-start gap-3 rounded-xl border border-stone-100 bg-stone-50/60 p-3 text-sm"
                   >
                     <Icon className="mt-0.5 h-4 w-4 shrink-0 text-stone-400" />
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-stone-800">{w.message}</p>
                       {w.note && <p className="mt-1 text-xs text-stone-500">{w.note}</p>}
+                      {key === 'unresolved' && <WarningDecision warning={w} period={period} />}
                     </div>
                     <span
                       className={`ml-auto inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${badge}`}

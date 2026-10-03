@@ -99,7 +99,7 @@ const INFORMATIONAL_CODES = new Set(['period_follows_cutoff_month', 'period_is_c
 
 // "Blank distribution cells for quarters that have begun: Sample Bank Q1, Sample Bank Q2."
 //   → [{ entity: 'Sample Bank', quarter: 'q1' }, { entity: 'Sample Bank', quarter: 'q2' }]
-function parseBlankQuarters(message) {
+export function parseBlankQuarters(message) {
   const m = /:\s*(.+?)(?:\.\s|\.$)/.exec(String(message || '').trim());
   if (!m) return [];
   return m[1]
