@@ -1,7 +1,7 @@
 import React from 'react';
-import { STATUS_STYLES, PACE_STATUS_STYLES } from '@/lib/finance';
+import { STATUS_STYLES, PACE_STATUS_STYLES, SAVINGS_STATUS_STYLES } from '@/lib/finance';
 
-const STYLES = { ...STATUS_STYLES, ...PACE_STATUS_STYLES };
+const STYLES = { ...STATUS_STYLES, ...PACE_STATUS_STYLES, ...SAVINGS_STATUS_STYLES };
 
 export default function BudgetBar({ pct, status }) {
   const s = STYLES[status] || STYLES.under;

@@ -163,12 +163,14 @@ export const FLAG = {
   OVER_PACE: 'over_expected_pace',
   EXCEEDED: 'annual_budget_exceeded',
   UNRESOLVED_WARNING: 'unresolved_validation_warning',
+  SAVINGS_BELOW: 'below_savings_target',
 };
 
 export const FLAG_TEXT = {
   [FLAG.OVER_PACE]: 'Above expected year-to-date pace',
   [FLAG.EXCEEDED]: 'Actual YTD exceeds the full annual budget',
   [FLAG.UNRESOLVED_WARNING]: 'Imported source data has an unresolved validation warning',
+  [FLAG.SAVINGS_BELOW]: 'Savings are below the savings target',
 };
 
 // Decide whether a monitored category should be flagged, and why.
@@ -179,4 +181,36 @@ export function flagsForCategory({ actualYtd, annualBudget }, elapsedMonths, has
   if (c.varianceToPace < 0 && c.status !== STATUS.EXCEEDED) reasons.push(FLAG.OVER_PACE);
   if (hasUnresolvedWarning) reasons.push(FLAG.UNRESOLVED_WARNING);
   return { computed: c, reasons, flagged: reasons.length > 0 };
+}
+
+// ---- Savings target status ----------------------------------------------
+// A savings line (budget_group 'savings' — e.g. the MONTHLY SAVINGS watch-list
+// row) is a TARGET, not an expense: the pace arithmetic is identical, but the
+// tone inverts (saving LESS than expected is the unfavorable outcome) and the
+// labels speak of the savings target, never of "budget" / "Under Budget".
+export const SAVINGS_STATUS = {
+  BELOW: 'below_savings_target',
+  ABOVE: 'above_savings_target',
+  ON: 'on_savings_target',
+};
+
+export const SAVINGS_STATUS_TEXT = {
+  [SAVINGS_STATUS.BELOW]: 'Below Savings Target',
+  [SAVINGS_STATUS.ABOVE]: 'Above Savings Target',
+  [SAVINGS_STATUS.ON]: 'On Savings Target',
+};
+
+export const SAVINGS_STATUS_STYLES = {
+  [SAVINGS_STATUS.BELOW]: { text: 'text-rose-800', bg: 'bg-rose-50', border: 'border-rose-300', bar: 'bg-rose-500', dot: 'bg-rose-700' },
+  [SAVINGS_STATUS.ABOVE]: { text: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', bar: 'bg-emerald-500', dot: 'bg-emerald-500' },
+  [SAVINGS_STATUS.ON]: { text: 'text-stone-600', bg: 'bg-stone-100', border: 'border-stone-200', bar: 'bg-stone-400', dot: 'bg-stone-400' },
+};
+
+// Same YTD math as computeYtd, but the status describes the savings target.
+// varianceToPace = expected YTD − actual: positive = below target (unfavorable).
+export function savingsStatus({ actualYtd, annualBudget }, elapsedMonths) {
+  const c = computeYtd({ actualYtd, annualBudget }, elapsedMonths);
+  const v = round2(c.varianceToPace);
+  const status = v === 0 ? SAVINGS_STATUS.ON : v > 0 ? SAVINGS_STATUS.BELOW : SAVINGS_STATUS.ABOVE;
+  return { ...c, status };
 }

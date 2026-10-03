@@ -31,6 +31,10 @@ export {
   flagsForCategory,
   FLAG,
   FLAG_TEXT,
+  SAVINGS_STATUS,
+  SAVINGS_STATUS_TEXT,
+  SAVINGS_STATUS_STYLES,
+  savingsStatus as bvaSavingsStatus,
 } from './bva.js';
 
 // "$1,234.56 Under Budget" / "$1,234.56 Over Budget" / "On pace"
@@ -70,3 +74,16 @@ export const STATUS_STYLES = {
   near: { text: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200', bar: 'bg-amber-500', dot: 'bg-amber-500' },
   over: { text: 'text-rose-800', bg: 'bg-rose-50', border: 'border-rose-300', bar: 'bg-rose-500', dot: 'bg-rose-800' },
 };
+
+// "October 3, 2026" from a date-only string (e.g. '2026-10-03'), formatted
+// without any timezone shift — a plain new Date('2026-10-03') is UTC midnight
+// and slides a day backward in timezones behind UTC.
+const DATE_MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+export function formatDateOnly(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  if (!m) return iso == null ? '' : String(iso);
+  return `${DATE_MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}`;
+}
