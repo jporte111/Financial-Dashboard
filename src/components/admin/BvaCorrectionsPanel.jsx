@@ -1,9 +1,14 @@
 import React from 'react';
 import { fmtCurrency } from '@/lib/finance';
-import { getPath, isStaleCorrection } from '@/lib/bvaCorrections';
-import { Button } from '@/components/ui/button';
+import { isStaleCorrection } from '@/lib/bvaCorrections';
+import { Button as UiButton } from '@/components/ui/button';
 import { Trash2 } from 'lucide-react';
 import { Card, SavingsCard, GroupMappingCard, TransferLabelsCard, DistributionZeroCard } from '@/components/admin/BvaCorrectionCards';
+
+// The shared ui primitives are untyped forwardRef components; these typed
+// wrappers state the props this file passes so the typecheck verifies them.
+/** @param {React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string, size?: string }} props */
+const Button = (props) => <UiButton {...props} />;
 
 const KIND_LABEL = {
   source: 'Source value',

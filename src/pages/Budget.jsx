@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { usePeriodContext } from '@/lib/usePeriod';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
 import { useBvaDashboard } from '@/lib/useBvaDashboard';
-import { bvaComputeYtd, bvaSavingsStatus, fmtCurrency, fmtPct } from '@/lib/finance';
+import { bvaSavingsStatus, fmtCurrency, fmtPct } from '@/lib/finance';
 import StatusPill from '@/components/StatusPill';
 import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import SectionHeading from '@/components/SectionHeading';

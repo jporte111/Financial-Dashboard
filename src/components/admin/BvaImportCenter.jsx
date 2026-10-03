@@ -19,7 +19,12 @@ import { SourceValueControl } from '@/components/admin/BvaCorrectionCards';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { FileSpreadsheet, Loader2, AlertTriangle, CheckCircle2, FolderOpen } from 'lucide-react';
+import { FileSpreadsheet, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+
+// The shared Label is an untyped forwardRef component; this typed wrapper
+// states the props passed below so the typecheck verifies them.
+/** @param {React.LabelHTMLAttributes<HTMLLabelElement>} props */
+const CaptionLabel = (props) => <Label {...props} />;
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -401,7 +406,7 @@ export default function BvaImportCenter() {
 
         {drafts.length > 0 && (
           <div className="mt-4">
-            <Label className="text-xs text-stone-500">Or open an existing import draft — corrections and override reasons are restored from it</Label>
+            <CaptionLabel className="text-xs text-stone-500">Or open an existing import draft — corrections and override reasons are restored from it</CaptionLabel>
             <select
               className="mt-1 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
               value=""

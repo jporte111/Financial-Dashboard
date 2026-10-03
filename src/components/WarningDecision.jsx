@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { decisionOptions, applyWarningDecision, MIN_REASON } from '@/lib/warningDecisions';
+import { decisionOptions, decisionBlockedReason, applyWarningDecision, MIN_REASON } from '@/lib/warningDecisions';
 import { parseBlankQuarters } from '@/lib/bvaDashboard';
 
 const btn =
@@ -12,7 +12,8 @@ const input =
 
 // Inline decision controls for one unresolved validation warning: the admin
 // records the decision (and the required written reason) right here, without
-// leaving the Dashboard.
+// leaving the Dashboard. Only for a draft period: a final or published report
+// shows how to reopen it deliberately instead of offering controls.
 export default function WarningDecision({ warning, period }) {
   const options = decisionOptions(warning);
   const [open, setOpen] = useState(null); // the chosen decision mode, when its form is expanded
@@ -21,6 +22,17 @@ export default function WarningDecision({ warning, period }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   if (!options.length || !period) return null;
+  const blocked = decisionBlockedReason(period);
+  if (blocked) {
+    return (
+      <p className="mt-2 text-xs text-stone-500" data-testid="decision-blocked">
+        {blocked}{' '}
+        <Link to="/admin" className="font-medium underline decoration-stone-300 underline-offset-4 hover:text-stone-700">
+          Open Admin
+        </Link>
+      </p>
+    );
+  }
   const blanks = parseBlankQuarters(warning.message);
 
   const apply = async () => {
@@ -28,7 +40,7 @@ export default function WarningDecision({ warning, period }) {
     setError(null);
     try {
       await applyWarningDecision({ period, warning, mode: open, reason, amounts });
-      // Reopen -> write -> finalize -> (re)publish all happened; reload so
+      // Audit record -> values -> finalize happened on the draft; reload so
       // every section re-derives from the fresh records.
       window.location.reload();
     } catch (e) {
@@ -90,7 +102,7 @@ export default function WarningDecision({ warning, period }) {
               onChange={(e) => setReason(e.target.value)}
               placeholder={
                 open === 'confirm_zero'
-                  ? 'e.g. Confirmed with the client: no Sample Bank distributions were received in Q1 or Q2.'
+                  ? 'e.g. Confirmed with the client: no Alpha distributions were received in Q1 or Q2.'
                   : open === 'enter_amounts'
                     ? 'e.g. Amounts confirmed against the receiving account statements.'
                     : 'e.g. Discrepancy reviewed and accepted; the calculated figure is correct.'
@@ -107,7 +119,7 @@ export default function WarningDecision({ warning, period }) {
             </button>
           </div>
           <p className="mt-2 text-xs text-stone-400">
-            Applying this reopens the period (logged), writes the decision, and finalizes{period.published ? ' and re-publishes' : ''} it again.
+            Applying this records the decision and your reason on the period&apos;s audit trail, writes it, and finalizes the draft. It is not published until you publish it in Review &amp; Publish.
           </p>
         </div>
       )}

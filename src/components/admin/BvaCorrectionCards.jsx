@@ -1,11 +1,19 @@
 import React, { useState } from 'react';
 import { fmtCurrency } from '@/lib/finance';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { Input as UiInput } from '@/components/ui/input';
+import { Button as UiButton } from '@/components/ui/button';
 import { SAVINGS_FIELDS } from '@/lib/bvaCorrections';
+
+// The shared ui primitives are untyped forwardRef components; these typed
+// wrappers state the props this file passes so the typecheck verifies them.
+/** @param {React.InputHTMLAttributes<HTMLInputElement>} props */
+const Input = (props) => <UiInput {...props} />;
+/** @param {React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string, size?: string }} props */
+const Button = (props) => <UiButton {...props} />;
 
 const QUARTER_LABEL = { q1: 'Q1', q2: 'Q2', q3: 'Q3', q4: 'Q4' };
 
+/** @param {{ title: React.ReactNode, subtitle?: React.ReactNode, children?: React.ReactNode }} props */
 export function Card({ title, subtitle, children }) {
   return (
     <div className="rounded-xl border border-stone-200 bg-white p-4">
