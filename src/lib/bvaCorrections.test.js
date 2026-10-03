@@ -27,9 +27,9 @@ const workbook = () => ({
     detail: { status: 'parsed' },
     transfers: { status: 'parsed' },
   },
-  cash: { accounts: [{ name: 'Sample Bank', balance: 100 }], reportedTotal: 100 },
+  cash: { accounts: [{ name: 'Acct A', balance: 100 }], reportedTotal: 100 },
   income: {
-    categories: [{ code: '4040', name: 'Sample Bank', actualYtd: 10, annualBudget: 20 }],
+    categories: [{ code: '4040', name: 'Interest Earned', actualYtd: 10, annualBudget: 20 }],
     reportedActualTotal: 10,
     reportedBudgetTotal: 20,
     hasMonthColumn: false,
@@ -45,10 +45,10 @@ const workbook = () => ({
     hasMonthColumn: false,
   },
   distributions: {
-    entities: [{ name: 'Sample Bank', q1: null, q2: null, q3: 100, q4: null, reportedYtd: 100 }],
+    entities: [{ name: 'Alpha', q1: null, q2: null, q3: 100, q4: null, reportedYtd: 100 }],
     reportedTotal: 100,
   },
-  transfers: { items: [{ amount: 500, source: 'Sample Bank', purpose: 'Property Tax' }], reportedTotal: 500 },
+  transfers: { items: [{ amount: 500, source: 'Acct A', purpose: 'Property Tax' }], reportedTotal: 500 },
   detail: { categories: [{ code: '6120', name: 'Grdng/LANDSCP', actualYtd: 100, annualBudget: 300 }] },
 });
 
@@ -92,14 +92,14 @@ describe('corrections layer over the preserved workbook', () => {
       makeCorrection({ kind: 'override', target: 'blank_reason', reason: '   ', by: 'a@b.c' }),
       makeCorrection({ kind: 'group', target: '6120', value: 'fixed', by: 'a@b.c' }),
       makeCorrection({ kind: 'group', target: '6845', value: 'unassigned', by: 'a@b.c' }),
-      makeCorrection({ kind: 'savings', target: 'savings_in_ytd', value: 12000, by: 'a@b.c' }),
+      makeCorrection({ kind: 'savings', target: 'savings_in_ytd', value: 3210.45, by: 'a@b.c' }),
       makeCorrection({ kind: 'savings', target: 'savings_spend_ytd', value: 'oops', by: 'a@b.c' }),
     ];
     expect(overridesFromCorrections(corrections)).toEqual({
       title_month_mismatch: { reason: 'Workbook titled by report month', by: 'a@b.c', at: expect.any(String) },
     });
     expect(groupMapFromCorrections(corrections)).toEqual({ '6120': 'fixed' });
-    expect(savingsFromCorrections(corrections)).toEqual({ savings_in_ytd: 12000 });
+    expect(savingsFromCorrections(corrections)).toEqual({ savings_in_ytd: 3210.45 });
   });
 
   it('keys corrections by kind + path/target', () => {
@@ -128,7 +128,7 @@ describe('validation re-runs against corrected values', () => {
     expect(before).toContain('distribution_quarter_blank');
     // Confirm Q1 as $0; Q2 stays blank (unverified).
     const corrected = applyCorrections(parsed, [
-      makeCorrection({ kind: 'zero_confirm', target: 'Sample Bank Q1', path: 'distributions.entities.0.q1', originalValue: null, value: 0, reason: 'No distribution received', by: 'a@b.c' }),
+      makeCorrection({ kind: 'zero_confirm', target: 'Alpha Q1', path: 'distributions.entities.0.q1', originalValue: null, value: 0, reason: 'No distribution received', by: 'a@b.c' }),
     ]);
     const after = codes(validate(corrected));
     expect(after).toContain('distribution_quarter_blank'); // Q2 still unverified
@@ -136,7 +136,7 @@ describe('validation re-runs against corrected values', () => {
     expect(validate(corrected).warnings.find((w) => w.code === 'distribution_quarter_blank').message).not.toContain('Q1');
     // Confirm Q2 too: the warning clears entirely.
     const both = applyCorrections(corrected, [
-      makeCorrection({ kind: 'zero_confirm', target: 'Sample Bank Q2', path: 'distributions.entities.0.q2', originalValue: null, value: 0, reason: 'No distribution received', by: 'a@b.c' }),
+      makeCorrection({ kind: 'zero_confirm', target: 'Alpha Q2', path: 'distributions.entities.0.q2', originalValue: null, value: 0, reason: 'No distribution received', by: 'a@b.c' }),
     ]);
     expect(codes(validate(both))).not.toContain('distribution_quarter_blank');
   });
@@ -162,9 +162,9 @@ describe('corrections carry through the import plan', () => {
     const parsed = workbook();
     const corrections = [
       makeCorrection({ kind: 'group', target: '6120', value: 'fixed', by: 'a@b.c' }),
-      makeCorrection({ kind: 'zero_confirm', target: 'Sample Bank Q1', path: 'distributions.entities.0.q1', originalValue: null, value: 0, reason: 'None received', by: 'a@b.c' }),
-      makeCorrection({ kind: 'transfer', target: 'Transfer 1 source', path: 'transfers.items.0.source', originalValue: 'Sample Bank', value: 'BOA', reason: 'Corrected in Import Center', by: 'a@b.c' }),
-      makeCorrection({ kind: 'savings', target: 'savings_in_ytd', value: 12000, by: 'a@b.c' }),
+      makeCorrection({ kind: 'zero_confirm', target: 'Alpha Q1', path: 'distributions.entities.0.q1', originalValue: null, value: 0, reason: 'None received', by: 'a@b.c' }),
+      makeCorrection({ kind: 'transfer', target: 'Transfer 1 source', path: 'transfers.items.0.source', originalValue: 'Acct A', value: 'Bank B', reason: 'Corrected in Import Center', by: 'a@b.c' }),
+      makeCorrection({ kind: 'savings', target: 'savings_in_ytd', value: 3210.45, by: 'a@b.c' }),
       makeCorrection({ kind: 'override', target: 'title_month_mismatch', reason: 'Titled by report month', by: 'a@b.c' }),
     ];
     const adjusted = applyCorrections(parsed, corrections);
@@ -189,13 +189,13 @@ describe('corrections carry through the import plan', () => {
     expect(dist.q2).toBeUndefined();
 
     // Corrected transfer label lands on the desired row.
-    expect(plan.transfers.toCreate[0].source).toBe('BOA');
+    expect(plan.transfers.toCreate[0].source).toBe('Bank B');
 
     // Period write: original workbook preserved, savings carried, corrections recorded.
     const write = periodWriteWithCorrections(plan, parsed, corrections);
     expect(write.bva_parsed_source).toBe(parsed);
     expect(write.bva_corrections).toEqual(corrections);
-    expect(write.savings_in_ytd).toBe(12000);
+    expect(write.savings_in_ytd).toBe(3210.45);
     expect(write.source_missing_fields).not.toContain('savings_in_ytd');
     expect(write.source_missing_fields).toEqual(expect.arrayContaining(['month_income', 'month_expenses']));
     // Derived totals stay calculated from the corrected primitives.

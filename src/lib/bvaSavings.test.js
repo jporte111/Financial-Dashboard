@@ -11,10 +11,10 @@ const PERIOD = {
   status: 'final',
   published: true,
   bva_import_status: 'final',
-  ytd_income: 654321.09,
-  ytd_expenses: 7654321.09,
-  annual_budgeted_income: 7654321.09,
-  annual_budgeted_expenses: 7654321.09,
+  ytd_income: 9000,
+  ytd_expenses: 7000,
+  annual_budgeted_income: 15000,
+  annual_budgeted_expenses: 10000,
 };
 
 const SAVINGS_LINE = {
@@ -24,8 +24,8 @@ const SAVINGS_LINE = {
   budget_group: 'savings',
   bva_detail: true,
   group_confirmed: true,
-  ytd_actual: 654321,
-  annual_budget: 300000,
+  ytd_actual: 5700,
+  annual_budget: 11400,
   month_actual: null,
   drilldown_enabled: true,
 };
@@ -36,8 +36,8 @@ const FIXED_LINE = {
   budget_group: 'fixed',
   bva_detail: true,
   group_confirmed: true,
-  ytd_actual: 1000,
-  annual_budget: 2400,
+  ytd_actual: 500,
+  annual_budget: 1000,
   month_actual: null,
 };
 
@@ -49,8 +49,8 @@ const FIXED_GROUP_LINE = {
   budget_group: 'fixed',
   bva_detail: false,
   group_confirmed: true,
-  ytd_actual: 1000,
-  annual_budget: 2400,
+  ytd_actual: 7000,
+  annual_budget: 10000,
   month_actual: null,
 };
 
@@ -62,19 +62,19 @@ const build = () =>
 
 describe('savings target status', () => {
   it('marks below-target savings as below_savings_target, not favorable', () => {
-    const c = savingsStatus({ actualYtd: 654321, annualBudget: 300000 }, 8);
+    const c = savingsStatus({ actualYtd: 5700, annualBudget: 11400 }, 8);
     expect(c.status).toBe(SAVINGS_STATUS.BELOW);
-    expect(c.expectedYtdBudget).toBe(200000);
-    expect(c.varianceToPace).toBe(63500);
+    expect(c.expectedYtdBudget).toBe(7600);
+    expect(c.varianceToPace).toBe(1900);
   });
 
   it('marks above-target savings as favorable', () => {
-    const c = savingsStatus({ actualYtd: 210000, annualBudget: 300000 }, 8);
+    const c = savingsStatus({ actualYtd: 8550, annualBudget: 11400 }, 8);
     expect(c.status).toBe(SAVINGS_STATUS.ABOVE);
   });
 
   it('marks on-target savings as on_savings_target', () => {
-    const c = savingsStatus({ actualYtd: 200000, annualBudget: 300000 }, 8);
+    const c = savingsStatus({ actualYtd: 7600, annualBudget: 11400 }, 8);
     expect(c.status).toBe(SAVINGS_STATUS.ON);
   });
 });
@@ -98,8 +98,8 @@ describe('savings in the dashboard view model', () => {
 
   it('never counts savings into expense group totals (no double counting)', () => {
     const vm = build();
-    expect(vm.snapshot.ytdExpenses).toBe(1000);
-    expect(vm.snapshot.annualExpenseBudget).toBe(2400);
+    expect(vm.snapshot.ytdExpenses).toBe(7000);
+    expect(vm.snapshot.annualExpenseBudget).toBe(10000);
     for (const g of vm.groups) expect(g.key).not.toBe('savings');
   });
 

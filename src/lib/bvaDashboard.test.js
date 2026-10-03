@@ -307,8 +307,8 @@ describe('period provenance: legacy vs BVA-validated', () => {
   });
 
   it('parses the blank entity-quarters named in a warning message', () => {
-    expect(parseBlankQuarters('Blank distribution cells for quarters that have begun: Sample Bank Q1, Sample Bank Q2. They add nothing to Distributions YTD; confirm none was received.'))
-      .toEqual([{ entity: 'Sample Bank', quarter: 'q1' }, { entity: 'Sample Bank', quarter: 'q2' }]);
+    expect(parseBlankQuarters('Blank distribution cells for quarters that have begun: Alpha Q1, Alpha Q2. They add nothing to Distributions YTD; confirm none was received.'))
+      .toEqual([{ entity: 'Alpha', quarter: 'q1' }, { entity: 'Alpha', quarter: 'q2' }]);
     expect(parseBlankQuarters('no quarters named here')).toEqual([]);
   });
 });

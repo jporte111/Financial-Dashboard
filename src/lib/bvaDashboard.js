@@ -97,8 +97,8 @@ function reportingLabels(period, elapsedMonths) {
 // preserved and a warning re-emerges automatically if its basis changes.
 const INFORMATIONAL_CODES = new Set(['period_follows_cutoff_month', 'period_is_cutoff_month']);
 
-// "Blank distribution cells for quarters that have begun: Sample Bank Q1, Sample Bank Q2."
-//   → [{ entity: 'Sample Bank', quarter: 'q1' }, { entity: 'Sample Bank', quarter: 'q2' }]
+// "Blank distribution cells for quarters that have begun: Alpha Q1, Alpha Q2."
+//   → [{ entity: 'Alpha', quarter: 'q1' }, { entity: 'Alpha', quarter: 'q2' }]
 export function parseBlankQuarters(message) {
   const m = /:\s*(.+?)(?:\.\s|\.$)/.exec(String(message || '').trim());
   if (!m) return [];

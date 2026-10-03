@@ -4,13 +4,13 @@ import { buildBvaDashboard } from './bvaDashboard.js';
 // The five stored September 2026 warnings, with the audit trail exactly as
 // saved in the Import screen: an override reason for the workbook title, a
 // source correction for the workbook's pace proxy, and no confirmation yet
-// for the blank Sample Bank Q1/Q2 distribution cells.
+// for the blank Alpha Q1/Q2 distribution cells.
 const WARNINGS = [
   { code: 'transfer_labels_misaligned', section: 'transfers', message: 'Recurring transfer labels vary between workbook layouts; confirm the source and purpose of each transfer in Admin.', requiresAdminReview: true, blocksFinalize: false },
   { code: 'period_follows_cutoff_month', section: 'meta', message: 'September 2026 is the report month; its data runs through 2026-08-31 (the previous month end).', requiresAdminReview: true, blocksFinalize: false },
   { code: 'title_month_mismatch', section: 'meta', message: 'The workbook title names August 2026, but it is being imported as September 2026.', requiresAdminReview: true, blocksFinalize: false },
   { code: 'pace_proxy_divergence', section: 'expenses', message: "The workbook's pace reference differs from elapsed reporting months / 12. Calculated pace is used.", sourceValue: 58.33, calculatedValue: 66.67, requiresAdminReview: true, blocksFinalize: false },
-  { code: 'distribution_quarter_blank', section: 'distributions', message: 'Blank distribution cells for quarters that have begun: Sample Bank Q1, Sample Bank Q2. They add nothing to Distributions YTD; confirm none was received.', requiresAdminReview: true, blocksFinalize: false },
+  { code: 'distribution_quarter_blank', section: 'distributions', message: 'Blank distribution cells for quarters that have begun: Alpha Q1, Alpha Q2. They add nothing to Distributions YTD; confirm none was received.', requiresAdminReview: true, blocksFinalize: false },
 ];
 
 const PERIOD = (extra = {}) => ({
@@ -31,11 +31,11 @@ const LINES = [
 ];
 
 const TRANSFERS = [
-  { id: 't1', amount: 1000.00, source: 'Sample Bank', purpose: 'Sample Purpose', visible_to_client: true },
-  { id: 't2', amount: 22224.71, source: 'Mortgage', purpose: 'Sample Bank', visible_to_client: true },
+  { id: 't1', amount: 1500, source: 'Bank 1234', purpose: 'Tax Reserve', visible_to_client: true },
+  { id: 't2', amount: 22224.71, source: 'Mortgage', purpose: 'Insurance Reserve', visible_to_client: true },
 ];
 
-const DISTRIBUTIONS = [{ id: 'd1', entity_name: 'Sample Bank', q1: null, q2: null, q3: 4500, q4: null }];
+const DISTRIBUTIONS = [{ id: 'd1', entity_name: 'Alpha', q1: null, q2: null, q3: 2345, q4: null }];
 
 const build = (period, distributions = DISTRIBUTIONS, transfers = TRANSFERS) =>
   buildBvaDashboard(
@@ -78,7 +78,7 @@ describe('warning resolution classification', () => {
           { id: 'c1', kind: 'source', target: 'pace_proxy_divergence', path: 'expenseSummary.pacePctProxy', original_value: 58.33, value: 66.67, reason: 'correct pace', by: 'admin', at: '2026-10-03T16:34:37.106Z' },
         ],
       }),
-      [{ id: 'd1', entity_name: 'Sample Bank', q1: 0, q2: 0, q3: 4500, q4: null }]
+      [{ id: 'd1', entity_name: 'Alpha', q1: 0, q2: 0, q3: 2345, q4: null }]
     );
     expect(vm.warnings.resolution.resolved.map((w) => w.code)).toContain('distribution_quarter_blank');
     expect(vm.warnings.unresolved.length).toBe(0);
