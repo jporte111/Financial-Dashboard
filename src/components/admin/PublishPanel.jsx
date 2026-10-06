@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { periodTransition } from '@/lib/periodTransition';
 import { PUBLISH_CHECKLIST } from '../../../base44/shared/publishGate.ts';
+import { versionLabel, isRevision, isSuperseded } from '../../../base44/shared/periodVersions.ts';
 
 // Review stages an admin may set directly. "Final" is deliberately absent:
 // a period becomes final only through validated finalization (BVA Import),
@@ -25,18 +26,22 @@ export default function PublishPanel({ period, reload }) {
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
   const [reopenLabel, setReopenLabel] = useState('');
+  const [replaceLabel, setReplaceLabel] = useState(''); // typed confirmation for publishing a revision
   const { toast } = useToast();
 
   const isPublished = !!period?.published;
   const isFinal = period?.status === 'final' && period?.bva_import_status === 'final' && !!period?.finalized_at;
   const validatedImport = period?.bva_import_status === 'final' || period?.bva_import_status === 'draft';
   const periodId = period?.id;
+  const revision = isRevision(period);
+  const superseded = isSuperseded(period);
 
   useEffect(() => {
     setChecklist(period?.checklist || {});
     setConfirmReopen(false);
     setReopenReason('');
     setReopenLabel('');
+    setReplaceLabel('');
     if (!periodId) return;
     let cancelled = false;
     periodTransition('check', periodId).then((r) => !cancelled && setCheck(r.ok ? r : null));
@@ -78,7 +83,7 @@ export default function PublishPanel({ period, reload }) {
 
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-6">
-      <p className="font-display text-lg">Review & Publication — {period.label}</p>
+      <p className="font-display text-lg">Review & Publication — {versionLabel(period)}</p>
       <p className="mt-1 text-sm text-stone-600">Status: <span className="font-medium">{statusLabel}</span></p>
 
       <div className="mt-5">
@@ -98,7 +103,7 @@ export default function PublishPanel({ period, reload }) {
         <p className="text-xs uppercase tracking-[0.12em] text-stone-500">Pre-Publication Checklist</p>
         {PUBLISH_CHECKLIST.map(([k, label]) => (
           <label key={k} className="flex items-center gap-3 text-sm">
-            <Checkbox checked={!!checklist[k]} disabled={isPublished} onCheckedChange={(v) => toggle(k, !!v)} />
+            <Checkbox checked={!!checklist[k]} disabled={isPublished || superseded} onCheckedChange={(v) => toggle(k, !!v)} />
             {label}
           </label>
         ))}
@@ -113,17 +118,34 @@ export default function PublishPanel({ period, reload }) {
         </div>
       )}
 
+      {revision && !isPublished && isFinal && (
+        <div className="mt-6 rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">
+          Publishing this revision replaces the version clients see now, in one step. The replaced version is kept (marked
+          superseded), not deleted.
+          <input
+            className="mt-2 w-full rounded-md border border-stone-200 bg-white p-2 text-sm"
+            placeholder={`Type "${period.label}" to confirm the replacement`}
+            value={replaceLabel}
+            onChange={(e) => setReplaceLabel(e.target.value)}
+          />
+        </div>
+      )}
+
       <div className="mt-6 flex flex-wrap items-center gap-3">
-        {!isPublished && (
+        {!isPublished && !superseded && (
           <Button
-            onClick={() => run(() => periodTransition('publish', period.id), 'Published to Sonia')}
-            disabled={busy || !isFinal || publishBlockers.length > 0}
+            onClick={async () => {
+              const res = await run(() => periodTransition('publish', period.id), revision ? 'Published as the replacement' : 'Published to Sonia');
+              if (res.ok && res.supersede_pending) toast({ title: 'Published — but marking the replaced version superseded did not finish', description: 'Finish it in Versions above. Clients already see this revision.' });
+              if (res.ok && res.conflict) toast({ title: 'Another version of this month is also published', description: 'See Versions above and resolve it.' });
+            }}
+            disabled={busy || !isFinal || publishBlockers.length > 0 || (revision && replaceLabel !== period.label)}
             className="rounded-full"
           >
-            Publish to Sonia
+            {revision ? 'Publish replacement' : 'Publish to Sonia'}
           </Button>
         )}
-        {isFinal && !isPublished && !confirmReopen && (
+        {isFinal && !isPublished && !superseded && !confirmReopen && (
           <Button variant="outline" className="rounded-full" disabled={busy} onClick={() => setConfirmReopen(true)}>
             Reopen to Draft
           </Button>

@@ -8,6 +8,7 @@
 // untouched.
 
 import { round2, n, elapsedMonthsFromCutoff } from './bva.js';
+import { monthState, isDiscarded, isSuperseded, isRevision, versionLabel } from '../../base44/shared/periodVersions.ts';
 import { withoutNulls, nextMissingList, MISSING_MARKER } from '../../base44/shared/sourceMissing.ts';
 
 const MONTH_NAMES = [
@@ -27,7 +28,8 @@ const normKey = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ')
 const r2 = (v) => (v == null ? null : round2(v));
 
 // Record fields Base44 manages; never copied from an old row into a new one.
-const SYSTEM_FIELDS = new Set(['id', 'created_date', 'updated_date', 'created_by', 'created_by_id', 'is_sample', 'app_id', 'period_id']);
+// copied_from is set only by the server (draft revisions) and refused on direct writes.
+const SYSTEM_FIELDS = new Set(['id', 'created_date', 'updated_date', 'created_by', 'created_by_id', 'is_sample', 'app_id', 'period_id', 'copied_from']);
 const hasValue = (v) => v !== null && v !== undefined && v !== '';
 
 // Reconcile a desired child-entity list against what already exists for the
@@ -271,11 +273,14 @@ export function planBvaImport(args) {
 // 'invalidate', so stale "final" state can never cover re-imported figures.
 export function importPreflight(match) {
   if (!match) return { allowed: true, action: 'create', needsInvalidate: false };
+  if (match.superseded || match.revision_status === 'discarded') {
+    return { allowed: false, action: 'refuse', reason: `${match.label || 'This version'} was replaced by a newer version and is kept read-only.` };
+  }
   if (match.published) {
     return {
       allowed: false,
       action: 'refuse',
-      reason: `${match.label || 'This month'} is published. Re-importing a published month is refused until draft revisions are available.`,
+      reason: `${match.label || 'This month'} is published. To correct it, create a revision (Admin → Review & Publish) and import into that revision.`,
     };
   }
   return { allowed: true, action: 'update', needsInvalidate: true };
@@ -291,4 +296,42 @@ export function groupMapFromLines(lines) {
     if (key && ['fixed', 'variable', 'discretionary'].includes(l.budget_group)) map[key] = l.budget_group;
   }
   return map;
+}
+
+// Which period an import for (month, year) writes into (draft revisions).
+// A month can have several versions; an import never writes into a published,
+// superseded or discarded version, nor into a revision whose initial copy is
+// not verified. While a month has an open revision, the import goes into that
+// revision -- never into the version it was copied from. `chosenId` is the
+// version the admin picked (e.g. "September 2026 · revision 2 (draft)").
+// Returns { allowed, action: 'create' | 'update', target, needsInvalidate,
+// candidates, reason }.
+export function importTarget(periods, month, year, chosenId = null) {
+  const versions = (periods || []).filter((p) => Number(p.month) === Number(month) && Number(p.year) === Number(year) && !isDiscarded(p));
+  if (!versions.length) return { allowed: true, action: 'create', target: null, needsInvalidate: false, candidates: [] };
+  const state = monthState(versions);
+  const open = state.openRevisions;
+  const label = versions[0].label || 'This month';
+  const refuse = (reason) => ({ allowed: false, action: 'refuse', target: null, needsInvalidate: false, candidates: open, reason });
+  const usable = (p) => !p.published && !isSuperseded(p) && (!isRevision(p) || p.copy_status === 'verified');
+  let target = null;
+  if (chosenId) {
+    target = versions.find((p) => p.id === chosenId) || null;
+    if (!target) return refuse('The chosen version does not belong to this month.');
+    if (open.length && !open.some((p) => p.id === target.id)) return refuse(`${label} has an open revision; import into the revision, not the version it was copied from.`);
+  } else if (open.length > 1) {
+    return refuse(`${label} has ${open.length} open revisions; choose one (or discard the extra one).`);
+  } else if (open.length === 1) {
+    target = open[0];
+  } else if (state.current) {
+    return refuse(`${label} is published. To correct it, create a revision (Admin → Review & Publish) and import into that revision.`);
+  } else {
+    target = state.working;
+  }
+  if (!target) return refuse(`${label} has no version an import can update.`);
+  if (isRevision(target) && target.copy_status !== 'verified') return refuse(`${versionLabel(target)} is still being copied; finish the copy first.`);
+  if (!usable(target)) return refuse(`${versionLabel(target)} cannot be imported into: it is ${target.published ? 'published' : 'superseded'}.`);
+  const pre = importPreflight(target);
+  if (!pre.allowed) return refuse(pre.reason);
+  return { allowed: true, action: 'update', target, needsInvalidate: pre.needsInvalidate, candidates: open.length ? open : [target], reason: null };
 }

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { versionLabel } from '../../base44/shared/periodVersions.ts';
 
 export default function PeriodSelector({ periods, periodId, onChange }) {
   if (!periods?.length) return null;
@@ -11,7 +12,7 @@ export default function PeriodSelector({ periods, periodId, onChange }) {
       <SelectContent>
         {periods.map((p) => (
           <SelectItem key={p.id} value={p.id}>
-            {p.label}{p.status !== 'final' ? ' · Preliminary' : ''}
+            {versionLabel(p)}{p.status !== 'final' ? ' · Preliminary' : ''}
           </SelectItem>
         ))}
       </SelectContent>

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { parseBvaWorkbook } from '@/lib/bvaParser';
 import { validateBva } from '@/lib/bvaValidation';
-import { planBvaImport, importPreflight, groupMapFromLines } from '@/lib/bvaImport';
+import { planBvaImport, importTarget, groupMapFromLines } from '@/lib/bvaImport';
 import {
   applyCorrections,
   overridesFromCorrections,
@@ -13,6 +13,7 @@ import {
   WARNING_SOURCE_PATHS,
 } from '@/lib/bvaCorrections';
 import { periodTransition } from '@/lib/periodTransition';
+import { monthStates, isSuperseded, isDiscarded, isRevision, versionLabel } from '../../../base44/shared/periodVersions.ts';
 import { fmtCurrency, fmtPct } from '@/lib/finance';
 import BvaCorrectionsPanel from '@/components/admin/BvaCorrectionsPanel';
 import { SourceValueControl } from '@/components/admin/BvaCorrectionCards';
@@ -55,6 +56,10 @@ export default function BvaImportCenter() {
   const [drafts, setDrafts] = useState([]); // existing draft periods that can be opened and corrected
   const [corrections, setCorrections] = useState([]); // adjustments layer, persisted to the draft
   const [matched, setMatched] = useState(null); // the existing period this import targets (may be null)
+  // Draft revisions: the version the admin chose to import into (null: the
+  // month's default -- its open revision, or its only editable version).
+  const [targetId, setTargetId] = useState(null);
+  const [targetInfo, setTargetInfo] = useState(null); // importTarget() result for the confirmed month
   const [savedGroupMap, setSavedGroupMap] = useState({}); // confirmed group mappings from the draft's saved lines
   const [me, setMe] = useState(null);
   const [saveState, setSaveState] = useState('idle');
@@ -91,7 +96,7 @@ export default function BvaImportCenter() {
     let cancelled = false;
     base44.entities.ReportingPeriod.list('-year', 300).then((all) => {
       if (cancelled) return;
-      setDrafts((all || []).filter((p) => p.bva_parsed_source && !p.published && p.bva_import_status !== 'final'));
+      setDrafts((all || []).filter((p) => p.bva_parsed_source && !p.published && p.bva_import_status !== 'final' && !isSuperseded(p) && !isDiscarded(p) && (!isRevision(p) || p.copy_status === 'verified')));
     }).catch(() => {});
     return () => {
       cancelled = true;
@@ -111,8 +116,10 @@ export default function BvaImportCenter() {
       try {
         const target = Number(confirm.year) * 12 + Number(confirm.month);
         const periods = await base44.entities.ReportingPeriod.list('-year', 300);
-        const prior = (periods || [])
-          .filter((p) => p.bva_import_status === 'final' && Number(p.year) * 12 + Number(p.month) < target)
+        // One version per month: the current published one, else the latest final one.
+        const prior = [...monthStates((periods || []).filter((p) => Number(p.year) * 12 + Number(p.month) < target)).values()]
+          .map((st) => st.current || st.working)
+          .filter((p) => p && p.bva_import_status === 'final')
           .sort((a, b) => b.year - a.year || b.month - a.month)[0];
         if (!prior) {
           if (!cancelled) setPrevious(null);
@@ -154,9 +161,10 @@ export default function BvaImportCenter() {
     (async () => {
       try {
         const periods = await base44.entities.ReportingPeriod.list('-year', 300);
-        const match =
-          (periods || []).find((p) => Number(p.month) === Number(confirm.month) && Number(p.year) === Number(confirm.year)) || null;
+        const info = importTarget(periods || [], confirm.month, confirm.year, targetId);
+        const match = info.target;
         if (cancelled) return;
+        setTargetInfo(info);
         setMatched(match);
         if (match) {
           const lines = await base44.entities.BudgetLine.filter({ period_id: match.id }, undefined, 1000);
@@ -180,7 +188,7 @@ export default function BvaImportCenter() {
     return () => {
       cancelled = true;
     };
-  }, [parsed, confirm.month, confirm.year]);
+  }, [parsed, confirm.month, confirm.year, targetId]);
 
   // The corrections layer: the original workbook stays untouched; adjusted
   // values are overlaid and every dependent total is recalculated from them.
@@ -220,6 +228,7 @@ export default function BvaImportCenter() {
   const openDraft = (p) => {
     setFile(null);
     setApplied({ periodId: p.id, action: 'update', reopened: true });
+    setTargetId(p.id);
     setLog([]);
     setBlockers([]);
     setParsed(p.bva_parsed_source);
@@ -233,17 +242,19 @@ export default function BvaImportCenter() {
     try {
       const meNow = me || (await base44.auth.me());
       const existingPeriods = await base44.entities.ReportingPeriod.list('-year', 300);
-      const match = existingPeriods.find(
-        (p) => Number(p.month) === Number(confirm.month) && Number(p.year) === Number(confirm.year)
-      );
-      // Refuse before any write: published months are read-only until draft
-      // revisions exist; an existing unpublished month is first reset to draft
-      // on the server, so no earlier "final" state can cover re-imported figures.
-      const pre = importPreflight(match);
+      // Refuse before any write. The target is the chosen draft revision, or the
+      // month's only editable version -- never a published, superseded or
+      // discarded one (importTarget). An existing unpublished final version is
+      // first reset to draft on the server, so no earlier "final" state can
+      // cover re-imported figures. The server refuses the first write (the
+      // period record) for a published or superseded period.
+      const pre = importTarget(existingPeriods, confirm.month, confirm.year, targetId);
+      const match = pre.target;
       if (!pre.allowed) {
         addLog(`✗ ${pre.reason} Nothing was changed.`);
         return;
       }
+      if (match) addLog(`Importing into ${versionLabel(match)}.`);
       if (pre.needsInvalidate) {
         const inv = await periodTransition('invalidate', match.id);
         if (!inv.ok) {
@@ -271,7 +282,7 @@ export default function BvaImportCenter() {
           filename: file?.name || match?.source_filename || undefined,
           importedBy: meNow?.email || meNow?.full_name || '',
         },
-        existingPeriods,
+        existingPeriods: match ? [match] : [],
         existing,
         groupMap,
       });
@@ -418,7 +429,7 @@ export default function BvaImportCenter() {
               <option value="">Open a draft period…</option>
               {drafts.map((d) => (
                 <option key={d.id} value={d.id}>
-                  {d.label} — draft{d.source_filename ? ` · ${d.source_filename}` : ''}
+                  {versionLabel(d)} — draft{d.source_filename ? ` · ${d.source_filename}` : ''}
                 </option>
               ))}
             </select>
@@ -454,6 +465,31 @@ export default function BvaImportCenter() {
               <span className="font-medium">{parsed.meta.cutoffDate || 'none'}</span>. Confirm above — the period is not
               inferred from the filename.
             </p>
+            {targetInfo && confirm.month && confirm.year && (
+              <div className={`mt-2 rounded-lg border p-3 text-xs ${targetInfo.allowed ? 'border-stone-200 bg-stone-50 text-stone-600' : 'border-rose-200 bg-rose-50 text-rose-800'}`} data-testid="import-target">
+                {!targetInfo.allowed ? (
+                  <p>{targetInfo.reason}</p>
+                ) : targetInfo.target ? (
+                  <>
+                    <p>
+                      Imports into: <span className="font-medium">{versionLabel(targetInfo.target)}</span>
+                      {isRevision(targetInfo.target) ? ' — clients keep seeing the published version until this revision is published.' : ''}
+                    </p>
+                    {targetInfo.candidates.length > 1 && (
+                      <select
+                        className="mt-2 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
+                        value={targetInfo.target.id}
+                        onChange={(e) => setTargetId(e.target.value)}
+                      >
+                        {targetInfo.candidates.map((c) => <option key={c.id} value={c.id}>{versionLabel(c)}</option>)}
+                      </select>
+                    )}
+                  </>
+                ) : (
+                  <p>Creates a new period for this month.</p>
+                )}
+              </div>
+            )}
             {parsed.sections && (
               <div className="mt-3 rounded-xl border border-stone-100 bg-stone-50 p-3 text-xs text-stone-600" data-testid="section-inventory">
                 <p className="mb-1 uppercase tracking-[0.12em] text-stone-400">Sections found</p>

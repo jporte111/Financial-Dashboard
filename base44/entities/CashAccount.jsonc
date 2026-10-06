@@ -12,6 +12,13 @@
     "delete": { "user_condition": { "role": "admin" } }
   },
   "properties": {
+    "copied_from": {
+      "rls": {
+        "write": false
+      },
+      "type": "string",
+      "description": "Draft revisions: id of the record this one was copied from (set only by the server when a revision is created)."
+    },
     "period_id": {
       "type": "string"
     },

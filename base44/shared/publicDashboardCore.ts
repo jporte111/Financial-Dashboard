@@ -19,6 +19,7 @@
 
 import { transactionsForCategory } from './categoryTransactionsCore.ts';
 import { effectiveRecord } from './sourceMissing.ts';
+import { currentPublished, isCurrentPublished } from './periodVersions.ts';
 
 export const isPublishedFinal = (p) => !!p && !!p.published && p.status === 'final';
 
@@ -130,7 +131,9 @@ const EMPTY = { periods: [], period: null, budgetLines: [], cashAccounts: [], di
 // Whole publicDashboard response. `svc` is base44.asServiceRole.
 export async function buildPublicDashboard(svc, body = {}) {
   const all = await svc.entities.ReportingPeriod.list('-year', 500);
-  const published = all.filter(isPublishedFinal).sort((a, b) => b.year - a.year || b.month - a.month);
+  // One report per month: the current published version (draft revisions,
+  // superseded and discarded versions are never served -- periodVersions.ts).
+  const published = currentPublished(all);
   if (!published.length) return EMPTY;
 
   // A requested period is honored only when it is published; anything else
@@ -182,6 +185,10 @@ export async function handlePublicCategoryRequest(base44, body = {}) {
   const period = await svc.entities.ReportingPeriod.get(period_id);
   if (!period) return reply(404, { error: 'Period not found' });
   if (!isPublishedFinal(period)) return reply(403, { error: 'Period not published' });
+  // Only the month's current version: a version just replaced by a published
+  // revision (still awaiting cleanup) is not served.
+  const sameMonth = await svc.entities.ReportingPeriod.filter({ month: period.month, year: period.year }, undefined, 200);
+  if (!isCurrentPublished(Array.isArray(sameMonth) ? sameMonth : [], period)) return reply(403, { error: 'Period not published' });
 
   const line = await resolveLine(svc, period.id, body);
   if (!line || line.drilldown_enabled === false) return reply(404, { error: 'Category not available' });

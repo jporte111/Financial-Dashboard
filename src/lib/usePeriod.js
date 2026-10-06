@@ -1,5 +1,6 @@
 import { useEffect, useState, createContext, useContext } from 'react';
 import { base44 } from '@/api/base44Client';
+import { currentPublished, isDiscarded, revisionNumber } from '../../base44/shared/periodVersions.ts';
 
 const PeriodContext = createContext(null);
 export const PeriodProvider = PeriodContext.Provider;
@@ -16,9 +17,14 @@ export function usePeriodData() {
     const me = await base44.auth.me();
     const all = await base44.entities.ReportingPeriod.list('-year');
     const isAdmin = me?.role === 'admin';
-    const visible = all
-      .filter((p) => isAdmin || (p.published && p.status === 'final'))
-      .sort((a, b) => b.year - a.year || b.month - a.month);
+    // Admins see every version (draft revisions and superseded versions
+    // included, discarded ones not); everyone else one current published
+    // report per month (see base44/shared/periodVersions.ts).
+    const visible = isAdmin
+      ? all
+          .filter((p) => !isDiscarded(p))
+          .sort((a, b) => b.year - a.year || b.month - a.month || revisionNumber(b) - revisionNumber(a))
+      : currentPublished(all);
     setUser(me);
     setPeriods(visible);
     setPeriodId((prev) => prev || visible[0]?.id || null);

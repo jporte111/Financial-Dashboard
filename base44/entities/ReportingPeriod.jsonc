@@ -23,6 +23,11 @@
           "data.published": {
             "$ne": true
           }
+        },
+        {
+          "data.superseded": {
+            "$ne": true
+          }
         }
       ]
     },
@@ -37,11 +42,99 @@
           "data.published": {
             "$ne": true
           }
+        },
+        {
+          "data.superseded": {
+            "$ne": true
+          }
         }
       ]
     }
   },
   "properties": {
+    "revision_of": {
+      "rls": {
+        "write": false
+      },
+      "type": "string",
+      "description": "Draft revisions: id of the first version of this report (absent on the original)."
+    },
+    "revision_number": {
+      "rls": {
+        "write": false
+      },
+      "type": "number",
+      "description": "Draft revisions: 1 (or absent) for the original, 2, 3, ... for revisions."
+    },
+    "supersedes": {
+      "rls": {
+        "write": false
+      },
+      "type": "string",
+      "description": "Draft revisions: id of the version this revision was copied from and replaces when published."
+    },
+    "superseded": {
+      "rls": {
+        "write": false
+      },
+      "type": "boolean",
+      "description": "True once a newer version replaced this one. A superseded version is kept, read-only through the app, and never shown to clients."
+    },
+    "superseded_by": {
+      "rls": {
+        "write": false
+      },
+      "type": "string",
+      "description": "Id of the revision that replaced this version."
+    },
+    "superseded_at": {
+      "rls": {
+        "write": false
+      },
+      "type": "string"
+    },
+    "revision_reason": {
+      "rls": {
+        "write": false
+      },
+      "type": "string",
+      "description": "Why the revision was created."
+    },
+    "revision_created_by": {
+      "rls": {
+        "write": false
+      },
+      "type": "string"
+    },
+    "revision_created_at": {
+      "rls": {
+        "write": false
+      },
+      "type": "string"
+    },
+    "revision_status": {
+      "rls": {
+        "write": false
+      },
+      "type": "string",
+      "enum": ["open", "discarded"],
+      "description": "A discarded revision is ignored everywhere while it is being deleted."
+    },
+    "copy_status": {
+      "rls": {
+        "write": false
+      },
+      "type": "string",
+      "enum": ["copying", "verified", "failed"],
+      "description": "Whether the initial copy of the source report was completed and verified (rows, values, relationships). Finalization requires verified."
+    },
+    "copy_verification": {
+      "rls": {
+        "write": false
+      },
+      "type": "object",
+      "description": "The copy verification report."
+    },
     "label": {
       "type": "string",
       "description": "e.g. July 2026"

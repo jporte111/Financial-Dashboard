@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { versionLabel, isSuperseded, isRevision } from '../../../base44/shared/periodVersions.ts';
 import { periodTransition } from '@/lib/periodTransition';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -10,7 +11,7 @@ const MONTHS = ['January','February','March','April','May','June','July','August
 // Published and final periods are read-only in the admin workflow, so their
 // row offers View; drafts offer Edit. Both select the period and open its
 // Monthly Data, where the read-only notice and disabled editors apply.
-const isReadOnly = (p) => !!p.published || p.status === 'final';
+const isReadOnly = (p) => !!p.published || p.status === 'final' || isSuperseded(p);
 
 export default function PeriodsManager({ periods, selectedId, reload, onOpen }) {
   const [month, setMonth] = useState(1);
@@ -66,11 +67,13 @@ export default function PeriodsManager({ periods, selectedId, reload, onOpen }) 
           >
             <div>
               <p className="font-medium">
-                {p.label}
+                {versionLabel(p)}
                 {selected && <span className="ml-2 rounded-full bg-stone-900 px-2 py-0.5 text-[10px] font-normal uppercase tracking-wide text-white">Selected</span>}
               </p>
               <p className="text-xs text-stone-500">
                 {p.status ? p.status.replace(/_/g, ' ') : 'not initialized (cannot be finalized)'}{p.published ? ' · published' : ' · not published'}
+                {isSuperseded(p) ? ' · superseded (kept, not shown to clients)' : ''}
+                {isRevision(p) && p.copy_status !== 'verified' ? ` · copy ${p.copy_status || 'unverified'}` : ''}
               </p>
             </div>
             <Button variant="ghost" size="sm" className="rounded-full" aria-label={`${action} ${p.label}`} onClick={() => onOpen(p.id)}>{action}</Button>

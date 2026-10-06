@@ -1,4 +1,5 @@
 import { buildIndexes, accountsForNames } from './rollupHelpers.ts';
+import { monthStates } from './periodVersions.ts';
 
 // Shared core for the category drill-down endpoints. Given a reporting period,
 // returns the YTD transactions behind a BVA-reported category. This reads only
@@ -15,12 +16,17 @@ import { buildIndexes, accountsForNames } from './rollupHelpers.ts';
 //                  transactions can never reach an anonymous visitor.
 //   publicRows     return only the fields the client drill-down displays.
 export async function transactionsForCategory(base44, period, category, qb_account_names, { publishedOnly = false, publicRows = false } = {}) {
-  // YTD = every period this year up to and including the selected month.
+  // YTD = every month this year up to and including the selected month: the
+  // selected period itself for its month, and ONE version of each earlier
+  // month -- the current published version (or, for an admin, the month's
+  // working version when nothing is published). A month with several versions
+  // (draft revisions) is never counted twice.
   const yearPeriods = await base44.asServiceRole.entities.ReportingPeriod.filter({ year: period.year }, 'month');
-  const ytdPeriodIds = yearPeriods
-    .filter((p) => p.month <= period.month)
-    .filter((p) => !publishedOnly || p.id === period.id || (p.published && p.status === 'final'))
-    .map((p) => p.id);
+  const states = monthStates(yearPeriods.filter((p) => p.month < period.month));
+  const ytdPeriodIds = [
+    period.id,
+    ...[...states.values()].map((st) => (publishedOnly ? st.current : st.current || st.working)).filter(Boolean).map((p) => p.id),
+  ];
 
   let ytdTxns = [];
   if (ytdPeriodIds.length) {

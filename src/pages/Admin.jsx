@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { usePeriodContext } from '@/lib/usePeriod';
+import { versionLabel, isSuperseded, isDiscarded } from '../../base44/shared/periodVersions.ts';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PeriodTotalsForm from '@/components/admin/PeriodTotalsForm';
 import BudgetLinesEditor from '@/components/admin/BudgetLinesEditor';
 import SupportingDataEditor from '@/components/admin/SupportingDataEditor';
 import PublishPanel from '@/components/admin/PublishPanel';
+import RevisionPanel from '@/components/admin/RevisionPanel';
 import ReviewQueue from '@/components/admin/ReviewQueue';
 import PeriodsManager from '@/components/admin/PeriodsManager';
 import TransactionsEditor from '@/components/admin/TransactionsEditor';
@@ -26,17 +28,24 @@ export default function Admin() {
     setTab('data'); // read-only there when the period is published or final
   };
 
-  // Final and published periods are read-only through the normal editing
-  // workflow until controlled draft revisions exist: a final period has been
-  // validated, so editing its figures would bypass that validation. The server
-  // refuses changes to a published ReportingPeriod; line-level records are
-  // guarded here in the UI (see the Phase 1 limitations).
-  const locked = !!period?.published || period?.status === 'final';
+  // Final, published and superseded versions are read-only through the normal
+  // editing workflow; corrections go into a draft revision. The server refuses
+  // changes to a published or superseded ReportingPeriod record; their
+  // line-level records are guarded here in the UI only (a known limitation).
+  const locked = !!period?.published || period?.status === 'final' || isSuperseded(period) || isDiscarded(period);
   const LockNote = () =>
     locked ? (
-      <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">
-        <strong>{period.label}</strong> is {period.published ? 'published' : 'final'} and read-only. To change it,
-        reopen it in Review &amp; Publish{period.published ? ' (this removes it from the client dashboard until it is finalized and published again)' : ''}.
+      <div className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-600" data-testid="lock-note">
+        {isSuperseded(period) ? (
+          <>
+            <strong>{versionLabel(period)}</strong> was replaced by a newer version. It is kept for reference and is not shown to clients.
+          </>
+        ) : (
+          <>
+            <strong>{versionLabel(period)}</strong> is {period.published ? 'published' : 'final'} and read-only. To correct it, create a
+            revision in Review &amp; Publish — clients keep seeing this version until the revision is published.
+          </>
+        )}
       </div>
     ) : null;
 
@@ -138,6 +147,7 @@ export default function Admin() {
       </TabsContent>
 
       <TabsContent value="review" className="space-y-5">
+        <RevisionPanel period={period} periods={periods} reload={reload} onOpen={(id) => setPeriodId(id)} />
         <PublishPanel period={period} reload={reload} />
         <fieldset disabled={locked} className="min-w-0 disabled:opacity-70" data-testid="review-editors">
           <ReviewQueue periodId={periodId} />

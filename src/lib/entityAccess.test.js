@@ -23,22 +23,33 @@ const FINANCIAL = [
   'Transaction',
 ];
 
-// A published ReportingPeriod is read-only for direct writes (even admins);
-// its state fields are writable only by the periodTransition function.
-const UNPUBLISHED_ADMIN = { $and: [ADMIN, { 'data.published': { $ne: true } }] };
-const PROTECTED_STATE = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log'];
+// A published or superseded ReportingPeriod is read-only for direct writes
+// (even admins); its state and version fields are writable only by the
+// periodTransition function.
+const UNPUBLISHED_ADMIN = { $and: [ADMIN, { 'data.published': { $ne: true } }, { 'data.superseded': { $ne: true } }] };
+const PROTECTED_STATE = [
+  'status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log',
+  'revision_of', 'revision_number', 'supersedes', 'superseded', 'superseded_by', 'superseded_at',
+  'revision_reason', 'revision_created_by', 'revision_created_at', 'revision_status', 'copy_status', 'copy_verification',
+];
+// Line records copied into a revision name their source; only the server sets it.
+const SERVER_ONLY_LINE_FIELDS = ['copied_from'];
 
 describe('entity access rules', () => {
   it.each(FINANCIAL.filter((n) => n !== 'ReportingPeriod'))('%s is admin-only for create, read, update and delete', (name) => {
     expect(load(name).rls).toEqual({ create: ADMIN, read: ADMIN, update: ADMIN, delete: ADMIN });
   });
 
-  it('ReportingPeriod: admin-only, and update/delete only while not published', () => {
+  it('ReportingPeriod: admin-only, and update/delete only while neither published nor superseded', () => {
     expect(load('ReportingPeriod').rls).toEqual({ create: ADMIN, read: ADMIN, update: UNPUBLISHED_ADMIN, delete: UNPUBLISHED_ADMIN });
   });
 
   it.each(PROTECTED_STATE)('ReportingPeriod.%s is never directly writable', (field) => {
     expect(load('ReportingPeriod').properties[field].rls).toEqual({ write: false });
+  });
+
+  it.each(['BudgetLine', 'CashAccount', 'Distribution', 'RecurringTransfer', 'SavingsSpend', 'Transaction'])('%s.copied_from is never directly writable', (name) => {
+    expect(load(name).properties.copied_from.rls).toEqual({ write: false });
   });
 
   it('every entity other than the built-in User is covered by the list above', () => {
@@ -50,7 +61,8 @@ describe('entity access rules', () => {
     for (const name of FINANCIAL) {
       for (const [field, def] of Object.entries(load(name).properties || {})) {
         if (!def || !def.rls) continue;
-        const allowed = name === 'ReportingPeriod' && PROTECTED_STATE.includes(field) ? { write: false } : { read: ADMIN, write: ADMIN };
+        const serverOnly = (name === 'ReportingPeriod' && PROTECTED_STATE.includes(field)) || SERVER_ONLY_LINE_FIELDS.includes(field);
+        const allowed = serverOnly ? { write: false } : { read: ADMIN, write: ADMIN };
         expect({ name, field, rls: def.rls }).toEqual({ name, field, rls: allowed });
       }
     }

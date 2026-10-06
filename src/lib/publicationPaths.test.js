@@ -54,7 +54,7 @@ describe('publication paths', () => {
 
   it('the importer checks for a published month before any write', () => {
     const center = read('src/components/admin/BvaImportCenter.jsx');
-    const pre = center.indexOf('importPreflight(match)');
+    const pre = center.indexOf('importTarget(existingPeriods');
     const firstWrite = center.search(/entities(?:\.[A-Za-z]+|\[[^\]]+\])\.(?:create|update|delete|bulkCreate)\(/);
     expect(pre).toBeGreaterThan(0);
     expect(firstWrite).toBeGreaterThan(0);

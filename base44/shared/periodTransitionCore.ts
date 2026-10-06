@@ -22,14 +22,28 @@
 //               historical reports are meant to stay published.
 //   invalidate  before a re-import: final -> draft; refused if published
 //   set_stage   intermediate review stages only (never 'final'); not when final/published
+//
+// Draft revisions (base44/shared/periodRevisionCore.ts, periodVersions.ts):
+//   create_revision  copy a final or published report (the month's current
+//                    version) into a new draft version; written reason
+//   copy_revision    continue / verify a copy that did not finish in one call
+//   discard_revision remove an unpublished revision
+//   publish          for a revision: ONE write publishes it (clients switch at
+//                    that moment), a second marks the version it replaced
+//                    superseded + unpublished; a retry finishes that second
+//                    write; refused if a newer version has been published
+//   finish_supersede complete the second write of an earlier publish
+// Superseded and discarded versions are read-only: every state change is refused.
 
 import { evaluateFinalize, evaluatePublish, recordedOverrides, hasInitializedState } from './publishGate.ts';
+import { monthState, isRevision, isSuperseded, isDiscarded, isFinal, revisionNumber } from './periodVersions.ts';
+import { REVISION_FIELDS, REQUIRED_REVISION_FIELDS, SchemaOutOfDate, revisionRecord, copyStep, discardStep } from './periodRevisionCore.ts';
 
 // Base44 rejects null for string and number fields (HTTP 422), so a cleared
 // timestamp / name is written as '' -- the gate treats '' as "not set".
 export const CLEARED = '';
 // State written by the server; never accepted from the caller on create.
-export const PROTECTED_FIELDS = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log'];
+export const PROTECTED_FIELDS = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log', ...REVISION_FIELDS];
 
 export const MIN_REOPEN_REASON = 10;
 export const STAGES = ['draft', 'transactions_posted', 'categories_reviewed', 'classes_reviewed', 'reports_reviewed'];
@@ -53,7 +67,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
   if (user.role !== 'admin') return reply(403, { error: 'Admins only' });
   const { action, period_id } = body;
   if (!period_id && action !== 'create') return reply(400, { error: 'period_id required' });
-  if (!['create', 'check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage'].includes(action)) {
+  if (!['create', 'check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage', 'create_revision', 'copy_revision', 'discard_revision', 'finish_supersede'].includes(action)) {
     return reply(400, { error: 'unknown action' });
   }
   const svc = base44.asServiceRole;
@@ -67,11 +81,101 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
     return reply(200, { ok: true, action, period_id: period.id, state: { ...pickState(period), ...pickState(data) } });
   };
 
+  const refuse = (code, message) => reply(409, { ok: false, action, blockers: [{ code, message, overridable: false }] });
+  const listOf = (res) => (Array.isArray(res) ? res : (res && res.items) || []);
+  const monthVersions = async () => listOf(await svc.entities.ReportingPeriod.filter({ month: period.month, year: period.year }, undefined, 200));
+  const getOrNull = async (id) => { try { return (await svc.entities.ReportingPeriod.get(id)) || null; } catch { return null; } };
+  // The second write of a publish: mark the replaced version superseded.
+  const supersede = async (replaced, by) => {
+    try {
+      await svc.entities.ReportingPeriod.update(replaced.id, { superseded: true, superseded_by: by.id, superseded_at: now.toISOString(), published: false });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   if (action === 'check') {
     return reply(200, { ok: true, finalize: evaluateFinalize(period, lines, body.overrides || {}), publish: evaluatePublish(period, lines) });
   }
 
+  // Superseded and discarded versions are kept as they are.
+  if (isDiscarded(period)) return refuse('revision_discarded', 'This revision was discarded.');
+  if (isSuperseded(period) && action !== 'finish_supersede') {
+    return refuse('superseded_read_only', `This version of ${period.label} was replaced by a newer one and is kept read-only.`);
+  }
+
+  if (action === 'create_revision') {
+    if (!period.published && !isFinal(period)) return refuse('source_not_final', 'Only a final or published report can be revised. Edit this draft directly.');
+    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (reason.length < MIN_REOPEN_REASON) return refuse('revision_reason_required', `Give a reason for the revision (at least ${MIN_REOPEN_REASON} characters).`);
+    const state = monthState(await monthVersions());
+    if (state.conflict) return refuse('version_conflict', `${period.label} has more than one published version; resolve that first.`);
+    if (state.pendingCleanup.length) return refuse('supersede_pending', `An earlier replacement of ${period.label} is not finished; finish it first.`);
+    if (state.openRevisions.length) return refuse('open_revision_exists', `${period.label} already has an open revision (revision ${revisionNumber(state.openRevisions[0])}).`);
+    if (state.current ? state.current.id !== period.id : state.working?.id !== period.id) {
+      return refuse('not_current_version', `Only the current version of ${period.label} can be revised.`);
+    }
+    const created = await svc.entities.ReportingPeriod.create(revisionRecord(period, { reason, by: who, now }));
+    // Base44 drops fields its schema does not declare. If the version fields
+    // did not stick (entity schemas older than these functions), the record
+    // would be an untracked second copy of the month: remove it and refuse.
+    const stored = (await getOrNull(created.id)) || created;
+    const lost = REQUIRED_REVISION_FIELDS.filter((f) => stored[f] === undefined || stored[f] === null || stored[f] === '');
+    if (lost.length) {
+      await discardStep(svc, { ...stored, revision_status: 'discarded' }).catch(() => {});
+      return refuse('schema_out_of_date', new SchemaOutOfDate(`ReportingPeriod.${lost[0]}`).message);
+    }
+    // No transactions: two admins could create revisions at the same moment.
+    // Keep the earliest; discard this one if it is not.
+    const open = monthState(await monthVersions()).openRevisions
+      .sort((a, b) => String(a.created_date || '').localeCompare(String(b.created_date || '')) || String(a.id).localeCompare(String(b.id)));
+    if (open.length > 1 && open[0].id !== created.id) {
+      await discardStep(svc, created).catch(() => {});
+      return refuse('concurrent_revision', `Another revision of ${period.label} was created at the same moment; use that one.`);
+    }
+    let copy;
+    try {
+      copy = await copyStep(svc, created, period);
+    } catch (e) {
+      if (!(e instanceof SchemaOutOfDate)) throw e;
+      await discardStep(svc, { ...stored, revision_status: 'discarded' }).catch(() => {});
+      return refuse('schema_out_of_date', e.message);
+    }
+    return reply(200, { ok: true, action, period_id: created.id, source_id: period.id, revision_number: created.revision_number, copy: { done: copy.done, verified: copy.verified ?? null, copied: copy.copied } });
+  }
+
+  if (action === 'copy_revision') {
+    if (!isRevision(period)) return refuse('not_a_revision', 'This period is not a revision.');
+    if (period.copy_status === 'verified') return reply(200, { ok: true, action, period_id: period.id, copy: { done: true, verified: true } });
+    const source = await getOrNull(period.supersedes);
+    if (!source) return refuse('source_missing', 'The version this revision was copied from no longer exists.');
+    const copy = await copyStep(svc, period, source);
+    return reply(200, { ok: true, action, period_id: period.id, copy: { done: copy.done, verified: copy.verified ?? null, copied: copy.copied, report: copy.report } });
+  }
+
+  if (action === 'discard_revision') {
+    if (!isRevision(period)) return refuse('not_a_revision', 'Only a revision can be discarded.');
+    if (period.published) return refuse('published', 'A published revision cannot be discarded.');
+    const step = await discardStep(svc, period);
+    return reply(200, { ok: true, action, period_id: period.id, done: step.done });
+  }
+
+  if (action === 'finish_supersede') {
+    if (!isRevision(period) || !period.published) return refuse('not_a_published_revision', 'Only a published revision replaces a version.');
+    const replaced = await getOrNull(period.supersedes);
+    if (!replaced || (isSuperseded(replaced) && replaced.superseded_by === period.id && !replaced.published)) {
+      return reply(200, { ok: true, action, period_id: period.id, unchanged: true });
+    }
+    if (isSuperseded(replaced) && replaced.superseded_by !== period.id) return refuse('replaced_by_other', 'That version was replaced by a different revision.');
+    const done = await supersede(replaced, period);
+    return done ? reply(200, { ok: true, action, period_id: period.id, superseded: replaced.id }) : reply(500, { ok: false, action, error: 'The replaced version could not be marked superseded; try again.' });
+  }
+
   if (action === 'finalize') {
+    if (isRevision(period) && period.copy_status !== 'verified') {
+      return refuse('revision_copy_unverified', 'This revision\'s copy has not been verified as complete. Continue the copy (or discard the revision).');
+    }
     const overrides = body.overrides || {};
     const result = evaluateFinalize(period, lines, overrides);
     if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers });
@@ -93,6 +197,46 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
   }
 
   if (action === 'publish') {
+    const state = monthState(await monthVersions());
+    // A version replaced by a published newer one (awaiting cleanup) is never
+    // published again.
+    if (state.pendingCleanup.some((v) => v.id === period.id)) return refuse('replaced_by_newer', `A newer version of ${period.label} has already been published.`);
+
+    if (isRevision(period)) {
+      const replaced = await getOrNull(period.supersedes);
+      // A retry of a publish that succeeded: never write it again; only finish
+      // the second write if it is still missing.
+      if (period.published) {
+        const pending = replaced && !(isSuperseded(replaced) && replaced.superseded_by === period.id && !replaced.published);
+        const finished = pending ? await supersede(replaced, period) : true;
+        return reply(200, { ok: true, action, period_id: period.id, already_published: true, supersede_pending: !finished });
+      }
+      if (period.copy_status !== 'verified') return refuse('revision_copy_unverified', 'This revision\'s copy has not been verified as complete.');
+      if (!replaced) return refuse('source_missing', 'The version this revision was copied from no longer exists.');
+      if (isSuperseded(replaced)) return refuse('stale_revision', `The version this revision was copied from has already been replaced by another revision. This revision is out of date; discard it.`);
+      // The version it replaces must still be the month's latest (this
+      // revision aside): the current published report, or -- if none is
+      // published -- the latest final version.
+      const others = monthState((await monthVersions()).filter((v) => v.id !== period.id));
+      const latest = others.current || others.working;
+      if (latest && latest.id !== replaced.id) return refuse('stale_revision', `${period.label} has a newer version than the one this revision was copied from. This revision is out of date; discard it.`);
+      const result = evaluatePublish(period, lines);
+      if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers });
+      // The switch: one write. From here clients see the revision.
+      await svc.entities.ReportingPeriod.update(period.id, { published: true, publication_date: today(now), reviewed_by: user.full_name || who, last_updated: today(now) });
+      const finished = await supersede(replaced, period);
+      // No transactions: re-read and report any competing published version.
+      const after = monthState(await monthVersions());
+      return reply(200, {
+        ok: true, action, period_id: period.id, replaced: replaced.id,
+        supersede_pending: !finished,
+        ...(after.conflict ? { conflict: after.conflict.map((v) => v.id) } : {}),
+        state: { ...pickState(period), published: true },
+      });
+    }
+
+    // An original version: its first publication. Refused once a newer version exists.
+    if (state.current && state.current.id !== period.id) return refuse('newer_version_published', `A newer version of ${period.label} is published.`);
     const result = evaluatePublish(period, lines);
     if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers });
     return update({ published: true, publication_date: today(now), reviewed_by: user.full_name || who, last_updated: today(now) });
@@ -122,6 +266,11 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
   }
 
   if (action === 'invalidate') {
+    // An import into a version that has an open revision would bypass it
+    // (e.g. a browser still running the previous app version).
+    if (monthState(await monthVersions()).openRevisions.some((r) => r.supersedes === period.id)) {
+      return refuse('open_revision_exists', `${period.label} has an open revision; import into the revision instead.`);
+    }
     if (period.published) {
       return reply(409, { ok: false, action, blockers: [{ code: 'published_read_only', message: 'Re-import into a published month is refused until draft revisions are available.', overridable: false }] });
     }

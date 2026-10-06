@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { base44 } from '@/api/base44Client';
+import { versionLabel } from '../../../base44/shared/periodVersions.ts';
 import { validateBva } from '@/lib/bvaValidation';
 import { groupMapFromLines } from '@/lib/bvaImport';
 import { fmtCurrency, fmtPct } from '@/lib/finance';
@@ -61,7 +62,7 @@ function BvaReviewRow({ period, open, onToggle, budgetLines }) {
       <button onClick={onToggle} className="flex w-full items-center justify-between px-6 py-4 text-left">
         <div>
           <p className="font-medium">
-            {period.label}
+            {versionLabel(period)}
             <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${period.bva_import_status === 'final' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
               {period.bva_import_status === 'final' ? 'Final' : 'Draft'}
             </span>
