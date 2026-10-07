@@ -52,6 +52,8 @@ async function retrying(fn: () => Promise<any>) {
       return await fn();
     } catch (e) {
       if (!rateLimited(e) || attempt >= copyOptions.attempts) throw e;
+      // Visible in the function logs: how often Base44 rate-limits a revision.
+      console.warn(`[revision] rate limited (attempt ${attempt}); retrying in ${delay} ms`);
       await sleep(delay);
       delay *= 2;
     }
