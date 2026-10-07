@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import React from 'react';
+import { useDrilldownTransactions } from '@/lib/useDrilldownTransactions';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -23,27 +23,13 @@ function Stat({ label, value, hint = null }) {
 
 // Body shared by the desktop side sheet and the mobile full-screen sheet.
 function DrilldownBody({ line, periodId, monthsElapsed }) {
-  const [txns, setTxns] = useState(null);
-
-  useEffect(() => {
-    if (!line) return;
-    let cancelled = false;
-    setTxns(null);
-    base44.functions
-      .invoke('publicCategoryTransactions', {
-        period_id: periodId,
-        // The server resolves the line and its account names itself.
-        budget_line_id: line.id,
-        category: line.category,
-      })
-      .then((res) => {
-        if (!cancelled) setTxns((res.data || res).transactions || []);
-      })
-      .catch(() => !cancelled && setTxns([]));
-    return () => {
-      cancelled = true;
-    };
-  }, [line, periodId]);
+  // The public endpoint resolves the line itself and returns no transaction
+  // rows (no transaction-detail source is approved for clients).
+  const detail = useDrilldownTransactions(
+    'publicCategoryTransactions',
+    line ? { period_id: periodId, budget_line_id: line.id, category: line.category } : null,
+    [line, periodId]
+  );
 
   const c = line.group === 'savings'
     ? bvaSavingsStatus({ actualYtd: line.ytd_actual, annualBudget: line.annual_budget }, monthsElapsed)
@@ -65,41 +51,47 @@ function DrilldownBody({ line, periodId, monthsElapsed }) {
         <Stat label="Current Month" value={line.month_actual == null ? '—' : fmtCurrency(line.month_actual)} />
       </div>
 
-      <div className="mt-8 flex items-center justify-between">
+      <div className="mt-8">
         <h4 className="text-xs uppercase tracking-[0.14em] text-stone-500">Transactions</h4>
-        {txns && txns.length > 0 && (
-          <span className="text-xs tabular-nums text-stone-500">
-            {txns.length} · {fmtCurrency(txns.reduce((s, t) => s + t.amount, 0))} YTD
-          </span>
-        )}
       </div>
-      {txns === null ? (
-        <p className="py-8 text-sm text-stone-400">Loading transactions…</p>
-      ) : txns.length === 0 ? (
-        <p className="py-8 text-sm text-stone-500">
-          No underlying transactions are stored for this category. Reported figures come from the monthly workbook.
-        </p>
-      ) : (
-        <div className="mt-3 overflow-y-auto rounded-xl border border-stone-200 lg:max-h-[40vh]">
-          {txns.map((t, i) => {
-            const sub = t.full_account_path ? t.full_account_path.split(':').pop().replace(/^\d+\s*[-:]?\s*/, '').trim() : '';
-            return (
-              <div key={t.id} className={`flex items-start justify-between gap-4 px-4 py-3 ${i ? 'border-t border-stone-100' : ''}`}>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">{t.vendor || t.description || '—'}</p>
-                  <p className="truncate text-xs text-stone-500">
-                    {t.date ? format(new Date(t.date), 'MMM d, yyyy') : ''}
-                    {t.description && t.vendor ? ` · ${t.description}` : ''}
-                    {sub ? ` · ${sub}` : ''}
-                  </p>
-                </div>
-                <p className={`shrink-0 text-sm tabular-nums ${t.amount < 0 ? 'text-emerald-700' : ''}`}>{fmtCurrency(t.amount)}</p>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <DrilldownDetail detail={detail} />
     </>
+  );
+}
+
+// What the transactions section says. A failed request is an error with a
+// retry -- never "no transactions".
+function DrilldownDetail({ detail }) {
+  if (detail.status === 'loading') return <p className="py-8 text-sm text-stone-400">Loading…</p>;
+  if (detail.status === 'error') {
+    return (
+      <div className="py-6 text-sm" role="alert" data-testid="drilldown-error">
+        <p className="text-rose-700">Transaction detail could not be loaded. The figures above are not affected.</p>
+        <button type="button" className="mt-2 rounded-full border border-stone-300 px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-stone-700 hover:bg-stone-100" onClick={detail.retry}>
+          Retry
+        </button>
+      </div>
+    );
+  }
+  if (detail.status !== 'rows') {
+    return (
+      <p className="py-8 text-sm text-stone-500" data-testid="drilldown-unavailable">
+        Transaction-level detail isn&apos;t shown on this dashboard. The figures above come from the monthly workbook.
+      </p>
+    );
+  }
+  return (
+    <div className="mt-3 overflow-y-auto rounded-xl border border-stone-200 lg:max-h-[40vh]">
+      {detail.rows.map((t, i) => (
+        <div key={i} className={`flex items-start justify-between gap-4 px-4 py-3 ${i ? 'border-t border-stone-100' : ''}`}>
+          <div className="min-w-0">
+            <p className="text-sm font-medium">{t.vendor || t.description || '—'}</p>
+            <p className="truncate text-xs text-stone-500">{t.date ? format(new Date(t.date), 'MMM d, yyyy') : ''}</p>
+          </div>
+          <p className={`shrink-0 text-sm tabular-nums ${t.amount < 0 ? 'text-emerald-700' : ''}`}>{fmtCurrency(t.amount)}</p>
+        </div>
+      ))}
+    </div>
   );
 }
 

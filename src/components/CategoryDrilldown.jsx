@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import React from 'react';
+import { useDrilldownTransactions } from '@/lib/useDrilldownTransactions';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { bvaComputeYtd, bvaSavingsStatus, fmtCurrency, fmtPct, PACE_VARIANCE_TOOLTIP, pct100 } from '@/lib/finance';
 import StatusPill from '@/components/StatusPill';
@@ -21,29 +21,16 @@ function Stat({ label, value, hint = null }) {
 
 // BVA-only: fetches whatever transaction detail already exists locally for a
 // category (never QuickBooks — see base44/functions/categoryTransactions).
+// Admins only see rows; replaced versions never supply them.
 export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClose }) {
-  const [txns, setTxns] = useState(null);
-
-  useEffect(() => {
-    if (!line) return;
-    let cancelled = false;
-    setTxns(null);
-    base44.functions
-      .invoke('categoryTransactions', {
-        period_id: periodId,
-        category: line.category,
-        qb_account_names: line.qb_account_names || [],
-      })
-      .then((res) => {
-        if (cancelled) return;
-        const data = res.data || res;
-        setTxns(data.transactions || []);
-      })
-      .catch(() => !cancelled && setTxns([]));
-    return () => {
-      cancelled = true;
-    };
-  }, [line, periodId]);
+  // Admins get the stored rows; a signed-in non-admin gets the public answer
+  // (no rows). A failed request shows an error and a retry.
+  const detail = useDrilldownTransactions(
+    'categoryTransactions',
+    line ? { period_id: periodId, category: line.category, qb_account_names: line.qb_account_names || [] } : null,
+    [line, periodId]
+  );
+  const txns = detail.rows;
 
   const hasBudgetContext = line && (line.has_snapshot || (line.annual_budget && Number(line.annual_budget) > 0));
   const c = hasBudgetContext
@@ -87,18 +74,29 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
                 </span>
               )}
             </div>
-            {txns === null ? (
+            {detail.status === 'loading' ? (
               <p className="py-8 text-sm text-stone-400">Loading transactions…</p>
-            ) : txns.length === 0 ? (
-              <p className="py-8 text-sm text-stone-500">
-                No underlying transactions are stored for this category. BVA figures come from the monthly workbook, not from transaction-level data.
+            ) : detail.status === 'error' ? (
+              <div className="py-6 text-sm" role="alert" data-testid="drilldown-error">
+                <p className="text-rose-700">{detail.error} The figures above are not affected.</p>
+                <button type="button" className="mt-2 rounded-full border border-stone-300 px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-stone-700 hover:bg-stone-100" onClick={detail.retry}>
+                  Retry
+                </button>
+              </div>
+            ) : detail.status === 'unavailable' ? (
+              <p className="py-8 text-sm text-stone-500" data-testid="drilldown-unavailable">
+                Transaction-level detail isn&apos;t shown on this dashboard. The figures above come from the monthly workbook.
+              </p>
+            ) : detail.status === 'empty' ? (
+              <p className="py-8 text-sm text-stone-500" data-testid="drilldown-empty">
+                No stored transactions match this category. BVA figures come from the monthly workbook, not from transaction-level data.
               </p>
             ) : (
               <div className="mt-3 max-h-[40vh] overflow-y-auto rounded-xl border border-stone-200">
                 {txns.map((t, i) => {
                   const sub = t.full_account_path ? t.full_account_path.split(':').pop().replace(/^\d+\s*[-:]?\s*/, '').trim() : '';
                   return (
-                    <div key={t.id} className={`flex items-start justify-between gap-4 px-4 py-3 ${i ? 'border-t border-stone-100' : ''}`}>
+                    <div key={t.id || i} className={`flex items-start justify-between gap-4 px-4 py-3 ${i ? 'border-t border-stone-100' : ''}`}>
                       <div className="min-w-0">
                         <p className="text-sm font-medium">{t.vendor || t.description || '—'}</p>
                         <p className="text-xs text-stone-500 truncate">

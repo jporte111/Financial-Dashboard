@@ -7,6 +7,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  PUBLIC_TRANSACTION_FIELDS,
+  NEVER_CLIENT_TRANSACTION_FIELDS,
+  PUBLIC_DRILLDOWN_KEYS,
   PUBLIC_PERIOD_FIELDS,
   buildPublicDashboard,
   handlePublicCategoryRequest,
@@ -162,11 +165,29 @@ describe('public transfer labels: account numbers masked, accounts still disting
 describe('publicCategoryTransactions: server-side publication and line checks', () => {
   const call = (body) => handlePublicCategoryRequest(fakeBase44(ALL), body);
 
-  it('returns published transactions for a published line, with public fields only', async () => {
+  it('answers a published line with no transaction rows and only the allowlisted keys', async () => {
     const { status, body } = await call({ period_id: 'p-aug', budget_line_id: 'l1' });
     expect(status).toBe(200);
-    expect(body.transactions.map((t) => t.vendor).sort()).toEqual(['Corner Market', 'June Market']);
-    for (const t of body.transactions) expect(Object.keys(t).sort()).toEqual(['amount', 'date', 'description', 'full_account_path', 'id', 'vendor']);
+    expect(body).toEqual({ period_id: 'p-aug', category: 'Groceries', detail_available: false, transactions: [] });
+    expect(Object.keys(body).sort()).toEqual([...PUBLIC_DRILLDOWN_KEYS].sort());
+    expect(JSON.stringify(body)).not.toMatch(/Corner Market|June Market|6100 Food|import/);
+  });
+
+  it('does not read transactions at all', async () => {
+    const reads = [];
+    const base = fakeBase44(ALL);
+    const spy = { asServiceRole: { entities: new Proxy({}, { get: (_, n) => { reads.push(String(n)); return base.asServiceRole.entities[n]; } }) } };
+    await handlePublicCategoryRequest(spy, { period_id: 'p-aug', budget_line_id: 'l1' });
+    expect(reads).not.toContain('Transaction');
+    expect(reads).not.toContain('Account');
+  });
+
+  it('the client field allowlist is empty and can never include internal fields', () => {
+    expect(PUBLIC_TRANSACTION_FIELDS).toEqual([]); // no client fields approved yet
+    expect(PUBLIC_TRANSACTION_FIELDS.filter((f) => NEVER_CLIENT_TRANSACTION_FIELDS.includes(f))).toEqual([]);
+    for (const f of ['internal_notes', 'review_status', 'review_flags', 'reviewed_by', 'qb_transaction_id', 'qb_account', 'account_id', 'full_account_path', 'copied_from', 'source', 'treatment', 'id']) {
+      expect(NEVER_CLIENT_TRANSACTION_FIELDS).toContain(f);
+    }
   });
 
   it('builds YTD from published periods only (a draft month never leaks)', async () => {
@@ -213,11 +234,12 @@ describe('categoryTransactions (signed in): admins full access, others public ru
     expect((await call({ period_id: 'p-aug', category: 'Groceries' }, null)).status).toBe(401);
   });
 
-  it('gives a signed-in non-admin only published data', async () => {
+  it('gives a signed-in non-admin exactly the public answer: no transaction rows', async () => {
     expect((await call({ period_id: 'p-jul', category: 'Groceries' }, { role: 'user' })).status).toBe(403);
     const ok = await call({ period_id: 'p-aug', budget_line_id: 'l1', qb_account_names: ['Other Ledger'] }, { role: 'user' });
     expect(ok.status).toBe(200);
-    expect(JSON.stringify(ok.body)).not.toMatch(/Other Vendor|Draft Month Shop/);
+    expect(ok.body).toMatchObject({ detail_available: false, transactions: [] });
+    expect(JSON.stringify(ok.body)).not.toMatch(/Other Vendor|Draft Month Shop|Corner Market/);
   });
 
   it('lets an admin open a draft period with full rows, as before', async () => {

@@ -19,7 +19,7 @@
 
 import { transactionsForCategory } from './categoryTransactionsCore.ts';
 import { effectiveRecord } from './sourceMissing.ts';
-import { currentPublished, isCurrentPublished } from './periodVersions.ts';
+import { currentPublished, isCurrentPublished, monthState, isSuperseded, isDiscarded } from './periodVersions.ts';
 
 export const isPublishedFinal = (p) => !!p && !!p.published && p.status === 'final';
 
@@ -173,9 +173,25 @@ export async function resolveLine(svc, periodId, { budget_line_id, category } = 
 
 const reply = (status, body) => ({ status, body });
 
-// Drill-down for anonymous visitors (and signed-in non-admins): published and
-// final periods only, the line resolved server-side, account names taken from
-// the stored line, YTD built from published periods only, public row fields.
+// Drill-down for anonymous visitors (and signed-in non-admins).
+//
+// Transaction fields a client may receive: an explicit allowlist. No
+// transaction-detail source is approved for clients yet, and detail will be
+// offered only to authenticated client users -- never through this anonymous
+// endpoint -- so the allowlist is EMPTY: the response carries no transaction
+// rows and this handler does not read transactions at all. Adding a field
+// needs the owner's approval of an authoritative export and of the field.
+export const PUBLIC_TRANSACTION_FIELDS: string[] = [];
+// Never client-visible, whatever is approved later.
+export const NEVER_CLIENT_TRANSACTION_FIELDS = [
+  'id', 'period_id', 'internal_notes', 'review_status', 'review_flags', 'reviewed_by',
+  'qb_transaction_id', 'qb_account', 'account_id', 'full_account_path', 'copied_from', 'source', 'treatment',
+];
+export const PUBLIC_DRILLDOWN_KEYS = ['period_id', 'category', 'detail_available', 'transactions'];
+
+// Published and final periods only, and only the month's current version
+// (draft revisions and replaced versions are refused); the line is resolved
+// on the server.
 export async function handlePublicCategoryRequest(base44, body = {}) {
   const svc = base44.asServiceRole;
   const { period_id } = body;
@@ -193,8 +209,8 @@ export async function handlePublicCategoryRequest(base44, body = {}) {
   const line = await resolveLine(svc, period.id, body);
   if (!line || line.drilldown_enabled === false) return reply(404, { error: 'Category not available' });
 
-  const names = Array.isArray(line.qb_account_names) ? line.qb_account_names : [];
-  return reply(200, await transactionsForCategory(base44, period, line.category, names, { publishedOnly: true, publicRows: true }));
+  // PUBLIC_TRANSACTION_FIELDS is empty: no rows, and no transaction reads.
+  return reply(200, { period_id: period.id, category: line.category, detail_available: false, transactions: [] });
 }
 
 // Signed-in drill-down: admins keep full access to any period (including
@@ -209,5 +225,12 @@ export async function handleCategoryTransactionsRequest(base44, body = {}, user)
   if (!category) return reply(400, { error: 'category required' });
   const period = await base44.asServiceRole.entities.ReportingPeriod.get(period_id);
   if (!period) return reply(404, { error: 'Period not found' });
+  // A replaced (superseded, or awaiting supersede cleanup) or discarded version
+  // never supplies transaction rows -- not even to an admin.
+  const versions = await base44.asServiceRole.entities.ReportingPeriod.filter({ month: period.month, year: period.year }, undefined, 200);
+  const state = monthState(Array.isArray(versions) ? versions : []);
+  if (isSuperseded(period) || isDiscarded(period) || state.pendingCleanup.some((v) => v.id === period.id)) {
+    return reply(409, { error: 'This version was replaced by a newer one; open the current version.', code: 'superseded_version' });
+  }
   return reply(200, await transactionsForCategory(base44, period, category, qb_account_names));
 }

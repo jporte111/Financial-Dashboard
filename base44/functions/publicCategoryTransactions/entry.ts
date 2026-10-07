@@ -1,10 +1,11 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 import { handlePublicCategoryRequest } from '../../shared/publicDashboardCore.ts';
 
-// Public (no-login) category drill-down for the client view. Serves only
-// published + final periods; the budget line and its account names are
-// resolved on the server (caller-supplied account names are ignored), YTD is
-// built from published periods only, and rows carry only displayed fields.
+// Public (no-login) category drill-down for the client view. Serves only the
+// current published + final version of a month, with the budget line resolved
+// on the server. It returns NO transaction rows: no transaction-detail source
+// is approved for clients, and detail will only ever be offered to
+// authenticated client users (PUBLIC_TRANSACTION_FIELDS is empty).
 // See base44/shared/publicDashboardCore.ts.
 export default async function(req) {
   try {

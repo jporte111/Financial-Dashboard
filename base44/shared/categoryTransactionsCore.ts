@@ -10,12 +10,11 @@ import { monthStates } from './periodVersions.ts';
 // financial-data source for the dashboard; this only supplements it with
 // underlying transaction detail when such records already exist locally.
 //
-// Options (both used by the public, no-login drill-down):
-//   publishedOnly  build YTD only from periods that are published and final
-//                  (plus the requested period), so a draft month's
-//                  transactions can never reach an anonymous visitor.
-//   publicRows     return only the fields the client drill-down displays.
-export async function transactionsForCategory(base44, period, category, qb_account_names, { publishedOnly = false, publicRows = false } = {}) {
+// Used only by the signed-in ADMIN drill-down (the client drill-down returns
+// no transaction rows -- see PUBLIC_TRANSACTION_FIELDS in publicDashboardCore.ts).
+//   publishedOnly  build YTD only from the current published version of each
+//                  earlier month (plus the requested period).
+export async function transactionsForCategory(base44, period, category, qb_account_names, { publishedOnly = false } = {}) {
   // YTD = every month this year up to and including the selected month: the
   // selected period itself for its month, and ONE version of each earlier
   // month -- the current published version (or, for an admin, the month's
@@ -71,8 +70,6 @@ export async function transactionsForCategory(base44, period, category, qb_accou
     total: rows.length,
     ytd_amount: rows.reduce((s, r) => s + r.amount, 0),
     month_amount: rows.filter((r) => r.in_month).reduce((s, r) => s + r.amount, 0),
-    transactions: publicRows
-      ? rows.map(({ id, date, vendor, description, amount, full_account_path }) => ({ id, date, vendor, description, amount, full_account_path }))
-      : rows,
+    transactions: rows,
   };
 }
