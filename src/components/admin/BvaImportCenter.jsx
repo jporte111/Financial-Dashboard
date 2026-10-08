@@ -53,6 +53,10 @@ export default function BvaImportCenter() {
   const [applied, setApplied] = useState(null); // { periodId }
   const [blockers, setBlockers] = useState([]); // refusals returned by the server-side gate
   const [previous, setPrevious] = useState(null); // latest earlier validated period: what to expect
+  // The previous period could not be loaded: its checks did not run, which
+  // blocks finalizing (never silently skipped). previousAttempt drives Retry.
+  const [previousError, setPreviousError] = useState(false);
+  const [previousAttempt, setPreviousAttempt] = useState(0);
   const [drafts, setDrafts] = useState([]); // existing draft periods that can be opened and corrected
   const [corrections, setCorrections] = useState([]); // adjustments layer, persisted to the draft
   const [matched, setMatched] = useState(null); // the existing period this import targets (may be null)
@@ -109,6 +113,7 @@ export default function BvaImportCenter() {
   useEffect(() => {
     if (!parsed || !confirm.month || !confirm.year) {
       setPrevious(null);
+      setPreviousError(false);
       return undefined;
     }
     let cancelled = false;
@@ -139,14 +144,18 @@ export default function BvaImportCenter() {
             transferCount: (transfers || []).length,
           });
         }
+        if (!cancelled) setPreviousError(false);
       } catch {
-        if (!cancelled) setPrevious(null);
+        if (!cancelled) {
+          setPrevious(null);
+          setPreviousError(true);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [parsed, confirm.month, confirm.year]);
+  }, [parsed, confirm.month, confirm.year, previousAttempt]);
 
   // The existing period this import targets: its confirmed group mappings feed
   // the validation display, and its persisted corrections are re-attached so
@@ -202,10 +211,11 @@ export default function BvaImportCenter() {
       cutoffDate: confirm.cutoffDate || adjusted.meta.cutoffDate,
       period: confirm.month && confirm.year ? { month: confirm.month, year: confirm.year } : null,
       previous,
+      previousUnavailable: previousError,
       overrides: overrideMap,
       groupMap: mergedGroupMap,
     });
-  }, [adjusted, confirm.cutoffDate, confirm.month, confirm.year, previous, overrideMap, mergedGroupMap]);
+  }, [adjusted, confirm.cutoffDate, confirm.month, confirm.year, previous, previousError, overrideMap, mergedGroupMap]);
 
   const onFile = async (f) => {
     setFile(f);
@@ -640,6 +650,13 @@ export default function BvaImportCenter() {
             </span>
           )}
           {applied?.finalized && <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Final</span>}
+        </div>
+      )}
+
+      {previousError && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm" data-testid="previous-unavailable">
+          <p className="text-stone-700">The previous period could not be loaded, so the checks against it did not run. Finalizing is blocked until they do.</p>
+          <Button variant="outline" className="mt-3 rounded-full" onClick={() => setPreviousAttempt((n) => n + 1)}>Retry</Button>
         </div>
       )}
 
