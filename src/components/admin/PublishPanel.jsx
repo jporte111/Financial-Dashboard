@@ -1,11 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { base44 } from '@/api/base44Client';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { periodTransition } from '@/lib/periodTransition';
-import { PUBLISH_CHECKLIST } from '../../../base44/shared/publishGate.ts';
+import { ChecklistItems, ReviewGroups } from './PublicationReview';
 import { versionLabel, isRevision, isSuperseded } from '../../../base44/shared/periodVersions.ts';
 
 // Review stages an admin may set directly. "Final" is deliberately absent:
@@ -20,7 +18,6 @@ export const STAGES = [
 ];
 
 export default function PublishPanel({ period, reload }) {
-  const [checklist, setChecklist] = useState(period?.checklist || {});
   const [check, setCheck] = useState(null); // server-side evaluation, read-only
   const [busy, setBusy] = useState(false);
   const [confirmReopen, setConfirmReopen] = useState(false);
@@ -37,7 +34,6 @@ export default function PublishPanel({ period, reload }) {
   const superseded = isSuperseded(period);
 
   useEffect(() => {
-    setChecklist(period?.checklist || {});
     setConfirmReopen(false);
     setReopenReason('');
     setReopenLabel('');
@@ -46,7 +42,7 @@ export default function PublishPanel({ period, reload }) {
     let cancelled = false;
     periodTransition('check', periodId).then((r) => !cancelled && setCheck(r.ok ? r : null));
     return () => { cancelled = true; };
-  }, [periodId, period?.checklist, period?.status, period?.published]);
+  }, [periodId, period?.checklist, period?.checklist_confirmations, period?.status, period?.published]);
 
   if (!period) {
     return (
@@ -69,21 +65,16 @@ export default function PublishPanel({ period, reload }) {
     }
   };
 
-  // The checklist is part of the publication rules; it is editable only while
-  // the period is not published (the server refuses edits to published periods).
-  const toggle = async (k, v) => {
-    const next = { ...checklist, [k]: v };
-    setChecklist(next);
-    await base44.entities.ReportingPeriod.update(period.id, { checklist: next });
-    reload();
-  };
+  // Checklist confirmations are recorded by the server (who, when, and what the
+  // item covered); a published period's checklist is read-only.
+  const confirmItem = (item) => run(() => periodTransition('confirm_checklist', period.id, { item }), 'Checklist item confirmed');
+  const unconfirmItem = (item) => run(() => periodTransition('unconfirm_checklist', period.id, { item }), 'Confirmation withdrawn');
 
   const publishBlockers = check?.publish?.blockers || [];
-  // Cross-period review (server-side, read-only): blockers appear above with
-  // the others; warnings and notes are listed for review and never block.
-  const cross = check?.cross_period || null;
-  const crossWarnings = (cross?.findings || []).filter((f) => f.severity === 'warn');
-  const crossNotes = (cross?.findings || []).filter((f) => f.severity === 'info');
+  // The server's review in four groups (blockers / needs review / warnings /
+  // completed); without it (the check failed) the raw blockers are listed.
+  const review = check?.review || null;
+  const comparedWith = check?.cross_period?.previous?.label || null;
   const statusLabel = isPublished ? 'Published' : isFinal ? 'Final (not yet published)' : 'Draft';
 
   return (
@@ -106,41 +97,28 @@ export default function PublishPanel({ period, reload }) {
 
       <div className="mt-6 space-y-3">
         <p className="text-xs uppercase tracking-[0.12em] text-stone-500">Pre-Publication Checklist</p>
-        {PUBLISH_CHECKLIST.map(([k, label]) => (
-          <label key={k} className="flex items-center gap-3 text-sm">
-            <Checkbox checked={!!checklist[k]} disabled={isPublished || superseded} onCheckedChange={(v) => toggle(k, !!v)} />
-            {label}
-          </label>
-        ))}
+        <ChecklistItems
+          items={check?.checklist?.items || null}
+          period={period}
+          readOnly={isPublished || superseded}
+          busy={busy}
+          onConfirm={confirmItem}
+          onUnconfirm={unconfirmItem}
+        />
       </div>
 
-      {!isPublished && publishBlockers.length > 0 && (
+      {!isPublished && review && (
+        <div className="mt-6">
+          <ReviewGroups review={review} comparedWith={comparedWith} />
+        </div>
+      )}
+
+      {!isPublished && !review && publishBlockers.length > 0 && (
         <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">
           <p className="mb-1 text-xs uppercase tracking-[0.12em] text-amber-800">Publication blocked until resolved</p>
           <ul className="list-disc space-y-1 pl-5 text-stone-700">
             {publishBlockers.map((b) => <li key={b.code}>{b.message}</li>)}
           </ul>
-        </div>
-      )}
-
-      {!isPublished && cross && (
-        <div className="mt-6 rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm" data-testid="cross-period-review">
-          <p className="mb-1 text-xs uppercase tracking-[0.12em] text-stone-500">
-            Cross-period review{cross.previous ? ` — compared with ${cross.previous.label}` : ''}
-          </p>
-          {crossWarnings.length > 0 ? (
-            <ul className="list-disc space-y-1 pl-5 text-stone-700">
-              {crossWarnings.map((f) => <li key={f.code}>{f.message}</li>)}
-            </ul>
-          ) : (
-            <p className="text-stone-600">No cross-period warnings.</p>
-          )}
-          {crossNotes.length > 0 && (
-            <details className="mt-2 text-xs text-stone-500">
-              <summary className="cursor-pointer">{crossNotes.length} note(s)</summary>
-              <ul className="mt-1 list-disc space-y-1 pl-5">{crossNotes.map((f) => <li key={f.code}>{f.message}</li>)}</ul>
-            </details>
-          )}
         </div>
       )}
 

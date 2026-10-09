@@ -335,6 +335,13 @@
       },
       "description": "Audit trail of exceptional reopen operations: { at, by, reason, was_published }. Written only by the periodTransition function."
     },
+    "checklist_confirmations": {
+      "rls": {
+        "write": false
+      },
+      "type": "object",
+      "description": "Phase 6c: who confirmed each pre-publication checklist item and when, with a fingerprint of the data the item covers and the linked warnings seen at the time. Written only by the periodTransition backend (confirm_checklist / unconfirm_checklist). A confirmation goes stale when that data changes. Never removed."
+    },
     "bva_overrides": {
       "rls": {
         "write": false

@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { handlePeriodTransition, crossPeriodContext } from '../../base44/shared/periodTransitionCore.ts';
 import { PUBLISH_CHECKLIST } from '../../base44/shared/publishGate.ts';
 import { fakeService } from './__fixtures__/fakeService.js';
+import { confirmAll } from './__fixtures__/checklist.js';
 
 const ADMIN = { role: 'admin', email: 'admin@example.invalid', full_name: 'Admin' };
 const NOW = new Date('2030-09-05T10:00:00Z');
@@ -95,6 +96,7 @@ describe('publish', () => {
   it('a finding accepted at finalize stays accepted at publish', async () => {
     const aug = period('aug', 8, 'final', { ytd_income: 100, month_income: -5900, bva_overrides: { 'cross_period:ytd_income_decreased': { reason: 'Refund booked in July.', by: 'a', at: 'b' } } });
     const db = fakeService(seed([period('jul', 7, 'published'), aug]));
+    for (const r of await confirmAll(handlePeriodTransition, db.base44, 'aug', ADMIN, NOW)) expect(r.status).toBe(200);
     const res = await call(db, 'publish', 'aug');
     expect(res.status).toBe(200);
   });

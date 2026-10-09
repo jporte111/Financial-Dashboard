@@ -9,6 +9,7 @@ import { planBvaImport } from './bvaImport.js';
 import { validateBva } from './bvaValidation.js';
 import { cleanParsed, workbookLikeParsed, SAMPLE_CUTOFF } from './__fixtures__/bvaSample.js';
 import { PUBLISH_CHECKLIST } from '../../base44/shared/publishGate.ts';
+import { confirmedChecklist } from './__fixtures__/checklist.js';
 
 const ADMIN = { role: 'admin', email: 'admin@example.invalid', full_name: 'Admin' };
 const STATE_AND_AUDIT = new Set([
@@ -72,6 +73,8 @@ function fake({ period, lines = [], others = [] }, { failUpdate = false, dropOnC
         filter: async (q) => lines.filter((l) => l.period_id === q.period_id),
         update: async () => { writes.push({ entity: 'BudgetLine' }); },
       },
+      // No cash / distribution / transfer / savings rows in these fixtures.
+      ...Object.fromEntries(['CashAccount', 'Distribution', 'RecurringTransfer', 'SavingsSpend'].map((e) => [e, { filter: async () => [] }])),
     },
   };
   return { base44: { asServiceRole: svc }, writes, store };
@@ -163,7 +166,7 @@ describe('publish', () => {
 
   it('accepted -> exactly one write that only sets publication fields', async () => {
     const fx = finalFx();
-    fx.period.checklist = Object.fromEntries(PUBLISH_CHECKLIST.map(([k]) => [k, true]));
+    Object.assign(fx.period, confirmedChecklist(fx.period, fx.lines));
     const r = await run(fx, { action: 'publish', period_id: 'p1' });
     expect(r.status).toBe(200);
     expectOnlyStateWrite(r.writes);
@@ -173,7 +176,7 @@ describe('publish', () => {
 
   it('a failing write surfaces as an error after a single attempt (no partial second write)', async () => {
     const fx = finalFx();
-    fx.period.checklist = Object.fromEntries(PUBLISH_CHECKLIST.map(([k]) => [k, true]));
+    Object.assign(fx.period, confirmedChecklist(fx.period, fx.lines));
     const f = fake(fx, { failUpdate: true });
     await expect(handlePeriodTransition(f.base44, { action: 'publish', period_id: 'p1' }, ADMIN, NOW)).rejects.toThrow('network');
     expect(f.writes).toHaveLength(1);

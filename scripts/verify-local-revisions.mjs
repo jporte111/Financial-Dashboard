@@ -60,7 +60,8 @@ for (let i = 0; i < 12; i++) await E.Transaction.create({ period_id: orig, date:
 const chk = await transition('check', orig);
 const overrides = Object.fromEntries((chk.body?.finalize?.blockers || []).filter((b) => b.overridable !== false).map((b) => [b.code, { reason: 'Fictional test month.' }]));
 const fin = await transition('finalize', orig, { overrides });
-await E.ReportingPeriod.update(orig, { checklist: Object.fromEntries(PUBLISH_CHECKLIST.map(([k]) => [k, true])) });
+// Phase 6c: the checklist is confirmed through the server (who/when recorded).
+for (const [k] of PUBLISH_CHECKLIST) await transition('confirm_checklist', orig, { item: k });
 const pub = await transition('publish', orig);
 if (fin.status !== 200 || pub.status !== 200) { log(`setup failed: finalize ${fin.status} publish ${pub.status} ${JSON.stringify(fin.body?.blockers || pub.body?.blockers || '')}`); process.exit(1); }
 const origCash = (await E.CashAccount.filter({ period_id: orig })).map((x) => x.balance).sort().join(',');
@@ -99,7 +100,8 @@ note('I4 a direct write to the published original is refused', !directOrig.ok, d
 // Finalize and publish the revision.
 if (rid) {
   const f2 = await transition('finalize', rid, { overrides });
-  await attempt(() => E.ReportingPeriod.update(rid, { checklist: Object.fromEntries(PUBLISH_CHECKLIST.map(([k]) => [k, true])) }));
+  // Phase 6c: the checklist is confirmed through the server (who/when recorded).
+  for (const [k] of PUBLISH_CHECKLIST) await transition('confirm_checklist', rid, { item: k });
   const p2 = await transition('publish', rid);
   note('finalize + publish the revision', null, `finalize ${f2.status} publish ${p2.status}${p2.body?.blockers ? ` ${p2.body.blockers.map((b) => b.code).join(',')}` : ''}${p2.body?.supersede_pending ? ' supersede pending' : ''}`);
 }

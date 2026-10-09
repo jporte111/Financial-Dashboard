@@ -23,6 +23,11 @@
 //               historical reports are meant to stay published.
 //   invalidate  before a re-import: final -> draft; refused if published
 //   set_stage   intermediate review stages only (never 'final'); not when final/published
+//   confirm_checklist / unconfirm_checklist
+//               record (or withdraw) one checklist item's confirmation: who,
+//               when, a fingerprint of the data it covers and the linked
+//               warnings seen (checklistCore.ts). Refused for a published
+//               period and while a linked blocker is open. One write.
 //
 // Draft revisions (base44/shared/periodRevisionCore.ts, periodVersions.ts):
 //   create_revision  copy a final or published report (the month's current
@@ -40,12 +45,13 @@ import { evaluateFinalize, evaluatePublish, recordedOverrides, hasInitializedSta
 import { monthState, isRevision, isSuperseded, isDiscarded, isFinal, revisionNumber } from './periodVersions.ts';
 import { REVISION_FIELDS, REQUIRED_REVISION_FIELDS, SchemaOutOfDate, revisionRecord, copyStep, discardStep } from './periodRevisionCore.ts';
 import { alignedPrevious, alignedNext, crossPeriodChecks, laterMonthChecks, UNAVAILABLE } from './crossPeriod.ts';
+import { CHECKLIST_ITEMS, CHECKLIST_KEYS, partHashes, warningCodes, checklistStatus, confirmationRecord, itemMessage, isDataBlocker, buildReview } from './checklistCore.ts';
 
 // Base44 rejects null for string and number fields (HTTP 422), so a cleared
 // timestamp / name is written as '' -- the gate treats '' as "not set".
 export const CLEARED = '';
 // State written by the server; never accepted from the caller on create.
-export const PROTECTED_FIELDS = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log', ...REVISION_FIELDS];
+export const PROTECTED_FIELDS = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log', 'checklist_confirmations', ...REVISION_FIELDS];
 
 export const MIN_REOPEN_REASON = 10;
 export const STAGES = ['draft', 'transactions_posted', 'categories_reviewed', 'classes_reviewed', 'reports_reviewed'];
@@ -104,12 +110,40 @@ export async function crossPeriodContext(svc, period, lines, { retryDelayMs = 50
   }
 }
 
+// The checklist (checklistCore.ts): fingerprints of the data each item covers,
+// the warnings showing now, and each item's state. Reads only. If the period's
+// records cannot be read (after one retry) every item is blocked: fail closed.
+export async function checklistContext(svc, period, lines, cross, { retryDelayMs = 500 } = {}) {
+  const listOf = (res) => (Array.isArray(res) ? res : (res && res.items) || []);
+  const load = async () => ({
+    cash: listOf(await svc.entities.CashAccount.filter({ period_id: period.id }, undefined, 500)),
+    distributions: listOf(await svc.entities.Distribution.filter({ period_id: period.id }, undefined, 500)),
+    transfers: listOf(await svc.entities.RecurringTransfer.filter({ period_id: period.id }, undefined, 500)),
+    savings: listOf(await svc.entities.SavingsSpend.filter({ period_id: period.id }, undefined, 500)),
+  });
+  let rec = null;
+  try { rec = await load(); } catch {
+    try { await new Promise((r) => setTimeout(r, retryDelayMs)); rec = await load(); } catch { rec = null; }
+  }
+  const findings = cross ? cross.findings : [];
+  if (!rec) {
+    const items = CHECKLIST_ITEMS.map((i) => ({ key: i.key, label: i.label, state: 'blocked', blockedBy: ['checklist_unavailable'], changedParts: [], newWarnings: [], by: null, at: null }));
+    return { unavailable: true, hashes: {}, warnings: [], items };
+  }
+  const hashes = partHashes({ period, lines, ...rec });
+  // What still stands in the way, as publish sees it (accepted reasons count).
+  const open = evaluatePublish(period, lines, findings, null).blockers.filter(isDataBlocker);
+  const warnings = warningCodes(period, findings);
+  const items = checklistStatus({ confirmations: period.checklist_confirmations, hashes, openBlockers: open, warnings });
+  return { hashes, warnings, items };
+}
+
 export async function handlePeriodTransition(base44, body = {}, user, now = new Date()) {
   if (!user) return reply(401, { error: 'Unauthorized' });
   if (user.role !== 'admin') return reply(403, { error: 'Admins only' });
   const { action, period_id } = body;
   if (!period_id && action !== 'create') return reply(400, { error: 'period_id required' });
-  if (!['create', 'check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage', 'create_revision', 'copy_revision', 'discard_revision', 'finish_supersede'].includes(action)) {
+  if (!['create', 'check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage', 'create_revision', 'copy_revision', 'discard_revision', 'finish_supersede', 'confirm_checklist', 'unconfirm_checklist'].includes(action)) {
     return reply(400, { error: 'unknown action' });
   }
   const svc = base44.asServiceRole;
@@ -138,21 +172,51 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
   };
 
   if (action === 'check') {
-    // A published report is never re-judged: no cross-period evaluation for it.
-    const cross = period.published ? null : await crossPeriodContext(svc, period, lines);
-    const findings = cross ? cross.findings : null;
-    return reply(200, {
-      ok: true,
-      finalize: evaluateFinalize(period, lines, body.overrides || {}, findings),
-      publish: evaluatePublish(period, lines, findings),
-      cross_period: cross,
-    });
+    // A published report is never re-judged: no cross-period or checklist evaluation for it.
+    if (period.published) {
+      return reply(200, { ok: true, finalize: evaluateFinalize(period, lines, body.overrides || {}, null), publish: evaluatePublish(period, lines, null), cross_period: null, checklist: null, review: null });
+    }
+    const cross = await crossPeriodContext(svc, period, lines);
+    const cl = await checklistContext(svc, period, lines, cross);
+    const finalize = evaluateFinalize(period, lines, body.overrides || {}, cross.findings);
+    const publish = evaluatePublish(period, lines, cross.findings, cl.items);
+    // A draft's open issues are what finalize will ask about; a final period's, what publish will.
+    const final = period.status === 'final' && period.bva_import_status === 'final';
+    const review = buildReview({ period, blockers: final ? publish.blockers : finalize.blockers, crossFindings: cross.findings, crossRan: !!cross.previous && !cross.unavailable, items: cl.items });
+    return reply(200, { ok: true, finalize, publish, cross_period: cross, checklist: { items: cl.items, unavailable: !!cl.unavailable }, review });
   }
 
   // Superseded and discarded versions are kept as they are.
   if (isDiscarded(period)) return refuse('revision_discarded', 'This revision was discarded.');
   if (isSuperseded(period) && action !== 'finish_supersede') {
     return refuse('superseded_read_only', `This version of ${period.label} was replaced by a newer one and is kept read-only.`);
+  }
+
+  if (action === 'confirm_checklist' || action === 'unconfirm_checklist') {
+    const key = body.item;
+    if (!CHECKLIST_KEYS.includes(key)) return reply(400, { error: 'unknown checklist item' });
+    if (period.published) return refuse('published_read_only', 'This period is published and read-only; its checklist is kept as it was.');
+    const confirmations = { ...(period.checklist_confirmations && typeof period.checklist_confirmations === 'object' ? period.checklist_confirmations : {}) };
+    const checklist = { ...(period.checklist && typeof period.checklist === 'object' ? period.checklist : {}) };
+    if (action === 'unconfirm_checklist') {
+      delete confirmations[key];
+      checklist[key] = false;
+      return update({ checklist_confirmations: confirmations, checklist, last_updated: today(now) });
+    }
+    const cross = await crossPeriodContext(svc, period, lines);
+    const cl = await checklistContext(svc, period, lines, cross);
+    const s = cl.items.find((i) => i.key === key);
+    if (s.state === 'blocked') return reply(409, { ok: false, action, blockers: [{ code: 'checklist_item_blocked', message: itemMessage(s), overridable: false, linked: s.blockedBy }] });
+    confirmations[key] = confirmationRecord(key, cl.hashes, cl.warnings, who, now.toISOString());
+    checklist[key] = true;
+    await svc.entities.ReportingPeriod.update(period.id, { checklist_confirmations: confirmations, checklist, last_updated: today(now) });
+    // Base44 silently drops a field the deployed schema does not have: verify.
+    let stored = null;
+    try { stored = await svc.entities.ReportingPeriod.get(period.id); } catch { stored = null; }
+    if (!stored || !stored.checklist_confirmations || !stored.checklist_confirmations[key]) {
+      return refuse('schema_out_of_date', 'The confirmation could not be stored (the data schema does not have checklist_confirmations yet). Publish the entity schemas, then try again.');
+    }
+    return reply(200, { ok: true, action, period_id: period.id, item: key, confirmation: confirmations[key] });
   }
 
   if (action === 'create_revision') {
@@ -272,7 +336,8 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
       const latest = others.current || others.working;
       if (latest && latest.id !== replaced.id) return refuse('stale_revision', `${period.label} has a newer version than the one this revision was copied from. This revision is out of date; discard it.`);
       const cross = await crossPeriodContext(svc, period, lines);
-      const result = evaluatePublish(period, lines, cross.findings);
+      const cl = await checklistContext(svc, period, lines, cross);
+      const result = evaluatePublish(period, lines, cross.findings, cl.items);
       if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers, cross_period: cross });
       // The switch: one write. From here clients see the revision.
       await svc.entities.ReportingPeriod.update(period.id, { published: true, publication_date: today(now), reviewed_by: user.full_name || who, last_updated: today(now) });
@@ -290,7 +355,8 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
     // An original version: its first publication. Refused once a newer version exists.
     if (state.current && state.current.id !== period.id) return refuse('newer_version_published', `A newer version of ${period.label} is published.`);
     const cross = await crossPeriodContext(svc, period, lines);
-    const result = evaluatePublish(period, lines, cross.findings);
+    const cl = await checklistContext(svc, period, lines, cross);
+    const result = evaluatePublish(period, lines, cross.findings, cl.items);
     if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers, cross_period: cross });
     return update({ published: true, publication_date: today(now), reviewed_by: user.full_name || who, last_updated: today(now) });
   }

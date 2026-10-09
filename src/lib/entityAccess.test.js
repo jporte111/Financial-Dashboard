@@ -28,7 +28,7 @@ const FINANCIAL = [
 // periodTransition function.
 const UNPUBLISHED_ADMIN = { $and: [ADMIN, { 'data.published': { $ne: true } }, { 'data.superseded': { $ne: true } }] };
 const PROTECTED_STATE = [
-  'status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log',
+  'status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log', 'checklist_confirmations',
   'revision_of', 'revision_number', 'supersedes', 'superseded', 'superseded_by', 'superseded_at',
   'revision_reason', 'revision_created_by', 'revision_created_at', 'revision_status', 'copy_status', 'copy_verification',
 ];

@@ -16,6 +16,7 @@
 
 import { effectiveRecord } from './sourceMissing.ts';
 import { CROSS_PERIOD_PREFIX } from './crossPeriod.ts';
+import { itemMessage } from './checklistCore.ts';
 
 const MONTHS_IN_YEAR = 12;
 
@@ -168,7 +169,10 @@ export function evaluateFinalize(rawPeriod, lines = [], overrides = {}, crossFin
   return { ok: out.length === 0, blockers: out };
 }
 
-export function evaluatePublish(rawPeriod, lines = [], crossFindings = null) {
+// checklistItems: checklistCore.checklistStatus() for this period. When given,
+// each item must be CONFIRMED (recorded by the server) and not stale; when
+// null (browser explanations, older tests) the stored true/false is used.
+export function evaluatePublish(rawPeriod, lines = [], crossFindings = null, checklistItems = null) {
   const period = effectiveRecord(rawPeriod);
   if (!period) return { ok: false, blockers: [blocker('period_not_found', 'Reporting period not found.')] };
   if (!hasInitializedState(period)) return { ok: false, blockers: [blocker('state_uninitialized', 'This period was not initialized by the server; it cannot be published.')] };
@@ -183,9 +187,13 @@ export function evaluatePublish(rawPeriod, lines = [], crossFindings = null) {
   out.push(...crossPeriodBlockers(crossFindings, period.bva_overrides || {}).map((b) => (b.overridable
     ? { ...b, message: `${b.message} Not accepted at finalize: reopen to draft and finalize again with a written reason.` }
     : b)));
-  const checklist = period.checklist || {};
-  for (const [k, label] of PUBLISH_CHECKLIST) {
-    if (!checklist[k]) out.push(blocker(`checklist_incomplete:${k}`, `Checklist item not confirmed: ${label}.`));
+  if (Array.isArray(checklistItems)) {
+    for (const s of checklistItems) if (s.state !== 'confirmed') out.push(blocker(`checklist_incomplete:${s.key}`, itemMessage(s)));
+  } else {
+    const checklist = period.checklist || {};
+    for (const [k, label] of PUBLISH_CHECKLIST) {
+      if (!checklist[k]) out.push(blocker(`checklist_incomplete:${k}`, `Checklist item not confirmed: ${label}.`));
+    }
   }
   return { ok: out.length === 0, blockers: out };
 }

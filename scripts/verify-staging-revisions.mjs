@@ -80,7 +80,8 @@ async function finalizeAndPublish(pid, { publish = true } = {}) {
   const overrides = Object.fromEntries((chk.body?.finalize?.blockers || []).filter((b) => b.overridable !== false).map((b) => [b.code, { reason: 'Fictional staging test period.' }]));
   const fin = await transition('finalize', pid, { overrides });
   if (fin.status !== 200) return { fin, overrides };
-  await E.ReportingPeriod.update(pid, { checklist: CHECKLIST });
+  // Phase 6c: the checklist is confirmed through the server (who/when recorded).
+  for (const k of Object.keys(CHECKLIST)) await transition('confirm_checklist', pid, { item: k });
   const pub = publish ? await transition('publish', pid) : null;
   return { fin, pub, overrides };
 }

@@ -26,7 +26,7 @@ const SYSTEM = new Set(['id', 'created_date', 'updated_date', 'created_by', 'cre
 const NOT_COPIED = new Set([
   ...SYSTEM, ...REVISION_FIELDS,
   'status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'reopen_log',
-  'publication_date', 'reviewed_by', 'checklist', 'last_updated',
+  'publication_date', 'reviewed_by', 'checklist', 'checklist_confirmations', 'last_updated',
 ]);
 
 // The deployed entity schema lacks the draft-revision fields (a partial
@@ -83,6 +83,7 @@ export function revisionRecord(source: any, { reason, by, now }: { reason: strin
     finalized_at: '',
     finalized_by: '',
     checklist: {},
+    checklist_confirmations: {},
     revision_of: source.revision_of || source.id,
     revision_number: (Number(source.revision_number) || 1) + 1,
     supersedes: source.id,
