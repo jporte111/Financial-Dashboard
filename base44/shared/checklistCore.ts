@@ -305,18 +305,25 @@ export function explain(code: string) {
 //   warnings      worth a look; never block
 //   completed     confirmed items, accepted reasons, automated checks that passed
 // plus notes (context such as "new year"), kept out of the way.
+// A check is listed as passed only if it actually RAN: `notRunIf` names the
+// notes (info findings) that mean it was skipped, e.g. a missing month column.
 const CHECK_FAMILIES = [
   { label: 'Cash accounts add up to Total Cash', codes: ['cash_total_mismatch', 'cash_total_row_missing'], kind: 'import' },
   { label: 'Income lines add up to total income', codes: ['income_actual_mismatch', 'income_total_row_missing'], kind: 'import' },
   { label: 'Expense groups add up to total expenses', codes: ['expense_actual_mismatch', 'expense_budget_mismatch', 'expense_group_missing', 'expense_total_row_missing'], kind: 'import' },
   { label: 'Every required figure is present', codes: ['required_value_missing', 'required_line_value_missing', 'source_value_missing', 'section_missing'], kind: 'import' },
   { label: 'Watch-list rows are classified', codes: ['detail_unassigned'], kind: 'import' },
-  { label: 'Year-to-date figures did not go down', codes: ['ytd_income_decreased', 'ytd_expenses_decreased', 'group_ytd_decreased', 'distributions_ytd_decreased', 'savings_in_ytd_decreased'], kind: 'cross' },
-  { label: 'This month matches the change in year-to-date', codes: ['month_vs_ytd'], kind: 'cross' },
+  { label: 'Year-to-date figures did not go down', codes: ['ytd_income_decreased', 'ytd_expenses_decreased', 'group_ytd_decreased', 'distributions_ytd_decreased', 'savings_in_ytd_decreased'], kind: 'cross',
+    notRunIf: ['not_comparable:ytd_income', 'not_comparable:ytd_expenses', 'not_comparable:distributions_ytd'] },
+  { label: 'This month matches the change in year-to-date', codes: ['month_vs_ytd'], kind: 'cross', notRunIf: ['not_comparable:month_income', 'not_comparable:month_expenses', 'month_gap'] },
   { label: 'Closed distribution quarters are unchanged', codes: ['closed_quarter_changed', 'closed_quarter_missing'], kind: 'cross' },
   { label: 'Annual budgets are unchanged', codes: ['annual_budget_changed', 'group_budget_changed'], kind: 'cross' },
   { label: 'Watch-list rows are consistent with last month', codes: ['detail_row_missing', 'detail_code_reused', 'detail_group_changed'], kind: 'cross' },
 ];
+// Findings after which crossPeriodChecks compares no figures at all.
+const CROSS_STOPPERS = new Set(['no_previous_period', 'previous_month_conflict', 'cutoff_not_comparable', 'cutoff_not_after_previous', 'new_year', 'legacy_previous', 'checks_unavailable']);
+// Did the cross-period figure comparisons run?
+export const crossComparisonsRan = (findings: any[] | null) => Array.isArray(findings) && findings.length > 0 && !findings.some((f) => CROSS_STOPPERS.has(family(f.code)));
 
 const entry = (code: string, message: string | null, extra: any = {}) => {
   const e = explain(code);
@@ -341,8 +348,10 @@ export function buildReview({ period, blockers, crossFindings, crossRan, items }
   }
   const present = new Set([...data.map((b) => family(b.code)), ...validation.map((w: any) => family(String(w.code))), ...(crossFindings || []).filter((f: any) => f.severity !== 'info').map((f: any) => family(f.code))]);
   const imported = !!period?.bva_parsed_source;
+  const crossFigures = crossRan && crossComparisonsRan(crossFindings);
+  const skipped = new Set((crossFindings || []).map((f: any) => bareCode(f.code)));
   for (const c of CHECK_FAMILIES) {
-    const ran = c.kind === 'import' ? imported : crossRan;
+    const ran = c.kind === 'import' ? imported : crossFigures && !(c.notRunIf || []).some((n) => skipped.has(n));
     if (ran && !c.codes.some((k) => present.has(k))) out.completed.push({ code: `passed:${c.codes[0]}`, title: c.label, problem: 'No issues found.', action: '', where: REVIEW, kind: 'passed' });
   }
   return out;

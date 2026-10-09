@@ -177,3 +177,29 @@ describe('missing elapsed months', () => {
     expect(partHashes(records({ period: { months_elapsed: null } })).cutoff).not.toBe(partHashes(records({ period: { months_elapsed: 0 } })).cutoff);
   });
 });
+
+describe('a check is "passed" only if it actually ran', () => {
+  const passed = (r) => r.completed.filter((e) => e.kind === 'passed').map((e) => e.title);
+  const run = (crossFindings) => buildReview({ period: period(), blockers: [], crossFindings, crossRan: true, items: [] });
+  it('after a stop (same cutoff as a legacy month, new year, no previous...): no cross-period check is listed as passed', () => {
+    for (const stop of ['cutoff_not_after_previous', 'legacy_previous', 'new_year', 'no_previous_period', 'checks_unavailable', 'previous_month_conflict', 'cutoff_not_comparable']) {
+      const p = passed(run([{ code: stop, severity: stop === 'cutoff_not_after_previous' ? 'override' : 'info' }]));
+      expect(p, stop).not.toContain('Year-to-date figures did not go down');
+      expect(p, stop).not.toContain('Closed distribution quarters are unchanged');
+    }
+  });
+  it('a missing month column: the month check is not "passed"; the others that ran are', () => {
+    const p = passed(run([{ code: 'not_comparable:month_income', severity: 'info' }, { code: 'transfers_ended', severity: 'warn' }]));
+    expect(p).not.toContain('This month matches the change in year-to-date');
+    expect(p).toContain('Year-to-date figures did not go down');
+  });
+  it('across a skipped month the month check did not run', () => {
+    expect(passed(run([{ code: 'month_gap', severity: 'warn' }]))).not.toContain('This month matches the change in year-to-date');
+  });
+  it('a missing year-to-date total: the year-to-date check is not "passed"', () => {
+    expect(passed(run([{ code: 'not_comparable:ytd_income', severity: 'info' }]))).not.toContain('Year-to-date figures did not go down');
+  });
+  it('a clean comparison lists the cross-period checks as passed', () => {
+    expect(passed(run([{ code: 'transfers_ended', severity: 'warn' }]))).toEqual(expect.arrayContaining(['Year-to-date figures did not go down', 'This month matches the change in year-to-date', 'Closed distribution quarters are unchanged']));
+  });
+});
