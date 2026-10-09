@@ -656,7 +656,9 @@ export default function BvaImportCenter() {
       {previousError && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm" data-testid="previous-unavailable">
           <p className="text-stone-700">The previous period could not be loaded, so the checks against it did not run. Finalizing is blocked until they do.</p>
-          <Button variant="outline" className="mt-3 rounded-full" onClick={() => setPreviousAttempt((n) => n + 1)}>Retry</Button>
+          <button type="button" className="mt-3 rounded-full border border-stone-300 bg-white px-4 py-1.5 text-sm font-medium text-stone-700 hover:bg-stone-100" onClick={() => setPreviousAttempt((n) => n + 1)}>
+            Retry
+          </button>
         </div>
       )}
 
