@@ -12,7 +12,8 @@
 //               write, read it back to verify its state, refuse a month that
 //               already exists (safe to retry), and never report success for
 //               a period whose state could not be verified
-//   check       evaluate finalize and publish rules; writes nothing
+//   check       evaluate finalize and publish rules (including the cross-period
+//               checks, returned with their warnings); writes nothing
 //   finalize    draft -> final (records override / exclusion reasons); NOT published
 //   publish     final -> published
 //   reopen      EXCEPTIONAL: published or final -> draft (unpublishes; figures
@@ -38,6 +39,7 @@
 import { evaluateFinalize, evaluatePublish, recordedOverrides, hasInitializedState } from './publishGate.ts';
 import { monthState, isRevision, isSuperseded, isDiscarded, isFinal, revisionNumber } from './periodVersions.ts';
 import { REVISION_FIELDS, REQUIRED_REVISION_FIELDS, SchemaOutOfDate, revisionRecord, copyStep, discardStep } from './periodRevisionCore.ts';
+import { alignedPrevious, alignedNext, crossPeriodChecks, laterMonthChecks, UNAVAILABLE } from './crossPeriod.ts';
 
 // Base44 rejects null for string and number fields (HTTP 422), so a cleared
 // timestamp / name is written as '' -- the gate treats '' as "not set".
@@ -60,6 +62,46 @@ async function load(svc, periodId) {
   if (!period) return { period: null, lines: [] };
   const lines = await svc.entities.BudgetLine.filter({ period_id: period.id }, undefined, 5000);
   return { period, lines };
+}
+
+// Cross-period checks (crossPeriod.ts): load the versions clients see for the
+// months before and after this period, plus the child records the checks
+// compare. Reads only. If anything cannot be read -- after one retry -- the
+// result is a single blocking finding: fail closed, never skip the checks.
+export async function crossPeriodContext(svc, period, lines, { retryDelayMs = 500 } = {}) {
+  const listOf = (res) => (Array.isArray(res) ? res : (res && res.items) || []);
+  const attempt = async () => {
+    const year = Number(period.year);
+    const periods = [];
+    for (const y of [year - 1, year, year + 1]) periods.push(...listOf(await svc.entities.ReportingPeriod.filter({ year: y }, undefined, 500)));
+    const prev = alignedPrevious(periods, period);
+    const next = alignedNext(periods, period);
+    const children = async (p, own = null) => ({
+      period: p,
+      lines: own || listOf(await svc.entities.BudgetLine.filter({ period_id: p.id }, undefined, 5000)),
+      distributions: listOf(await svc.entities.Distribution.filter({ period_id: p.id }, undefined, 500)),
+      transfers: listOf(await svc.entities.RecurringTransfer.filter({ period_id: p.id }, undefined, 500)),
+      cash: listOf(await svc.entities.CashAccount.filter({ period_id: p.id }, undefined, 500)),
+    });
+    const cur = prev.period ? await children(period, lines) : { period, lines };
+    const prevSide = prev.period ? await children(prev.period) : null;
+    const findings = [
+      ...crossPeriodChecks(cur, prevSide, { conflict: prev.conflict, openRevision: prev.openRevision }),
+      ...laterMonthChecks(cur, next.period ? { period: next.period } : null),
+    ];
+    const ref = (p) => (p ? { id: p.id, label: p.label } : null);
+    return { findings, previous: ref(prev.period), next: ref(next.period) };
+  };
+  try {
+    return await attempt();
+  } catch {
+    try {
+      await new Promise((r) => setTimeout(r, retryDelayMs));
+      return await attempt();
+    } catch {
+      return { findings: [UNAVAILABLE], previous: null, next: null, unavailable: true };
+    }
+  }
 }
 
 export async function handlePeriodTransition(base44, body = {}, user, now = new Date()) {
@@ -96,7 +138,15 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
   };
 
   if (action === 'check') {
-    return reply(200, { ok: true, finalize: evaluateFinalize(period, lines, body.overrides || {}), publish: evaluatePublish(period, lines) });
+    // A published report is never re-judged: no cross-period evaluation for it.
+    const cross = period.published ? null : await crossPeriodContext(svc, period, lines);
+    const findings = cross ? cross.findings : null;
+    return reply(200, {
+      ok: true,
+      finalize: evaluateFinalize(period, lines, body.overrides || {}, findings),
+      publish: evaluatePublish(period, lines, findings),
+      cross_period: cross,
+    });
   }
 
   // Superseded and discarded versions are kept as they are.
@@ -177,10 +227,11 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
       return refuse('revision_copy_unverified', 'This revision\'s copy has not been verified as complete. Continue the copy (or discard the revision).');
     }
     const overrides = body.overrides || {};
-    const result = evaluateFinalize(period, lines, overrides);
-    if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers });
+    const cross = await crossPeriodContext(svc, period, lines);
+    const result = evaluateFinalize(period, lines, overrides, cross.findings);
+    if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers, cross_period: cross });
     const at = now.toISOString();
-    const recorded = recordedOverrides(period, lines, overrides, who, at);
+    const recorded = recordedOverrides(period, lines, overrides, who, at, cross.findings);
     const warnings = (Array.isArray(period.bva_validation_warnings) ? period.bva_validation_warnings : []).map((w) => {
       const o = recorded[`open_reconciliation:${w.code}`];
       return o && w.blocksFinalize ? { ...w, overridden: true, override: o, blocksFinalize: false } : w;
@@ -220,8 +271,9 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
       const others = monthState((await monthVersions()).filter((v) => v.id !== period.id));
       const latest = others.current || others.working;
       if (latest && latest.id !== replaced.id) return refuse('stale_revision', `${period.label} has a newer version than the one this revision was copied from. This revision is out of date; discard it.`);
-      const result = evaluatePublish(period, lines);
-      if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers });
+      const cross = await crossPeriodContext(svc, period, lines);
+      const result = evaluatePublish(period, lines, cross.findings);
+      if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers, cross_period: cross });
       // The switch: one write. From here clients see the revision.
       await svc.entities.ReportingPeriod.update(period.id, { published: true, publication_date: today(now), reviewed_by: user.full_name || who, last_updated: today(now) });
       const finished = await supersede(replaced, period);
@@ -237,8 +289,9 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
 
     // An original version: its first publication. Refused once a newer version exists.
     if (state.current && state.current.id !== period.id) return refuse('newer_version_published', `A newer version of ${period.label} is published.`);
-    const result = evaluatePublish(period, lines);
-    if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers });
+    const cross = await crossPeriodContext(svc, period, lines);
+    const result = evaluatePublish(period, lines, cross.findings);
+    if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers, cross_period: cross });
     return update({ published: true, publication_date: today(now), reviewed_by: user.full_name || who, last_updated: today(now) });
   }
 

@@ -79,6 +79,11 @@ export default function PublishPanel({ period, reload }) {
   };
 
   const publishBlockers = check?.publish?.blockers || [];
+  // Cross-period review (server-side, read-only): blockers appear above with
+  // the others; warnings and notes are listed for review and never block.
+  const cross = check?.cross_period || null;
+  const crossWarnings = (cross?.findings || []).filter((f) => f.severity === 'warn');
+  const crossNotes = (cross?.findings || []).filter((f) => f.severity === 'info');
   const statusLabel = isPublished ? 'Published' : isFinal ? 'Final (not yet published)' : 'Draft';
 
   return (
@@ -115,6 +120,27 @@ export default function PublishPanel({ period, reload }) {
           <ul className="list-disc space-y-1 pl-5 text-stone-700">
             {publishBlockers.map((b) => <li key={b.code}>{b.message}</li>)}
           </ul>
+        </div>
+      )}
+
+      {!isPublished && cross && (
+        <div className="mt-6 rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm" data-testid="cross-period-review">
+          <p className="mb-1 text-xs uppercase tracking-[0.12em] text-stone-500">
+            Cross-period review{cross.previous ? ` — compared with ${cross.previous.label}` : ''}
+          </p>
+          {crossWarnings.length > 0 ? (
+            <ul className="list-disc space-y-1 pl-5 text-stone-700">
+              {crossWarnings.map((f) => <li key={f.code}>{f.message}</li>)}
+            </ul>
+          ) : (
+            <p className="text-stone-600">No cross-period warnings.</p>
+          )}
+          {crossNotes.length > 0 && (
+            <details className="mt-2 text-xs text-stone-500">
+              <summary className="cursor-pointer">{crossNotes.length} note(s)</summary>
+              <ul className="mt-1 list-disc space-y-1 pl-5">{crossNotes.map((f) => <li key={f.code}>{f.message}</li>)}</ul>
+            </details>
+          )}
         </div>
       )}
 

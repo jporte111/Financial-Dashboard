@@ -15,6 +15,7 @@
 // (including having a validated BVA import) before it can be published again.
 
 import { effectiveRecord } from './sourceMissing.ts';
+import { CROSS_PERIOD_PREFIX } from './crossPeriod.ts';
 
 const MONTHS_IN_YEAR = 12;
 
@@ -129,6 +130,20 @@ function dataBlockers(period, lines, overrides) {
   return out;
 }
 
+// Cross-period findings (crossPeriod.ts) as blockers: 'block' cannot be
+// overridden; 'override' blocks until accepted with a written reason (codes
+// prefixed cross_period:); 'warn' and 'info' never block. `findings` is null
+// when the caller did not evaluate them (browser explanations, older tests).
+export function crossPeriodBlockers(findings, overrides = {}) {
+  const out = [];
+  for (const f of Array.isArray(findings) ? findings : []) {
+    const code = `${CROSS_PERIOD_PREFIX}${f.code}`;
+    if (f.severity === 'block') out.push(blocker(code, f.message, false));
+    else if (f.severity === 'override' && !hasReason(overrides[code])) out.push(blocker(code, f.message, true));
+  }
+  return out;
+}
+
 // A period must carry its protected state (written by the server on create).
 // A record missing it -- e.g. an interrupted creation -- can never be
 // finalized or published.
@@ -137,7 +152,7 @@ function dataBlockers(period, lines, overrides) {
 export const hasInitializedState = (p) =>
   !!p && typeof p.status === 'string' && p.status !== '' && typeof p.published === 'boolean';
 
-export function evaluateFinalize(rawPeriod, lines = [], overrides = {}) {
+export function evaluateFinalize(rawPeriod, lines = [], overrides = {}, crossFindings = null) {
   // Fields listed as missing are missing, whatever number is stored.
   const period = effectiveRecord(rawPeriod);
   if (!period) return { ok: false, blockers: [blocker('period_not_found', 'Reporting period not found.')] };
@@ -149,10 +164,11 @@ export function evaluateFinalize(rawPeriod, lines = [], overrides = {}) {
     out.push(blocker('no_validated_import', 'This period has no validated BVA import. Import the workbook before finalizing.'));
   }
   out.push(...dataBlockers(period, lines, overrides));
+  out.push(...crossPeriodBlockers(crossFindings, overrides));
   return { ok: out.length === 0, blockers: out };
 }
 
-export function evaluatePublish(rawPeriod, lines = []) {
+export function evaluatePublish(rawPeriod, lines = [], crossFindings = null) {
   const period = effectiveRecord(rawPeriod);
   if (!period) return { ok: false, blockers: [blocker('period_not_found', 'Reporting period not found.')] };
   if (!hasInitializedState(period)) return { ok: false, blockers: [blocker('state_uninitialized', 'This period was not initialized by the server; it cannot be published.')] };
@@ -162,6 +178,11 @@ export function evaluatePublish(rawPeriod, lines = []) {
     out.push(blocker('not_final', 'Only a finalized period (validated BVA import) can be published.'));
   }
   out.push(...dataBlockers(period, lines, period.bva_overrides || {}));
+  // A cross-period finding accepted at finalize stays accepted; a new one
+  // (e.g. the previous month was revised since) needs a reopen and a reason.
+  out.push(...crossPeriodBlockers(crossFindings, period.bva_overrides || {}).map((b) => (b.overridable
+    ? { ...b, message: `${b.message} Not accepted at finalize: reopen to draft and finalize again with a written reason.` }
+    : b)));
   const checklist = period.checklist || {};
   for (const [k, label] of PUBLISH_CHECKLIST) {
     if (!checklist[k]) out.push(blocker(`checklist_incomplete:${k}`, `Checklist item not confirmed: ${label}.`));
@@ -171,8 +192,8 @@ export function evaluatePublish(rawPeriod, lines = []) {
 
 // The overrides that finalize records: only those that clear a blocker that
 // was actually present, each with its reason, who and when.
-export function recordedOverrides(period, lines, overrides, by, at) {
-  const needed = dataBlockers(period, lines, {}).filter((b) => b.overridable).map((b) => b.code);
+export function recordedOverrides(period, lines, overrides, by, at, crossFindings = null) {
+  const needed = [...dataBlockers(period, lines, {}), ...crossPeriodBlockers(crossFindings, {})].filter((b) => b.overridable).map((b) => b.code);
   const out = { ...(period.bva_overrides || {}) };
   for (const code of needed) {
     const o = overrides[code] || overrides[code.replace(/^open_reconciliation:/, '')];

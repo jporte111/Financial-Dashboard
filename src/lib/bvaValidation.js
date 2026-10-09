@@ -122,6 +122,8 @@ const ymLabel = (ym) => `${MONTH_NAMES[ym.month - 1]} ${ym.year}`;
  *   overrides: { [warningCode]: { reason, by, at } } — clears blocksFinalize
  *              for overridable warnings only.
  *   period:    { month, year } — the reporting period being imported into.
+ *   previousUnavailable: true when the previous period could not be loaded —
+ *              its checks did not run, which blocks (never skipped silently).
  *   previous:  { month, year, label?, cutoffDate?, detailCodes?, transferCount? } —
  *              the latest earlier BVA period, which sets what this import is
  *              expected to contain.
@@ -153,6 +155,10 @@ export function validateBva(parsed, opts = {}) {
   }
   const has = (code) => warnings.some((w) => w.code === code);
   const block = (w) => warn(warnings, { requiresAdminReview: true, ...w, blocksFinalize: w.overridable === false ? true : !cleared(w.code) });
+
+  if (opts.previousUnavailable) {
+    block({ code: 'previous_period_unavailable', section: 'meta', message: 'The previous period could not be loaded, so the checks against it did not run. Retry before finalizing.', overridable: false });
+  }
 
   // ---- Cutoff date and reporting month -----------------------------------
   if (!cutoffDate) {
