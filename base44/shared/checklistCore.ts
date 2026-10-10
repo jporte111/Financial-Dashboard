@@ -136,6 +136,9 @@ export function partHashes(rec: any) {
 // Codes that describe the period's state rather than its data; never "linked".
 const STATE_CODES = new Set(['period_not_found', 'state_uninitialized', 'published_read_only', 'already_final', 'already_published', 'not_final', 'no_validated_import', 'checklist_incomplete']);
 export const isDataBlocker = (b: any) => !STATE_CODES.has(family(b.code));
+// When the checks themselves could not run, nothing can be confirmed: these
+// block EVERY item (fail closed), whatever the item covers.
+const UNIVERSAL = new Set(['checks_unavailable', 'checklist_unavailable']);
 
 // The warnings an item can go stale on: codes only (the wording may change).
 export function warningCodes(period: any, crossFindings: any[] | null) {
@@ -153,7 +156,7 @@ export function checklistStatus({ confirmations, hashes, openBlockers, warnings 
   const conf = confirmations && typeof confirmations === 'object' ? confirmations : {};
   return CHECKLIST_ITEMS.map((item) => {
     const c = conf[item.key] && typeof conf[item.key] === 'object' ? conf[item.key] : null;
-    const blockedBy = (openBlockers || []).filter((b) => isDataBlocker(b) && item.linked(b.code)).map((b) => b.code);
+    const blockedBy = (openBlockers || []).filter((b) => isDataBlocker(b) && (UNIVERSAL.has(family(b.code)) || item.linked(b.code))).map((b) => b.code);
     const linkedWarnings = (warnings || []).filter((w) => item.linked(w));
     const base = { key: item.key, label: item.label, by: c?.by || null, at: c?.at || null };
     if (blockedBy.length) return { ...base, state: 'blocked', blockedBy, changedParts: [], newWarnings: [] };

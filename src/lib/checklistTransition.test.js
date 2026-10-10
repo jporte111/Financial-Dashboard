@@ -161,3 +161,16 @@ describe('published periods and revisions (Phase 4)', () => {
     expect(notConfirmed(await itemStates(db, rid))).toHaveLength(7);
   });
 });
+
+describe('fail closed while the cross-period checks cannot run', () => {
+  it('an item is not confirmed (no write) while an earlier period cannot be read', async () => {
+    const db = fakeService(seed([period('jul', 7, 'published'), period('aug', 8, 'final')]));
+    const realFilter = db.base44.asServiceRole.entities.Distribution.filter;
+    db.base44.asServiceRole.entities.Distribution.filter = async (q) => { if (q.period_id === 'jul') throw new Error('rate limited'); return realFilter(q); };
+    const before = db.log.length;
+    const r = await call(db, 'confirm_checklist', 'aug', { item: 'distributions_confirmed' });
+    expect(r.status).toBe(409);
+    expect(r.body.blockers[0].message).toMatch(/Cross-period checks could not run/);
+    expect(db.log.length).toBe(before);
+  });
+});

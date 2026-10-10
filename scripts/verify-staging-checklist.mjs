@@ -30,6 +30,20 @@ async function transition(action, period_id, extra = {}) {
   }
 }
 const codes = (r) => (r.body?.blockers || []).map((b) => b.code);
+// Cross-period checks fail CLOSED when Base44 rate-limits a burst of reads
+// (seen on hosted staging): retry a refused publish a few times in that case only.
+async function publishRetry(pid) {
+  let p = await transition('publish', pid);
+  for (let i = 0; i < 3 && p.status === 409 && codes(p).includes('cross_period:checks_unavailable'); i++) { await sleep(5000); p = await transition('publish', pid); }
+  return p;
+}
+// ...and a confirm refused only because the checks could not run (fail closed).
+const unavailable = (r) => r.status === 409 && (r.body?.blockers || []).some((b) => /could not run|could not be evaluated/.test(b.message || ''));
+async function confirmRetry(pid, item) {
+  let r = await transition('confirm_checklist', pid, { item });
+  for (let i = 0; i < 3 && unavailable(r); i++) { await sleep(5000); r = await transition('confirm_checklist', pid, { item }); }
+  return r;
+}
 // Base44 reads can lag a write for a few seconds: poll the server's check until `want` holds.
 async function checkUntil(pid, want, tries = 12) {
   let r;
@@ -68,8 +82,8 @@ async function makeMonth(year, month, { publish = true } = {}) {
   if (f.status !== 200) throw new Error(`finalize ${month}/${year}: ${f.status} ${codes(f)}`);
   if (publish) {
     await checkUntil(pid, (b) => (b.checklist?.items || []).every((s) => s.state !== 'blocked'));
-    for (const k of KEYS) { const r = await transition('confirm_checklist', pid, { item: k }); if (r.status !== 200) throw new Error(`confirm ${k}: ${r.status} ${codes(r)}`); }
-    const p = await transition('publish', pid);
+    for (const k of KEYS) { const r = await confirmRetry(pid, k); if (r.status !== 200) throw new Error(`confirm ${k}: ${r.status} ${codes(r)}`); }
+    const p = await publishRetry(pid);
     if (p.status !== 200) throw new Error(`publish ${month}/${year}: ${p.status} ${codes(p)}`);
   }
   return pid;
@@ -86,7 +100,7 @@ check('1b the review has the four groups, with plain-language actions', ['blocke
 check('1c the old true/false checklist alone cannot publish', codes(await transition('publish', aug)).filter((c) => c.startsWith('checklist_incomplete:')).length === 7);
 
 // 2. confirm each item: who and when recorded
-for (const k of KEYS) await transition('confirm_checklist', aug, { item: k });
+for (const k of KEYS) await confirmRetry(aug, k);
 const p1 = await E.ReportingPeriod.get(aug);
 check('2a every item recorded with who, when and what it covered', KEYS.every((k) => p1.checklist_confirmations?.[k]?.by && p1.checklist_confirmations[k].at && Object.keys(p1.checklist_confirmations[k].parts || {}).length));
 const c1 = await checkUntil(aug, (b) => notConfirmed(b).length === 0);
@@ -132,13 +146,13 @@ await checkUntil(aug, (b) => notConfirmed(b).length === 0);
 // 7. a linked open blocker: the item cannot be confirmed
 await E.ReportingPeriod.update(aug, { distributions_ytd: 300 });
 await checkUntil(aug, (b) => states(b).distributions_confirmed === 'blocked');
-const blocked = await transition('confirm_checklist', aug, { item: 'distributions_confirmed' });
-check('7  an item with an open linked blocker cannot be confirmed', blocked.status === 409 && codes(blocked)[0] === 'checklist_item_blocked', `${blocked.status} ${(blocked.body?.blockers?.[0]?.message || '').slice(0, 90)}`);
+const blocked = await confirmRetry(aug, 'distributions_confirmed');
+check('7  an item with an open linked blocker cannot be confirmed', blocked.status === 409 && codes(blocked)[0] === 'checklist_item_blocked' && /Distributions YTD went down/.test(blocked.body.blockers[0].message), `${blocked.status} ${(blocked.body?.blockers?.[0]?.message || '').slice(0, 90)}`);
 await E.ReportingPeriod.update(aug, { distributions_ytd: 307 });
 await checkUntil(aug, (b) => notConfirmed(b).length === 0);
 
 // 8. publish once everything is current
-const pub = await transition('publish', aug);
+const pub = await publishRetry(aug);
 check('8  publishes once every item is confirmed and current', pub.status === 200, `${pub.status} ${codes(pub).join(',')}`);
 
 // 9. a published period is untouched

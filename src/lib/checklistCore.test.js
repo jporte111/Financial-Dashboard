@@ -203,3 +203,10 @@ describe('a check is "passed" only if it actually ran', () => {
     expect(passed(run([{ code: 'transfers_ended', severity: 'warn' }]))).toEqual(expect.arrayContaining(['Year-to-date figures did not go down', 'This month matches the change in year-to-date', 'Closed distribution quarters are unchanged']));
   });
 });
+
+describe('fail closed', () => {
+  it('when the cross-period checks could not run, NO item can be confirmed', () => {
+    const st = states({}, records(), { openBlockers: [{ code: 'cross_period:checks_unavailable', overridable: false }] });
+    expect(Object.values(st).every((s) => s === 'blocked')).toBe(true);
+  });
+});
