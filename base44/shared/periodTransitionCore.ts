@@ -70,61 +70,77 @@ async function load(svc, periodId) {
   return { period, lines };
 }
 
-// Cross-period checks (crossPeriod.ts): load the versions clients see for the
-// months before and after this period, plus the child records the checks
-// compare. Reads only. If anything cannot be read -- after one retry -- the
-// result is a single blocking finding: fail closed, never skip the checks.
-export async function crossPeriodContext(svc, period, lines, { retryDelayMs = 500 } = {}) {
-  const listOf = (res) => (Array.isArray(res) ? res : (res && res.items) || []);
-  const attempt = async () => {
+// ---- reads for the checks -----------------------------------------------------
+// Base44 rate-limits bursts of reads and can briefly fail one: every read the
+// checks make is retried up to 3 times with short, growing pauses. If a read
+// still fails, the checks FAIL CLOSED (they never pass on missing data).
+export const readRetryOptions = { delaysMs: [300, 800, 1500] };
+const listOf = (res) => (Array.isArray(res) ? res : (res && res.items) || []);
+async function readWithRetry(fn) {
+  const delays = readRetryOptions.delaysMs;
+  for (let i = 0; ; i++) {
+    try { return await fn(); } catch (e) {
+      if (i >= delays.length) throw e;
+      await new Promise((r) => setTimeout(r, delays[i]));
+    }
+  }
+}
+const readList = (svc, entity, query, limit) => readWithRetry(async () => listOf(await svc.entities[entity].filter(query, undefined, limit)));
+
+// A period's own child records, read ONCE per request and shared by the
+// cross-period and checklist evaluations. Throws if a read keeps failing.
+export async function periodRecords(svc, period) {
+  return {
+    distributions: await readList(svc, 'Distribution', { period_id: period.id }, 500),
+    transfers: await readList(svc, 'RecurringTransfer', { period_id: period.id }, 500),
+    cash: await readList(svc, 'CashAccount', { period_id: period.id }, 500),
+    savings: await readList(svc, 'SavingsSpend', { period_id: period.id }, 500),
+  };
+}
+
+// Cross-period checks (crossPeriod.ts): the versions clients see for the
+// months before and after this period, compared with this period. Reads only.
+// `records`: this period's child records if already read (periodRecords).
+// If anything cannot be read, the result is a single blocking finding.
+export async function crossPeriodContext(svc, period, lines, records = undefined) {
+  try {
     const year = Number(period.year);
     const periods = [];
-    for (const y of [year - 1, year, year + 1]) periods.push(...listOf(await svc.entities.ReportingPeriod.filter({ year: y }, undefined, 500)));
+    for (const y of [year - 1, year, year + 1]) periods.push(...(await readList(svc, 'ReportingPeriod', { year: y }, 500)));
     const prev = alignedPrevious(periods, period);
     const next = alignedNext(periods, period);
-    const children = async (p, own = null) => ({
-      period: p,
-      lines: own || listOf(await svc.entities.BudgetLine.filter({ period_id: p.id }, undefined, 5000)),
-      distributions: listOf(await svc.entities.Distribution.filter({ period_id: p.id }, undefined, 500)),
-      transfers: listOf(await svc.entities.RecurringTransfer.filter({ period_id: p.id }, undefined, 500)),
-      cash: listOf(await svc.entities.CashAccount.filter({ period_id: p.id }, undefined, 500)),
-    });
-    const cur = prev.period ? await children(period, lines) : { period, lines };
-    const prevSide = prev.period ? await children(prev.period) : null;
+    let cur = { period, lines };
+    let prevSide = null;
+    if (prev.period) {
+      const own = records || (await periodRecords(svc, period));
+      cur = { period, lines, distributions: own.distributions, transfers: own.transfers, cash: own.cash };
+      const p = prev.period;
+      prevSide = {
+        period: p,
+        lines: await readList(svc, 'BudgetLine', { period_id: p.id }, 5000),
+        distributions: await readList(svc, 'Distribution', { period_id: p.id }, 500),
+        transfers: await readList(svc, 'RecurringTransfer', { period_id: p.id }, 500),
+        cash: await readList(svc, 'CashAccount', { period_id: p.id }, 500),
+      };
+    }
     const findings = [
       ...crossPeriodChecks(cur, prevSide, { conflict: prev.conflict, openRevision: prev.openRevision }),
       ...laterMonthChecks(cur, next.period ? { period: next.period } : null),
     ];
     const ref = (p) => (p ? { id: p.id, label: p.label } : null);
     return { findings, previous: ref(prev.period), next: ref(next.period) };
-  };
-  try {
-    return await attempt();
   } catch {
-    try {
-      await new Promise((r) => setTimeout(r, retryDelayMs));
-      return await attempt();
-    } catch {
-      return { findings: [UNAVAILABLE], previous: null, next: null, unavailable: true };
-    }
+    return { findings: [UNAVAILABLE], previous: null, next: null, unavailable: true };
   }
 }
 
 // The checklist (checklistCore.ts): fingerprints of the data each item covers,
-// the warnings showing now, and each item's state. Reads only. If the period's
-// records cannot be read (after one retry) every item is blocked: fail closed.
-export async function checklistContext(svc, period, lines, cross, { retryDelayMs = 500 } = {}) {
-  const listOf = (res) => (Array.isArray(res) ? res : (res && res.items) || []);
-  const load = async () => ({
-    cash: listOf(await svc.entities.CashAccount.filter({ period_id: period.id }, undefined, 500)),
-    distributions: listOf(await svc.entities.Distribution.filter({ period_id: period.id }, undefined, 500)),
-    transfers: listOf(await svc.entities.RecurringTransfer.filter({ period_id: period.id }, undefined, 500)),
-    savings: listOf(await svc.entities.SavingsSpend.filter({ period_id: period.id }, undefined, 500)),
-  });
-  let rec = null;
-  try { rec = await load(); } catch {
-    try { await new Promise((r) => setTimeout(r, retryDelayMs)); rec = await load(); } catch { rec = null; }
-  }
+// the warnings showing now, and each item's state. Reads only.
+// `records`: this period's child records (periodRecords) if already read;
+// null means they could not be read. Then every item is blocked: fail closed.
+export async function checklistContext(svc, period, lines, cross, records = undefined) {
+  let rec = records;
+  if (rec === undefined) { try { rec = await periodRecords(svc, period); } catch { rec = null; } }
   const findings = cross ? cross.findings : [];
   if (!rec) {
     const items = CHECKLIST_ITEMS.map((i) => ({ key: i.key, label: i.label, state: 'blocked', blockedBy: ['checklist_unavailable'], changedParts: [], newWarnings: [], by: null, at: null }));
@@ -136,6 +152,15 @@ export async function checklistContext(svc, period, lines, cross, { retryDelayMs
   const warnings = warningCodes(period, findings);
   const items = checklistStatus({ confirmations: period.checklist_confirmations, hashes, openBlockers: open, warnings });
   return { hashes, warnings, items };
+}
+
+// Both evaluations for one request, sharing one read of the period's records.
+export async function reviewContexts(svc, period, lines) {
+  let records;
+  try { records = await periodRecords(svc, period); } catch { records = null; }
+  const cross = records ? await crossPeriodContext(svc, period, lines, records) : { findings: [UNAVAILABLE], previous: null, next: null, unavailable: true };
+  const cl = await checklistContext(svc, period, lines, cross, records);
+  return { cross, cl };
 }
 
 // ---- checklist writes, hardened against stale reads -------------------------
@@ -239,8 +264,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
     if (period.published) {
       return reply(200, { ok: true, finalize: evaluateFinalize(period, lines, body.overrides || {}, null), publish: evaluatePublish(period, lines, null), cross_period: null, checklist: null, review: null });
     }
-    const cross = await crossPeriodContext(svc, period, lines);
-    const cl = await checklistContext(svc, period, lines, cross);
+    const { cross, cl } = await reviewContexts(svc, period, lines);
     const finalize = evaluateFinalize(period, lines, body.overrides || {}, cross.findings);
     const publish = evaluatePublish(period, lines, cross.findings, cl.items);
     // A draft's open issues are what finalize will ask about; a final period's, what publish will.
@@ -261,8 +285,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
     if (period.published) return refuse('published_read_only', 'This period is published and read-only; its checklist is kept as it was.');
     let record = null;
     if (action === 'confirm_checklist') {
-      const cross = await crossPeriodContext(svc, period, lines);
-      const cl = await checklistContext(svc, period, lines, cross);
+      const { cross, cl } = await reviewContexts(svc, period, lines);
       const s = cl.items.find((i) => i.key === key);
       if (s.state === 'blocked') return reply(409, { ok: false, action, blockers: [{ code: 'checklist_item_blocked', message: itemMessage(s), overridable: false, linked: s.blockedBy }] });
       record = confirmationRecord(key, cl.hashes, cl.warnings, who, now.toISOString());
@@ -392,8 +415,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
       const others = monthState((await monthVersions()).filter((v) => v.id !== period.id));
       const latest = others.current || others.working;
       if (latest && latest.id !== replaced.id) return refuse('stale_revision', `${period.label} has a newer version than the one this revision was copied from. This revision is out of date; discard it.`);
-      const cross = await crossPeriodContext(svc, period, lines);
-      const cl = await checklistContext(svc, period, lines, cross);
+      const { cross, cl } = await reviewContexts(svc, period, lines);
       const result = evaluatePublish(period, lines, cross.findings, cl.items);
       if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers, cross_period: cross });
       // The switch: one write. From here clients see the revision.
@@ -411,8 +433,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
 
     // An original version: its first publication. Refused once a newer version exists.
     if (state.current && state.current.id !== period.id) return refuse('newer_version_published', `A newer version of ${period.label} is published.`);
-    const cross = await crossPeriodContext(svc, period, lines);
-    const cl = await checklistContext(svc, period, lines, cross);
+    const { cross, cl } = await reviewContexts(svc, period, lines);
     const result = evaluatePublish(period, lines, cross.findings, cl.items);
     if (!result.ok) return reply(409, { ok: false, action, blockers: result.blockers, cross_period: cross });
     return update({ published: true, publication_date: today(now), reviewed_by: user.full_name || who, last_updated: today(now) });

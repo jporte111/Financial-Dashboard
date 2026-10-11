@@ -2,7 +2,7 @@
 // (periodTransitionCore.ts): check / finalize / publish. Reads only; a refused
 // transition writes nothing; checks that cannot run fail closed. Fictional data.
 import { describe, it, expect } from 'vitest';
-import { handlePeriodTransition, crossPeriodContext } from '../../base44/shared/periodTransitionCore.ts';
+import { handlePeriodTransition, crossPeriodContext, readRetryOptions } from '../../base44/shared/periodTransitionCore.ts';
 import { PUBLISH_CHECKLIST } from '../../base44/shared/publishGate.ts';
 import { fakeService } from './__fixtures__/fakeService.js';
 import { confirmAll } from './__fixtures__/checklist.js';
@@ -75,7 +75,8 @@ describe('finalize', () => {
     expect(writes(db)).toHaveLength(0);
   });
 
-  it('fails closed when an earlier period cannot be read (after one retry), and writes nothing', async () => {
+  it('fails closed when an earlier period cannot be read (after the retries), and writes nothing', async () => {
+    readRetryOptions.delaysMs = [1, 1, 1];
     const db = fakeService(seed([period('jul', 7, 'published'), period('aug', 8, 'draft')]));
     const svc = db.base44.asServiceRole;
     const realFilter = svc.entities.Distribution.filter;
@@ -84,10 +85,10 @@ describe('finalize', () => {
     expect(res.status).toBe(409);
     expect(res.body.blockers).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'cross_period:checks_unavailable', overridable: false })]));
     expect(writes(db)).toHaveLength(0);
-    // one transient failure is retried
-    let failures = 1;
+    // up to three transient failures of a read are retried
+    let failures = 3;
     svc.entities.Distribution.filter = async (...a) => { if (failures-- > 0) throw new Error('blip'); return realFilter(...a); };
-    const ctx = await crossPeriodContext(svc, db.tables.ReportingPeriod.get('aug'), linesFor('aug', 8), { retryDelayMs: 1 });
+    const ctx = await crossPeriodContext(svc, db.tables.ReportingPeriod.get('aug'), linesFor('aug', 8));
     expect(ctx.unavailable).toBeUndefined();
   });
 });

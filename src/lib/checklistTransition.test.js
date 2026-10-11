@@ -129,14 +129,17 @@ describe('publish requires every item confirmed and current', () => {
     expect(notConfirmed(await itemStates(db, 'aug'))).toEqual(['budget_report_reviewed', 'income_reviewed']);
   });
 
-  it('records that cannot be read: every item blocked, publish refused (fail closed)', async () => {
+  it('records that cannot be read: the checks are unavailable, every item blocked, publish refused (fail closed)', async () => {
+    readRetryOptions.delaysMs = [1, 1, 1];
     const db = fakeService(seed([period('aug', 8, 'final')]));
     await confirmAll(handlePeriodTransition, db.base44, 'aug', ADMIN, NOW);
     db.base44.asServiceRole.entities.SavingsSpend.filter = async () => { throw new Error('rate limited'); };
     const pub = await call(db, 'publish', 'aug');
     expect(pub.status).toBe(409);
-    expect(pub.body.blockers.filter((b) => b.code.startsWith('checklist_incomplete:'))).toHaveLength(7);
-    expect(pub.body.blockers[0].message).toMatch(/Checklist could not be evaluated/);
+    const codes = pub.body.blockers.map((b) => b.code);
+    expect(codes).toContain('cross_period:checks_unavailable');
+    expect(codes.filter((c) => c.startsWith('checklist_incomplete:'))).toHaveLength(7);
+    expect(pub.body.blockers.find((b) => b.code === 'checklist_incomplete:cash_confirmed').message).toMatch(/Cross-period checks could not run|Checklist could not be evaluated/);
   });
 });
 
@@ -274,5 +277,45 @@ describe('confirm is hardened against stale reads', () => {
     expect((await call(db, 'unconfirm_checklist', 'aug', { item: 'cash_confirmed' })).status).toBe(200);
     expect(items(db, 'aug')).toEqual(CHECKLIST_KEYS.filter((k) => k !== 'cash_confirmed').sort());
     expect(db.tables.ReportingPeriod.get('aug').checklist.cash_confirmed).toBe(false);
+  });
+});
+
+// ---- fewer reads, more patient retries (still fail closed) ----
+import { readRetryOptions } from '../../base44/shared/periodTransitionCore.ts';
+
+describe('reads for the checks', () => {
+  const countReads = (db) => {
+    const counts = {};
+    for (const [name, ent] of Object.entries(db.base44.asServiceRole.entities)) {
+      const real = ent.filter;
+      ent.filter = async (q, ...rest) => { const key = `${name}${q && q.period_id ? `:${q.period_id}` : ''}`; counts[key] = (counts[key] || 0) + 1; return real(q, ...rest); };
+    }
+    return counts;
+  };
+  it("a check reads the current period's own records ONCE (shared by the cross-period and checklist evaluations)", async () => {
+    readRetryOptions.delaysMs = [1, 1, 1];
+    const db = fakeService(seed([period('jul', 7, 'published'), period('aug', 8, 'final')]));
+    const counts = countReads(db);
+    expect((await call(db, 'check', 'aug')).status).toBe(200);
+    for (const e of ['Distribution', 'RecurringTransfer', 'CashAccount', 'SavingsSpend']) expect(counts[`${e}:aug`], e).toBe(1);
+  });
+  it('a read that fails twice is retried and succeeds: the item can be confirmed', async () => {
+    readRetryOptions.delaysMs = [1, 1, 1];
+    const db = fakeService(seed([period('jul', 7, 'published'), period('aug', 8, 'final')]));
+    const E = db.base44.asServiceRole.entities.CashAccount;
+    const real = E.filter;
+    let fails = 2;
+    E.filter = async (...a) => { if (fails-- > 0) throw Object.assign(new Error('rate limited'), { status: 429 }); return real(...a); };
+    expect((await call(db, 'confirm_checklist', 'aug', { item: 'cash_confirmed' })).status).toBe(200);
+  });
+  it('a read that keeps failing still fails closed (nothing confirmed, nothing written)', async () => {
+    readRetryOptions.delaysMs = [1, 1, 1];
+    const db = fakeService(seed([period('jul', 7, 'published'), period('aug', 8, 'final')]));
+    db.base44.asServiceRole.entities.CashAccount.filter = async () => { throw Object.assign(new Error('rate limited'), { status: 429 }); };
+    const before = db.log.length;
+    const r = await call(db, 'confirm_checklist', 'aug', { item: 'income_reviewed' });
+    expect(r.status).toBe(409);
+    expect(r.body.blockers[0].code).toBe('checklist_item_blocked');
+    expect(db.log.length).toBe(before);
   });
 });
