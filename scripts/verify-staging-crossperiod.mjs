@@ -52,6 +52,13 @@ async function confirmChecklist(pid) {
     if (r.status !== 200) throw new Error(`confirm ${item} on ${pid}: ${r.status} ${JSON.stringify(r.body?.blockers || r.body)}`);
   }
 }
+// A publish refused only because the cross-period checks could not run (Base44
+// rate limits -- fail closed) is retried; anything else is returned as is.
+async function publishRetry(pid) {
+  let p = await transition('publish', pid);
+  for (let i = 0; i < 4 && p.status === 409 && (p.body?.blockers || []).some((b) => b.code === 'cross_period:checks_unavailable'); i++) { await sleep(6100); p = await transition('publish', pid); }
+  return p;
+}
 // ---- fictional months -----------------------------------------------------
 const usedYears = new Set((await E.ReportingPeriod.list('-year', 1000)).map((p) => p.year));
 const freshYear = () => { let y; do y = 3000 + Math.floor(Math.random() * 6000); while (usedYears.has(y)); usedYears.add(y); return y; };
@@ -84,7 +91,7 @@ async function makeMonth(year, month, { period = {}, dist = { q1: 101, q2: 203 }
   const f = await finalizeAfterLag(pid);
   if (f.status !== 200) throw new Error(`finalize ${month}/${year}: ${f.status} ${JSON.stringify(codes(f))}`);
     await confirmChecklist(pid); // checked, transient-only retry
-  if (publish) { const p = await transition('publish', pid); if (p.status !== 200) throw new Error(`publish ${month}/${year}: ${p.status} ${JSON.stringify(codes(p))}`); }
+  if (publish) { const p = await publishRetry(pid); if (p.status !== 200) throw new Error(`publish ${month}/${year}: ${p.status} ${JSON.stringify(codes(p))}`); }
   return pid;
 }
 // Base44 reads can lag just-created rows: wait until the month's lines and
@@ -117,7 +124,7 @@ const scenarioYears = {};
   const f = await transition('finalize', jul);
   check('A2 a consistent month finalizes (no cross-period blockers)', f.status === 200, `HTTP ${f.status} ${xcodes(f).join(',')}`);
     await confirmChecklist(jul); // checked, transient-only retry
-  check('A3 ...and publishes', (await transition('publish', jul)).status === 200);
+  check('A3 ...and publishes', (await publishRetry(jul)).status === 200);
   const pubChk = await transition('check', jul);
   check('A4 a published period is never re-judged (no cross-period evaluation)', pubChk.body?.cross_period === null);
 }
@@ -135,7 +142,7 @@ const scenarioYears = {};
   const stored = await E.ReportingPeriod.get(jul);
   check('B3 accepted with a written reason: finalizes, reason recorded with who/when', f2.status === 200 && !!stored.bva_overrides?.['cross_period:ytd_income_decreased']?.by, `HTTP ${f2.status}`);
     await confirmChecklist(jul); // checked, transient-only retry
-  const p = await transition('publish', jul);
+  const p = await publishRetry(jul);
   check('B4 the reason given at finalize satisfies publish', p.status === 200, `HTTP ${p.status} ${xcodes(p).join(',')}`);
 }
 
@@ -207,7 +214,7 @@ const scenarioYears = {};
   const f = await transition('finalize', rid);
   check('F3 ...which does not block finalize', f.status === 200, `HTTP ${f.status} ${xcodes(f).join(',')}`);
     await confirmChecklist(rid); // checked, transient-only retry
-  const p = await transition('publish', rid);
+  const p = await publishRetry(rid);
   check('F4 ...or publish; the revision replaces the original (Phase 4 unchanged)', p.status === 200 && p.body?.replaced === jul && !p.body?.supersede_pending, `HTTP ${p.status}`);
   const orig = await E.ReportingPeriod.get(jul);
   check('F5 the original is superseded and unpublished', orig.superseded === true && orig.published === false);

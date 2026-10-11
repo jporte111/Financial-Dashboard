@@ -92,13 +92,20 @@ async function confirmChecklist(pid) {
     if (r.status !== 200) throw new Error(`confirm ${item} on ${pid}: ${r.status} ${JSON.stringify(r.body?.blockers || r.body)}`);
   }
 }
+// A publish refused only because the cross-period checks could not run (Base44
+// rate limits -- fail closed) is retried; anything else is returned as is.
+async function publishRetry(pid) {
+  let p = await transition('publish', pid);
+  for (let i = 0; i < 4 && p.status === 409 && (p.body?.blockers || []).some((b) => b.code === 'cross_period:checks_unavailable'); i++) { await sleep(6100); p = await transition('publish', pid); }
+  return p;
+}
 async function finalizeAndPublish(pid, { publish = true } = {}) {
   const chk = await transition('check', pid);
   const overrides = Object.fromEntries((chk.body?.finalize?.blockers || []).filter((b) => b.overridable !== false).map((b) => [b.code, { reason: 'Fictional staging test period.' }]));
   const fin = await transition('finalize', pid, { overrides });
   if (fin.status !== 200) return { fin, overrides };
     await confirmChecklist(pid); // checked, transient-only retry
-  const pub = publish ? await transition('publish', pid) : null;
+  const pub = publish ? await publishRetry(pid) : null; // setup publish: transient-only retry
   return { fin, pub, overrides };
 }
 async function seedPublished({ publish = true } = {}) {
