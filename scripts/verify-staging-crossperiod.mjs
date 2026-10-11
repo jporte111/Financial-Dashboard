@@ -59,6 +59,18 @@ async function publishRetry(pid) {
   for (let i = 0; i < 4 && p.status === 409 && (p.body?.blockers || []).some((b) => b.code === 'cross_period:checks_unavailable' || /could not run|could not be evaluated/.test(b.message || '')); i++) { await sleep(6100); p = await transition('publish', pid); }
   return p;
 }
+// A check taken while the checks could not run (Base44 rate limits) carries no
+// comparison by design (fail closed): repeat it until one ran (as the 6c suite does).
+async function checkRan(pid) {
+  let r;
+  for (let i = 0; i < 6; i++) {
+    r = await transition('check', pid);
+    const ran = r.status === 200 && !r.body?.cross_period?.unavailable && !r.body?.checklist?.unavailable;
+    if (ran || r.body?.cross_period === null) return r;
+    await sleep(5300);
+  }
+  return r;
+}
 // ---- fictional months -----------------------------------------------------
 const usedYears = new Set((await E.ReportingPeriod.list('-year', 1000)).map((p) => p.year));
 const freshYear = () => { let y; do y = 3000 + Math.floor(Math.random() * 6000); while (usedYears.has(y)); usedYears.add(y); return y; };
@@ -119,13 +131,13 @@ const scenarioYears = {};
   const y = (scenarioYears.A = freshYear());
   await makeMonth(y, 5); const jun = await makeMonth(y, 6);
   const jul = await makeMonth(y, 7, { finalize: false });
-  const chk = await transition('check', jul);
+  const chk = await checkRan(jul);
   check('A1 check compares with the previous published month', chk.body?.cross_period?.previous?.id === jun);
   const f = await transition('finalize', jul);
   check('A2 a consistent month finalizes (no cross-period blockers)', f.status === 200, `HTTP ${f.status} ${xcodes(f).join(',')}`);
     await confirmChecklist(jul); // checked, transient-only retry
   check('A3 ...and publishes', (await publishRetry(jul)).status === 200);
-  const pubChk = await transition('check', jul);
+  const pubChk = await checkRan(jul);
   check('A4 a published period is never re-judged (no cross-period evaluation)', pubChk.body?.cross_period === null);
 }
 
@@ -177,7 +189,7 @@ const scenarioYears = {};
   await E.RecurringTransfer.create({ period_id: jun, source: 'ZZ Bank', purpose: 'ZZ Savings', amount: 17 });
   await E.CashAccount.create({ period_id: jun, name: 'ZZ Checking', balance: 4409 });
   await visible(jun);
-  const chk = await transition('check', jun);
+  const chk = await checkRan(jun);
   check('D1 a missing month column is a note, not a mismatch', findings(chk, 'info').includes('not_comparable:month_income') && !findings(chk).some((x) => x.startsWith('month_vs_ytd:income')), findings(chk).join(','));
   const f = await finalizeAfterLag(jun);
   check('D2 ...and finalizes', f.status === 200, `HTTP ${f.status} ${codes(f).join(',')}`);
@@ -194,7 +206,7 @@ const scenarioYears = {};
   const f1 = await transition('finalize', aug);
   const b = (f1.body?.blockers || []).find((x) => x.code === 'cross_period:cutoff_not_after_previous');
   check('E1 same cutoff as a legacy month: needs a written reason (overridable)', f1.status === 409 && !!b && b.overridable === true, xcodes(f1).join(','));
-  const chk = await transition('check', aug);
+  const chk = await checkRan(aug);
   check('E2 a legacy previous month is not compared figure by figure', !findings(chk).some((x) => /decreased|budget_changed|month_vs_ytd/.test(x)), findings(chk).join(','));
   check('E3 accepted with a reason: finalizes', (await transition('finalize', aug, { overrides: reason(xcodes(f1)) })).status === 200);
 }
@@ -208,7 +220,7 @@ const scenarioYears = {};
   for (let i = 0; i < 10 && (await E.ReportingPeriod.get(rid)).copy_status !== 'verified'; i++) await transition('copy_revision', rid);
   // the corrected July: income grows by more (month figure consistent with June)
   await E.ReportingPeriod.update(rid, { ytd_income: 1013 * 5 + 9001, month_income: 9001 });
-  const chk = await transition('check', rid);
+  const chk = await checkRan(rid);
   check('F1 a revision is compared with the month before it (not its own original)', chk.body?.cross_period?.previous?.id === jun, chk.body?.cross_period?.previous?.id);
   check('F2 the later published month that no longer follows is a WARNING', findings(chk, 'warn').includes('later_month_behind:ytd_income'), findings(chk, 'warn').join(','));
   const f = await transition('finalize', rid);
@@ -221,7 +233,7 @@ const scenarioYears = {};
   const aug2 = await transition('create_revision', (await E.ReportingPeriod.filter({ year: y, month: 8 }))[0].id, { reason: 'Fictional staging test: baseline after a revision.' });
   const a2 = aug2.body?.period_id;
   for (let i = 0; i < 10 && (await E.ReportingPeriod.get(a2)).copy_status !== 'verified'; i++) await transition('copy_revision', a2);
-  const chk2 = await transition('check', a2);
+  const chk2 = await checkRan(a2);
   check('F6 the next month now compares with the published revision, never the superseded original', chk2.body?.cross_period?.previous?.id === rid, chk2.body?.cross_period?.previous?.id);
   await transition('discard_revision', a2);
 }
