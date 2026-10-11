@@ -56,7 +56,7 @@ async function confirmChecklist(pid) {
 // rate limits -- fail closed) is retried; anything else is returned as is.
 async function publishRetry(pid) {
   let p = await transition('publish', pid);
-  for (let i = 0; i < 4 && p.status === 409 && (p.body?.blockers || []).some((b) => b.code === 'cross_period:checks_unavailable'); i++) { await sleep(6100); p = await transition('publish', pid); }
+  for (let i = 0; i < 4 && p.status === 409 && (p.body?.blockers || []).some((b) => b.code === 'cross_period:checks_unavailable' || /could not run|could not be evaluated/.test(b.message || '')); i++) { await sleep(6100); p = await transition('publish', pid); }
   return p;
 }
 // ---- fictional months -----------------------------------------------------

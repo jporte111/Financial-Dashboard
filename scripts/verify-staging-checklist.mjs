@@ -34,7 +34,7 @@ const codes = (r) => (r.body?.blockers || []).map((b) => b.code);
 // (seen on hosted staging): retry a refused publish a few times in that case only.
 async function publishRetry(pid) {
   let p = await transition('publish', pid);
-  for (let i = 0; i < 3 && p.status === 409 && codes(p).includes('cross_period:checks_unavailable'); i++) { await sleep(5000); p = await transition('publish', pid); }
+  for (let i = 0; i < 3 && p.status === 409 && (p.body?.blockers || []).some((b) => b.code === 'cross_period:checks_unavailable' || /could not run|could not be evaluated/.test(b.message || '')); i++) { await sleep(5000); p = await transition('publish', pid); }
   return p;
 }
 // ...and a confirm refused only because the checks could not run (fail closed).
