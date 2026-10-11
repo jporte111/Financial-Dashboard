@@ -72,7 +72,8 @@ async function finalizePublish(pid, publish = true) {
   const chk = await transition('check', pid);
   const overrides = Object.fromEntries((chk.body?.finalize?.blockers || []).filter((b) => b.overridable !== false).map((b) => [b.code, { reason: 'Fictional staging test.' }]));
   const f = await transition('finalize', pid, { overrides });
-  await E.ReportingPeriod.update(pid, { checklist: Object.fromEntries(PUBLISH_CHECKLIST.map(([k]) => [k, true])) });
+  // Phase 6c: the checklist is confirmed through the server (who/when recorded).
+  for (const [k] of PUBLISH_CHECKLIST) await transition('confirm_checklist', pid, { item: k });
   const p = publish ? await transition('publish', pid) : null;
   if (f.status !== 200 || (publish && p.status !== 200)) throw new Error(`finalize ${f.status} publish ${p?.status} ${JSON.stringify(f.body?.blockers || p?.body?.blockers || '')}`);
 }

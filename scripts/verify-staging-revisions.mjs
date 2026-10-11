@@ -75,13 +75,37 @@ function workbookPlan(year, { cashDelta = 0 } = {}) {
   const groupMap = Object.fromEntries((parsed.detail?.categories || []).filter((d) => d.code).map((d) => [String(d.code).trim().toLowerCase(), 'fixed']));
   return { parsed, validation, cutoffDate, groupMap };
 }
+// Confirm every checklist item through the server, checking each reply (the
+// same rule in every hosted suite): retry only TRANSIENT refusals -- checks that
+// could not run (Base44 rate limits), a change not verified as saved, or lines
+// the server cannot see yet right after finalize (read lag). Anything else fails.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const transientRefusal = (r) => r.status === 409 && (r.body?.blockers || []).some((b) => b.code === 'checklist_not_saved' || /could not run|could not be evaluated|Budget lines are incomplete/.test(b.message || ''));
+async function confirmItem(pid, item) {
+  let r = await transition('confirm_checklist', pid, { item });
+  for (let i = 0; i < 6 && transientRefusal(r); i++) { await sleep(3700); r = await transition('confirm_checklist', pid, { item }); }
+  return r;
+}
+async function confirmChecklist(pid) {
+  for (const item of Object.keys(CHECKLIST)) {
+    const r = await confirmItem(pid, item);
+    if (r.status !== 200) throw new Error(`confirm ${item} on ${pid}: ${r.status} ${JSON.stringify(r.body?.blockers || r.body)}`);
+  }
+}
+// A publish refused only because the cross-period checks could not run (Base44
+// rate limits -- fail closed) is retried; anything else is returned as is.
+async function publishRetry(pid) {
+  let p = await transition('publish', pid);
+  for (let i = 0; i < 4 && p.status === 409 && (p.body?.blockers || []).some((b) => b.code === 'cross_period:checks_unavailable' || /could not run|could not be evaluated/.test(b.message || '')); i++) { await sleep(6100); p = await transition('publish', pid); }
+  return p;
+}
 async function finalizeAndPublish(pid, { publish = true } = {}) {
   const chk = await transition('check', pid);
   const overrides = Object.fromEntries((chk.body?.finalize?.blockers || []).filter((b) => b.overridable !== false).map((b) => [b.code, { reason: 'Fictional staging test period.' }]));
   const fin = await transition('finalize', pid, { overrides });
   if (fin.status !== 200) return { fin, overrides };
-  await E.ReportingPeriod.update(pid, { checklist: CHECKLIST });
-  const pub = publish ? await transition('publish', pid) : null;
+    await confirmChecklist(pid); // checked, transient-only retry
+  const pub = publish ? await publishRetry(pid) : null; // setup publish: transient-only retry
   return { fin, pub, overrides };
 }
 async function seedPublished({ publish = true } = {}) {

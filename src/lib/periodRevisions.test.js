@@ -61,7 +61,11 @@ async function revise(db, source = 'orig') {
 async function finalizeAndTick(db, rid) {
   const f = await t(db, 'finalize', rid);
   expect(f.status).toBe(200);
-  db.tables.ReportingPeriod.get(rid).checklist = CHECKLIST; // the admin ticks the checklist
+  await confirmChecklist(db, rid); // the admin confirms the checklist
+}
+// Confirm every checklist item through the real server action.
+async function confirmChecklist(db, pid) {
+  for (const [item] of PUBLISH_CHECKLIST) expect((await t(db, 'confirm_checklist', pid, { item })).status).toBe(200);
 }
 
 describe('create a revision', () => {
@@ -224,6 +228,7 @@ describe('publish as the replacement', () => {
   it('the original is published while a revision is open: allowed; the revision can still replace it later', async () => {
     const db = fakeService(seed({ published: false }));
     const rid = await revise(db);
+    await confirmChecklist(db, 'orig');
     expect((await t(db, 'publish', 'orig')).status).toBe(200);
     await finalizeAndTick(db, rid);
     expect((await t(db, 'publish', rid)).body.replaced).toBe('orig');

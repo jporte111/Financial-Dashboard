@@ -127,6 +127,8 @@ check('publish with an incomplete checklist is refused', r.status === 409 && blo
 check('  ...unchanged', before === (await snapshot(pid)));
 const ck = await attempt(() => RP.update(pid, { checklist: Object.fromEntries(CHECKLIST.map((k) => [k, true])) }));
 check('checklist editable while unpublished', ck.ok);
+// Phase 6c: publishing needs each item confirmed through the server (who/when recorded).
+for (const k of CHECKLIST) await transition('confirm_checklist', pid, { item: k });
 r = await transition('publish', pid);
 check('publish succeeds', r.status === 200, `HTTP ${r.status}`);
 p = await RP.get(pid);

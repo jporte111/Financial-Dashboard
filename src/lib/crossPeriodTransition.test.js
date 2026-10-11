@@ -2,9 +2,10 @@
 // (periodTransitionCore.ts): check / finalize / publish. Reads only; a refused
 // transition writes nothing; checks that cannot run fail closed. Fictional data.
 import { describe, it, expect } from 'vitest';
-import { handlePeriodTransition, crossPeriodContext } from '../../base44/shared/periodTransitionCore.ts';
+import { handlePeriodTransition, crossPeriodContext, readRetryOptions } from '../../base44/shared/periodTransitionCore.ts';
 import { PUBLISH_CHECKLIST } from '../../base44/shared/publishGate.ts';
 import { fakeService } from './__fixtures__/fakeService.js';
+import { confirmAll } from './__fixtures__/checklist.js';
 
 const ADMIN = { role: 'admin', email: 'admin@example.invalid', full_name: 'Admin' };
 const NOW = new Date('2030-09-05T10:00:00Z');
@@ -74,7 +75,8 @@ describe('finalize', () => {
     expect(writes(db)).toHaveLength(0);
   });
 
-  it('fails closed when an earlier period cannot be read (after one retry), and writes nothing', async () => {
+  it('fails closed when an earlier period cannot be read (after the retries), and writes nothing', async () => {
+    readRetryOptions.delaysMs = [1, 1, 1];
     const db = fakeService(seed([period('jul', 7, 'published'), period('aug', 8, 'draft')]));
     const svc = db.base44.asServiceRole;
     const realFilter = svc.entities.Distribution.filter;
@@ -83,10 +85,10 @@ describe('finalize', () => {
     expect(res.status).toBe(409);
     expect(res.body.blockers).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'cross_period:checks_unavailable', overridable: false })]));
     expect(writes(db)).toHaveLength(0);
-    // one transient failure is retried
-    let failures = 1;
+    // up to three transient failures of a read are retried
+    let failures = 3;
     svc.entities.Distribution.filter = async (...a) => { if (failures-- > 0) throw new Error('blip'); return realFilter(...a); };
-    const ctx = await crossPeriodContext(svc, db.tables.ReportingPeriod.get('aug'), linesFor('aug', 8), { retryDelayMs: 1 });
+    const ctx = await crossPeriodContext(svc, db.tables.ReportingPeriod.get('aug'), linesFor('aug', 8));
     expect(ctx.unavailable).toBeUndefined();
   });
 });
@@ -95,6 +97,7 @@ describe('publish', () => {
   it('a finding accepted at finalize stays accepted at publish', async () => {
     const aug = period('aug', 8, 'final', { ytd_income: 100, month_income: -5900, bva_overrides: { 'cross_period:ytd_income_decreased': { reason: 'Refund booked in July.', by: 'a', at: 'b' } } });
     const db = fakeService(seed([period('jul', 7, 'published'), aug]));
+    for (const r of await confirmAll(handlePeriodTransition, db.base44, 'aug', ADMIN, NOW)) expect(r.status).toBe(200);
     const res = await call(db, 'publish', 'aug');
     expect(res.status).toBe(200);
   });
