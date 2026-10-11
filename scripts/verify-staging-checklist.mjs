@@ -47,9 +47,13 @@ async function confirmRetry(pid, item) {
   return r;
 }
 // Base44 reads can lag a write for a few seconds: poll the server's check until `want` holds.
+// A check taken while the checks could not run (Base44 rate limits) blocks every
+// item by design (fail closed); it says nothing about the data, so skip it.
+const checksRan = (b) => !b?.cross_period?.unavailable && !b?.checklist?.unavailable
+  && !(b?.checklist?.items || []).some((s) => (s.blockedBy || []).some((c) => /checks_unavailable|checklist_unavailable/.test(c)));
 async function checkUntil(pid, want, tries = 12) {
   let r;
-  for (let i = 0; i < tries; i++) { r = await transition('check', pid); if (r.status === 200 && want(r.body)) return r; await sleep(1500); }
+  for (let i = 0; i < tries; i++) { r = await transition('check', pid); if (r.status === 200 && checksRan(r.body) && want(r.body)) return r; await sleep(1500); }
   return r;
 }
 const states = (body) => Object.fromEntries((body?.checklist?.items || []).map((s) => [s.key, s.state]));
@@ -168,7 +172,8 @@ const rid = r.body?.period_id;
 for (let i = 0; i < 10 && (await E.ReportingPeriod.get(rid)).copy_status !== 'verified'; i++) await transition('copy_revision', rid);
 const rev = await E.ReportingPeriod.get(rid);
 const orig = await E.ReportingPeriod.get(aug);
-check('10 a revision starts with no confirmations; the original keeps all 7', Object.keys(rev.checklist_confirmations || {}).length === 0 && Object.keys(orig.checklist_confirmations || {}).length === 7);
+const itemKeys = (c) => Object.keys(c || {}).filter((k) => KEYS.includes(k)); // not the _revision stamp
+check('10 a revision starts with no confirmations; the original keeps all 7', itemKeys(rev.checklist_confirmations).length === 0 && itemKeys(orig.checklist_confirmations).length === 7, `revision ${itemKeys(rev.checklist_confirmations).length}, original ${itemKeys(orig.checklist_confirmations).length}`);
 await transition('discard_revision', rid);
 
 const failed = results.filter((x) => !x).length;
