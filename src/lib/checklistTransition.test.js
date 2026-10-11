@@ -157,7 +157,7 @@ describe('published periods and revisions (Phase 4)', () => {
     const rid = r.body.period_id;
     for (let i = 0; i < 5 && db.tables.ReportingPeriod.get(rid).copy_status !== 'verified'; i++) await call(db, 'copy_revision', rid);
     expect(db.tables.ReportingPeriod.get(rid).checklist_confirmations || {}).toEqual({});
-    expect(Object.keys(db.tables.ReportingPeriod.get('aug').checklist_confirmations)).toHaveLength(7);
+    expect(Object.keys(db.tables.ReportingPeriod.get('aug').checklist_confirmations).filter((k) => CHECKLIST_KEYS.includes(k))).toHaveLength(7);
     expect(notConfirmed(await itemStates(db, rid))).toHaveLength(7);
   });
 });
@@ -172,5 +172,107 @@ describe('fail closed while the cross-period checks cannot run', () => {
     expect(r.status).toBe(409);
     expect(r.body.blockers[0].message).toMatch(/Cross-period checks could not run/);
     expect(db.log.length).toBe(before);
+  });
+});
+
+// ---- stale reads (Base44 has no conditional writes; reads can lag a write) ----
+import { checklistWriteOptions, CHECKLIST_REVISION } from '../../base44/shared/periodTransitionCore.ts';
+
+describe('confirm is hardened against stale reads', () => {
+  const fast = () => Object.assign(checklistWriteOptions, { tries: 4, delayMs: 1 });
+  const items = (db, pid) => Object.keys(db.tables.ReportingPeriod.get(pid).checklist_confirmations || {}).filter((k) => CHECKLIST_KEYS.includes(k)).sort();
+  // Make ReportingPeriod.get return an older snapshot for the next `n` reads.
+  const lagReads = (db, snapshot, n) => {
+    const E = db.base44.asServiceRole.entities.ReportingPeriod;
+    const real = E.get;
+    let left = n;
+    E.get = async (id) => (left-- > 0 ? structuredClone(snapshot) : real(id));
+    return () => { E.get = real; };
+  };
+
+  it('normal path: one write, every other confirmation kept, verified, revision stamped', async () => {
+    fast();
+    const db = fakeService(seed([period('aug', 8, 'final')]));
+    await call(db, 'confirm_checklist', 'aug', { item: 'cash_confirmed' });
+    const before = db.log.length;
+    const r = await call(db, 'confirm_checklist', 'aug', { item: 'income_reviewed' });
+    expect(r.status).toBe(200);
+    expect(db.log.slice(before)).toHaveLength(1);
+    expect(items(db, 'aug')).toEqual(['cash_confirmed', 'income_reviewed']);
+    expect(db.tables.ReportingPeriod.get('aug').checklist_confirmations[CHECKLIST_REVISION].n).toBe(2);
+  });
+
+  it('a lagging read (older than a state already seen) is never used as the base: it waits for the fresh state', async () => {
+    fast();
+    const db = fakeService(seed([period('aug', 8, 'final')]));
+    const stale = structuredClone(db.tables.ReportingPeriod.get('aug')); // before anything was confirmed
+    await call(db, 'confirm_checklist', 'aug', { item: 'cash_confirmed' });
+    await call(db, 'confirm_checklist', 'aug', { item: 'income_reviewed' });
+    // the request's own load sees the latest; the next 2 reads lag behind it
+    const handlerGet = db.base44.asServiceRole.entities.ReportingPeriod.get;
+    let calls = 0;
+    db.base44.asServiceRole.entities.ReportingPeriod.get = async (id) => { calls++; return calls >= 2 && calls <= 3 ? structuredClone(stale) : handlerGet(id); };
+    const r = await call(db, 'confirm_checklist', 'aug', { item: 'refunds_reviewed' });
+    expect(r.status).toBe(200);
+    expect(items(db, 'aug')).toEqual(['cash_confirmed', 'income_reviewed', 'refunds_reviewed']);
+  });
+
+  it('if the fresh state cannot be read reliably, nothing is written and the caller must retry', async () => {
+    fast();
+    const db = fakeService(seed([period('aug', 8, 'final')]));
+    const stale = structuredClone(db.tables.ReportingPeriod.get('aug'));
+    await call(db, 'confirm_checklist', 'aug', { item: 'cash_confirmed' });
+    const handlerGet = db.base44.asServiceRole.entities.ReportingPeriod.get;
+    let calls = 0;
+    db.base44.asServiceRole.entities.ReportingPeriod.get = async (id) => (++calls === 1 ? handlerGet(id) : structuredClone(stale));
+    const before = db.log.length;
+    const r = await call(db, 'confirm_checklist', 'aug', { item: 'income_reviewed' });
+    expect(r.status).toBe(409);
+    expect(r.body.blockers[0].code).toBe('checklist_not_saved');
+    expect(db.log.length).toBe(before); // no write
+    expect(items(db, 'aug')).toEqual(['cash_confirmed']); // the existing confirmation is intact
+  });
+
+  it('a write that cannot be read back is reported as NOT saved (retry), never as success', async () => {
+    fast();
+    const db = fakeService(seed([period('aug', 8, 'final')]));
+    const handlerGet = db.base44.asServiceRole.entities.ReportingPeriod.get;
+    const pre = structuredClone(db.tables.ReportingPeriod.get('aug'));
+    let wrote = false;
+    const E = db.base44.asServiceRole.entities.ReportingPeriod;
+    const realUpdate = E.update;
+    E.update = async (...a) => { wrote = true; return realUpdate(...a); };
+    E.get = async (id) => (wrote ? structuredClone(pre) : handlerGet(id)); // every read after the write is stale
+    const r = await call(db, 'confirm_checklist', 'aug', { item: 'cash_confirmed' });
+    expect(r.status).toBe(409);
+    expect(r.body.blockers[0].code).toBe('checklist_not_saved');
+  });
+
+  it('a later write that kept our change counts as saved; one that dropped it does not', async () => {
+    fast();
+    for (const keepOurs of [true, false]) {
+      const db = fakeService(seed([period('aug', 8, 'final')]));
+      const E = db.base44.asServiceRole.entities.ReportingPeriod;
+      const realUpdate = E.update;
+      E.update = async (id, data) => {
+        await realUpdate(id, data);
+        // another admin's write lands right after ours
+        const c = structuredClone(data.checklist_confirmations);
+        if (!keepOurs) delete c.cash_confirmed;
+        c[CHECKLIST_REVISION] = { n: c[CHECKLIST_REVISION].n + 1, token: 'other' };
+        await realUpdate(id, { checklist_confirmations: c });
+      };
+      const r = await call(db, 'confirm_checklist', 'aug', { item: 'cash_confirmed' });
+      expect(r.status, `keepOurs=${keepOurs}`).toBe(keepOurs ? 200 : 409);
+    }
+  });
+
+  it('withdrawing goes through the same path: other confirmations kept', async () => {
+    fast();
+    const db = fakeService(seed([period('aug', 8, 'final')]));
+    await confirmAll(handlePeriodTransition, db.base44, 'aug', ADMIN, NOW);
+    expect((await call(db, 'unconfirm_checklist', 'aug', { item: 'cash_confirmed' })).status).toBe(200);
+    expect(items(db, 'aug')).toEqual(CHECKLIST_KEYS.filter((k) => k !== 'cash_confirmed').sort());
+    expect(db.tables.ReportingPeriod.get('aug').checklist.cash_confirmed).toBe(false);
   });
 });

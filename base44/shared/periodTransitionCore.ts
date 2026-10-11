@@ -138,6 +138,69 @@ export async function checklistContext(svc, period, lines, cross, { retryDelayMs
   return { hashes, warnings, items };
 }
 
+// ---- checklist writes, hardened against stale reads -------------------------
+// Base44 has no conditional writes and its reads can briefly lag a write, so a
+// confirmation is written as:
+//   1. read the freshest state: never older than any state already seen (the
+//      request's own load included); a revision counter inside
+//      checklist_confirmations tells which state is newer;
+//   2. change ONLY this item, on top of that state (every other confirmation
+//      is carried over unchanged), stamped with the next revision and a
+//      unique token -- one write;
+//   3. read back until the stored token is ours and every item matches what
+//      was written (or a later write landed that still has our change).
+// If the latest state cannot be read reliably, or the write cannot be
+// verified, the caller is told it was NOT saved and must retry (fail safe).
+// No schema change: the revision lives inside the existing object field.
+export const CHECKLIST_REVISION = '_revision';
+export const checklistWriteOptions = { tries: 5, delayMs: 400 };
+const revOf = (c) => (c && typeof c === 'object' && c[CHECKLIST_REVISION] && Number.isFinite(Number(c[CHECKLIST_REVISION].n)) ? Number(c[CHECKLIST_REVISION].n) : 0);
+const itemsOf = (c) => Object.fromEntries(CHECKLIST_KEYS.filter((k) => c && c[k]).map((k) => [k, c[k]]));
+const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+export async function writeChecklistItem(svc, period, key, record, who, now) {
+  const { tries, delayMs } = checklistWriteOptions;
+  const pause = () => new Promise((r) => setTimeout(r, delayMs));
+  const read = async () => { try { return (await svc.entities.ReportingPeriod.get(period.id)) || null; } catch { return null; } };
+  // 1. the freshest state
+  let newestSeen = revOf(period.checklist_confirmations);
+  let latest = await read();
+  for (let i = 0; i < tries && (!latest || revOf(latest.checklist_confirmations) < newestSeen); i++) {
+    if (latest) newestSeen = Math.max(newestSeen, revOf(latest.checklist_confirmations));
+    await pause();
+    latest = await read();
+  }
+  if (!latest || revOf(latest.checklist_confirmations) < newestSeen) return { ok: false, reason: 'stale' };
+  if (latest.published) return { ok: false, reason: 'published' };
+  // 2. only this item changes
+  const base = latest.checklist_confirmations && typeof latest.checklist_confirmations === 'object' ? latest.checklist_confirmations : {};
+  const next = { ...itemsOf(base) };
+  if (record) next[key] = record; else delete next[key];
+  const token = `${now.getTime().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  next[CHECKLIST_REVISION] = { n: revOf(base) + 1, token, by: who, at: now.toISOString() };
+  const checklist = { ...(latest.checklist && typeof latest.checklist === 'object' ? latest.checklist : {}), [key]: !!record };
+  await svc.entities.ReportingPeriod.update(period.id, { checklist_confirmations: next, checklist, last_updated: now.toISOString().slice(0, 10) });
+  // 3. verify what is stored
+  for (let i = 0; i < tries; i++) {
+    const stored = await read();
+    // The same write set this item's true/false box: if the box shows our write
+    // but checklist_confirmations is absent, the deployed schema dropped the
+    // field. If the box does not show it yet, the read is stale: keep checking.
+    if (record && stored && !stored.checklist_confirmations && stored.checklist && stored.checklist[key] === true) return { ok: false, reason: 'schema' };
+    const c = stored && stored.checklist_confirmations;
+    if (c && c[CHECKLIST_REVISION] && c[CHECKLIST_REVISION].token === token) {
+      return sameJson(itemsOf(c), itemsOf(next)) ? { ok: true, confirmations: next } : { ok: false, reason: 'mismatch' };
+    }
+    if (c && revOf(c) > revOf(next)) {
+      // a later write landed after ours: it must still carry our change
+      const kept = record ? !!c[key] && c[key].at === record.at : !c[key];
+      return kept ? { ok: true, confirmations: c } : { ok: false, reason: 'overtaken' };
+    }
+    await pause();
+  }
+  return { ok: false, reason: 'unverified' };
+}
+
 export async function handlePeriodTransition(base44, body = {}, user, now = new Date()) {
   if (!user) return reply(401, { error: 'Unauthorized' });
   if (user.role !== 'admin') return reply(403, { error: 'Admins only' });
@@ -196,27 +259,21 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
     const key = body.item;
     if (!CHECKLIST_KEYS.includes(key)) return reply(400, { error: 'unknown checklist item' });
     if (period.published) return refuse('published_read_only', 'This period is published and read-only; its checklist is kept as it was.');
-    const confirmations = { ...(period.checklist_confirmations && typeof period.checklist_confirmations === 'object' ? period.checklist_confirmations : {}) };
-    const checklist = { ...(period.checklist && typeof period.checklist === 'object' ? period.checklist : {}) };
-    if (action === 'unconfirm_checklist') {
-      delete confirmations[key];
-      checklist[key] = false;
-      return update({ checklist_confirmations: confirmations, checklist, last_updated: today(now) });
+    let record = null;
+    if (action === 'confirm_checklist') {
+      const cross = await crossPeriodContext(svc, period, lines);
+      const cl = await checklistContext(svc, period, lines, cross);
+      const s = cl.items.find((i) => i.key === key);
+      if (s.state === 'blocked') return reply(409, { ok: false, action, blockers: [{ code: 'checklist_item_blocked', message: itemMessage(s), overridable: false, linked: s.blockedBy }] });
+      record = confirmationRecord(key, cl.hashes, cl.warnings, who, now.toISOString());
     }
-    const cross = await crossPeriodContext(svc, period, lines);
-    const cl = await checklistContext(svc, period, lines, cross);
-    const s = cl.items.find((i) => i.key === key);
-    if (s.state === 'blocked') return reply(409, { ok: false, action, blockers: [{ code: 'checklist_item_blocked', message: itemMessage(s), overridable: false, linked: s.blockedBy }] });
-    confirmations[key] = confirmationRecord(key, cl.hashes, cl.warnings, who, now.toISOString());
-    checklist[key] = true;
-    await svc.entities.ReportingPeriod.update(period.id, { checklist_confirmations: confirmations, checklist, last_updated: today(now) });
-    // Base44 silently drops a field the deployed schema does not have: verify.
-    let stored = null;
-    try { stored = await svc.entities.ReportingPeriod.get(period.id); } catch { stored = null; }
-    if (!stored || !stored.checklist_confirmations || !stored.checklist_confirmations[key]) {
-      return refuse('schema_out_of_date', 'The confirmation could not be stored (the data schema does not have checklist_confirmations yet). Publish the entity schemas, then try again.');
-    }
-    return reply(200, { ok: true, action, period_id: period.id, item: key, confirmation: confirmations[key] });
+    const w = await writeChecklistItem(svc, period, key, record, who, now);
+    if (w.ok) return reply(200, { ok: true, action, period_id: period.id, item: key, ...(record ? { confirmation: record } : {}) });
+    if (w.reason === 'published') return refuse('published_read_only', 'This period is published and read-only; its checklist is kept as it was.');
+    if (w.reason === 'schema') return refuse('schema_out_of_date', 'The confirmation could not be stored (the data schema does not have checklist_confirmations yet). Publish the entity schemas, then try again.');
+    return refuse('checklist_not_saved', w.reason === 'stale'
+      ? 'The latest checklist state could not be read reliably, so nothing was saved. Try again in a moment.'
+      : 'The checklist change could not be confirmed as saved. Reload the page and check the item; try again if it is not shown as you set it.');
   }
 
   if (action === 'create_revision') {

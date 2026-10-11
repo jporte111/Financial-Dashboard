@@ -36,6 +36,22 @@ const codes = (r) => (r.body?.blockers || []).map((b) => b.code);
 const xcodes = (r) => codes(r).filter((c) => c.startsWith('cross_period:'));
 const findings = (r, sev) => (r.body?.cross_period?.findings || []).filter((f) => !sev || f.severity === sev).map((f) => f.code);
 
+// Confirm every checklist item through the server, checking each reply (the
+// same rule in every hosted suite): retry only TRANSIENT refusals -- checks that
+// could not run (Base44 rate limits), a change not verified as saved, or lines
+// the server cannot see yet right after finalize (read lag). Anything else fails.
+const transientRefusal = (r) => r.status === 409 && (r.body?.blockers || []).some((b) => b.code === 'checklist_not_saved' || /could not run|could not be evaluated|Budget lines are incomplete/.test(b.message || ''));
+async function confirmItem(pid, item) {
+  let r = await transition('confirm_checklist', pid, { item });
+  for (let i = 0; i < 6 && transientRefusal(r); i++) { await sleep(3700); r = await transition('confirm_checklist', pid, { item }); }
+  return r;
+}
+async function confirmChecklist(pid) {
+  for (const item of PUBLISH_CHECKLIST.map(([k]) => k)) {
+    const r = await confirmItem(pid, item);
+    if (r.status !== 200) throw new Error(`confirm ${item} on ${pid}: ${r.status} ${JSON.stringify(r.body?.blockers || r.body)}`);
+  }
+}
 // ---- fictional months -----------------------------------------------------
 const usedYears = new Set((await E.ReportingPeriod.list('-year', 1000)).map((p) => p.year));
 const freshYear = () => { let y; do y = 3000 + Math.floor(Math.random() * 6000); while (usedYears.has(y)); usedYears.add(y); return y; };
@@ -67,8 +83,7 @@ async function makeMonth(year, month, { period = {}, dist = { q1: 101, q2: 203 }
   if (!finalize) return pid;
   const f = await finalizeAfterLag(pid);
   if (f.status !== 200) throw new Error(`finalize ${month}/${year}: ${f.status} ${JSON.stringify(codes(f))}`);
-  // Phase 6c: the checklist is confirmed through the server (who/when recorded).
-  for (const [k] of PUBLISH_CHECKLIST) await transition('confirm_checklist', pid, { item: k });
+    await confirmChecklist(pid); // checked, transient-only retry
   if (publish) { const p = await transition('publish', pid); if (p.status !== 200) throw new Error(`publish ${month}/${year}: ${p.status} ${JSON.stringify(codes(p))}`); }
   return pid;
 }
@@ -101,8 +116,7 @@ const scenarioYears = {};
   check('A1 check compares with the previous published month', chk.body?.cross_period?.previous?.id === jun);
   const f = await transition('finalize', jul);
   check('A2 a consistent month finalizes (no cross-period blockers)', f.status === 200, `HTTP ${f.status} ${xcodes(f).join(',')}`);
-  // Phase 6c: the checklist is confirmed through the server (who/when recorded).
-  for (const [k] of PUBLISH_CHECKLIST) await transition('confirm_checklist', jul, { item: k });
+    await confirmChecklist(jul); // checked, transient-only retry
   check('A3 ...and publishes', (await transition('publish', jul)).status === 200);
   const pubChk = await transition('check', jul);
   check('A4 a published period is never re-judged (no cross-period evaluation)', pubChk.body?.cross_period === null);
@@ -120,8 +134,7 @@ const scenarioYears = {};
   const f2 = await transition('finalize', jul, { overrides: reason(xcodes(f1)) });
   const stored = await E.ReportingPeriod.get(jul);
   check('B3 accepted with a written reason: finalizes, reason recorded with who/when', f2.status === 200 && !!stored.bva_overrides?.['cross_period:ytd_income_decreased']?.by, `HTTP ${f2.status}`);
-  // Phase 6c: the checklist is confirmed through the server (who/when recorded).
-  for (const [k] of PUBLISH_CHECKLIST) await transition('confirm_checklist', jul, { item: k });
+    await confirmChecklist(jul); // checked, transient-only retry
   const p = await transition('publish', jul);
   check('B4 the reason given at finalize satisfies publish', p.status === 200, `HTTP ${p.status} ${xcodes(p).join(',')}`);
 }
@@ -193,8 +206,7 @@ const scenarioYears = {};
   check('F2 the later published month that no longer follows is a WARNING', findings(chk, 'warn').includes('later_month_behind:ytd_income'), findings(chk, 'warn').join(','));
   const f = await transition('finalize', rid);
   check('F3 ...which does not block finalize', f.status === 200, `HTTP ${f.status} ${xcodes(f).join(',')}`);
-  // Phase 6c: the checklist is confirmed through the server (who/when recorded).
-  for (const [k] of PUBLISH_CHECKLIST) await transition('confirm_checklist', rid, { item: k });
+    await confirmChecklist(rid); // checked, transient-only retry
   const p = await transition('publish', rid);
   check('F4 ...or publish; the revision replaces the original (Phase 4 unchanged)', p.status === 200 && p.body?.replaced === jul && !p.body?.supersede_pending, `HTTP ${p.status}`);
   const orig = await E.ReportingPeriod.get(jul);

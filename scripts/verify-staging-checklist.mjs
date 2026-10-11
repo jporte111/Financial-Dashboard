@@ -38,7 +38,9 @@ async function publishRetry(pid) {
   return p;
 }
 // ...and a confirm refused only because the checks could not run (fail closed).
-const unavailable = (r) => r.status === 409 && (r.body?.blockers || []).some((b) => /could not run|could not be evaluated/.test(b.message || ''));
+// Transient refusals only (the same rule in every hosted suite): checks that could
+// not run, a change not verified as saved, or lines not yet visible to the server.
+const unavailable = (r) => r.status === 409 && (r.body?.blockers || []).some((b) => b.code === 'checklist_not_saved' || /could not run|could not be evaluated|Budget lines are incomplete/.test(b.message || ''));
 async function confirmRetry(pid, item) {
   let r = await transition('confirm_checklist', pid, { item });
   for (let i = 0; i < 3 && unavailable(r); i++) { await sleep(5000); r = await transition('confirm_checklist', pid, { item }); }

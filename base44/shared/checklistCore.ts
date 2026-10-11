@@ -206,6 +206,7 @@ export const CATALOGUE: Record<string, { title: string; action: string; where: s
   checklist_incomplete: { title: 'Checklist item not confirmed', action: 'Review the item and confirm it.', where: REVIEW },
   checklist_item_blocked: { title: 'Checklist item cannot be confirmed yet', action: 'Resolve the linked issue first.', where: REVIEW },
   checklist_unavailable: { title: 'Checklist could not be evaluated', action: 'Nothing was changed. Try again in a moment.', where: REVIEW },
+  checklist_not_saved: { title: 'Checklist change not saved', action: 'Reload the page and check the item; try again if it is not shown as you set it.', where: REVIEW },
   // publish gate data rules
   required_value_missing: { title: 'A required figure is missing', action: 'A blank is not $0.00. Correct the workbook (or Monthly Totals) and import again.', where: WORKBOOK },
   cutoff_invalid: { title: 'The reporting cutoff date is not a valid date', action: 'Set the correct cutoff date and import again.', where: IMPORT },
