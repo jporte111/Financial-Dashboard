@@ -136,9 +136,18 @@ export async function buildPublicDashboard(svc, body = {}) {
   const published = currentPublished(all);
   if (!published.length) return EMPTY;
 
-  // A requested period is honored only when it is published; anything else
-  // falls back to the most recent published period.
-  const period = (body.period_id && published.find((p) => p.id === body.period_id)) || published[0];
+  // Which report to serve. Always one from `published` -- the single current
+  // version of each month (periodVersions.monthState) -- so a superseded,
+  // replaced, discarded or draft version is never served.
+  //   - the requested id is a month's current version: serve it;
+  //   - it is an older/other version of a month that HAS a published report
+  //     (e.g. a link to a version a revision has since replaced): serve that
+  //     same month's current version, not some other month;
+  //   - an unknown id, or a month with nothing published: the most recent
+  //     published period, as before (drafts stay hidden).
+  const requested = body.period_id ? all.find((p) => p.id === body.period_id) : null;
+  const sameMonth = requested ? published.find((p) => Number(p.month) === Number(requested.month) && Number(p.year) === Number(requested.year)) : null;
+  const period = (requested && published.find((p) => p.id === requested.id)) || sameMonth || published[0];
 
   const [budgetLines, cashAccounts, distributions, transfers, savingsSpends] = await Promise.all([
     svc.entities.BudgetLine.filter({ period_id: period.id }, undefined, 5000),
