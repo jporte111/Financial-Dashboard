@@ -227,7 +227,10 @@ const scenarioYears = {};
   check('F3 ...which does not block finalize', f.status === 200, `HTTP ${f.status} ${xcodes(f).join(',')}`);
     await confirmChecklist(rid); // checked, transient-only retry
   const p = await publishRetry(rid);
-  check('F4 ...or publish; the revision replaces the original (Phase 4 unchanged)', p.status === 200 && p.body?.replaced === jul && !p.body?.supersede_pending, `HTTP ${p.status}`);
+  // A transport-level 500 can hide a publish that succeeded; the retried call is
+  // then answered by Phase 4's idempotent path (already_published) -- same outcome.
+  const replacedOk = p.body?.replaced === jul || p.body?.already_published === true;
+  check('F4 ...or publish; the revision replaces the original (Phase 4 unchanged)', p.status === 200 && replacedOk && !p.body?.supersede_pending, `HTTP ${p.status}${p.body?.already_published ? ' (answered by the idempotent retry path)' : ''}`);
   const orig = await E.ReportingPeriod.get(jul);
   check('F5 the original is superseded and unpublished', orig.superseded === true && orig.published === false);
   const aug2 = await transition('create_revision', (await E.ReportingPeriod.filter({ year: y, month: 8 }))[0].id, { reason: 'Fictional staging test: baseline after a revision.' });
