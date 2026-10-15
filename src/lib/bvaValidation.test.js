@@ -111,18 +111,17 @@ describe('finalize gating (requirement: no Final while required reconciliations 
   it('a clean workbook does not block finalize', () => {
     expect(run(cleanParsed()).blocksFinalize).toBe(false);
   });
-  it('a real-shaped workbook blocks finalize on its cash discrepancy, but NOT on the distributions correction', () => {
+  it('a real-shaped workbook\'s cash discrepancy and distributions correction are warnings, not blockers', () => {
     const v = run(workbookLikeParsed());
-    expect(v.blocksFinalize).toBe(true);
-    expect(v.openReconciliations).toContain('cash_total_mismatch');
-    expect(v.openReconciliations).not.toContain('distribution_workbook_total_corrected');
+    expect(v.blocksFinalize).toBe(false);
+    expect(v.warnings.map((w) => w.code)).toEqual(expect.arrayContaining(['cash_total_mismatch', 'distribution_workbook_total_corrected']));
   });
-  it('flags a hard cash mismatch as a finalize blocker', () => {
+  it('a cash mismatch keeps both figures, uses the calculated total, and does not block', () => {
     const p = cleanParsed();
     p.cash.reportedTotal = 41000; // accounts still sum to 40000
     const v = run(p);
     const w = v.warnings.find((x) => x.code === 'cash_total_mismatch');
-    expect(w.blocksFinalize).toBe(true);
+    expect(w).toMatchObject({ blocksFinalize: false, sourceValue: 41000, calculatedValue: 40000 });
     expect(v.reconciled.cash.total).toBe(40000); // calculated value used
   });
 });

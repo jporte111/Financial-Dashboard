@@ -56,12 +56,9 @@ describe('decision options', () => {
     expect(MIN_REASON).toBe(10);
   });
 
-  it('offers an override only for overridable finalize blockers', () => {
-    expect(decisionOptions({ code: 'cash_total_mismatch', resolution: 'unresolved', blocksFinalize: true, overridable: true }))
-      .toEqual([{ mode: 'accept', label: 'Accept with a reason' }]);
-    expect(decisionOptions({ code: 'source_value_missing:cash', resolution: 'unresolved', blocksFinalize: true, overridable: true }))
-      .toEqual([{ mode: 'accept', label: 'Accept with a reason' }]);
-    expect(decisionOptions({ code: 'cash_total_mismatch', resolution: 'accepted', blocksFinalize: true, overridable: true })).toEqual([]);
+  it('never asks to accept a warning with a reason (warnings need none)', () => {
+    expect(decisionOptions({ code: 'cash_total_mismatch', resolution: 'unresolved', blocksFinalize: true, overridable: true })).toEqual([]);
+    expect(decisionOptions({ code: 'source_value_missing:cash', resolution: 'unresolved', blocksFinalize: false })).toEqual([]);
   });
 });
 
@@ -117,11 +114,9 @@ describe('draft decisions keep an audit record', () => {
     expect(calls).toEqual([]);
   });
 
-  it('accepting an exception records an override correction and passes the reason to finalize', async () => {
+  it('an "accept" decision is refused before anything is written', async () => {
     const warning = { code: 'cash_total_mismatch', resolution: 'unresolved', blocksFinalize: true, overridable: true, message: 'm' };
-    await applyWarningDecision({ period: draft(), warning, mode: 'accept', reason: REASON });
-    expect(calls[0][2].bva_corrections.find((c) => c.kind === 'override' && c.target === 'cash_total_mismatch').reason).toBe(REASON);
-    expect(calls[1]).toEqual(['periodTransition', 'finalize', 'p9', { overrides: { 'open_reconciliation:cash_total_mismatch': { reason: REASON } } }]);
-    expect(calls).toHaveLength(2);
+    await expect(applyWarningDecision({ period: draft(), warning, mode: 'accept', reason: REASON })).rejects.toThrow(/no such decision/);
+    expect(calls).toHaveLength(0);
   });
 });

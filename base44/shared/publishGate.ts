@@ -17,10 +17,13 @@
 import { effectiveRecord } from './sourceMissing.ts';
 import { CROSS_PERIOD_PREFIX } from './crossPeriod.ts';
 import { itemMessage } from './checklistCore.ts';
+import { isHardValidation } from './hardRules.ts';
 
 const MONTHS_IN_YEAR = 12;
 
-// Period totals that must come from the workbook. A missing value blocks.
+// Period totals the workbook should carry. A missing one is shown as missing
+// (never $0.00) and highlighted as a warning; only a missing reporting cutoff
+// blocks (the report cannot be placed in a month without it).
 export const REQUIRED_PERIOD_FIELDS = [
   'reporting_cutoff_date',
   'total_cash',
@@ -50,24 +53,6 @@ export const PUBLISH_CHECKLIST = [
 const isMissing = (v) => v === null || v === undefined || v === '' || (typeof v === 'number' && !Number.isFinite(v));
 const isNonZero = (v) => !isMissing(v) && Number(v) !== 0;
 
-// Which validation warning a missing period total traces to, so accepting
-// that warning with a written reason ("leave blank for now, correct later")
-// also clears the total's blocker. The reporting cutoff has no such warning.
-export const REQUIRED_FIELD_WARNINGS = {
-  total_cash: 'source_value_missing:cash',
-  ytd_income: 'source_value_missing:income',
-  annual_budgeted_income: 'source_value_missing:income',
-  ytd_expenses: 'source_value_missing:expenses',
-  annual_budgeted_expenses: 'source_value_missing:expenses',
-  distributions_ytd: 'source_value_missing:distributions',
-};
-
-// Cleared by a reason on the blocker's own code, or on the validation
-// warning that reported the missing value (bare or open_reconciliation key).
-const clearedBy = (code, alt, overrides) =>
-  hasReason(overrides[code]) ||
-  (alt != null && (hasReason(overrides[alt]) || hasReason(overrides[`open_reconciliation:${alt}`])));
-
 export function elapsedMonthsFromCutoff(cutoffDate) {
   if (!cutoffDate) return null;
   const d = new Date(cutoffDate);
@@ -80,35 +65,22 @@ export const hasReason = (o) => !!(o && typeof o.reason === 'string' && o.reason
 
 const blocker = (code, message, overridable = false) => ({ code, message, overridable });
 
-// A monitored DETAIL row with no confirmed group affects reporting when it
-// carries any non-zero figure. Such rows block until classified or explicitly
-// excluded with a reason; all-blank / all-zero rows do not.
+// A monitored DETAIL row with no confirmed group that carries a non-zero
+// figure: shown as "Unassigned" (never counted in a group) and highlighted.
 export function isMaterialUnassignedDetail(line) {
   const unassigned = !line.group_confirmed || !line.budget_group || line.budget_group === 'unassigned';
   return !!line.bva_detail && unassigned && [line.ytd_actual, line.annual_budget, line.month_actual].some(isNonZero);
 }
 
-// Data rules shared by finalize and publish.
-// Missing figures: a blank is missing, never $0.00. At FINALIZE a missing
-// figure (other than the cutoff) may be deferred with a written reason ("leave
-// blank for now, correct later"). At PUBLISH nothing missing may reach the
-// client: every missing required total, every missing summary-line figure and
-// every missing-source-value warning blocks, deferred or not, and cannot be
-// overridden there -- correct the workbook and import again.
-const PUBLISH_MISSING = ' A deferral at finalize does not allow publishing: a report with a missing figure cannot be published. Correct the workbook and import again.';
-function dataBlockers(period, lines, overrides, { forPublish = false } = {}) {
+// Data rules shared by finalize and publish: ONLY structural / integrity
+// failures block (see hardRules.ts). Everything else the workbook contains --
+// blanks included -- is represented as it is and reported by dataWarnings().
+// No blocker here can be overridden. `overrides` and `forPublish` are kept for
+// callers; neither changes the result.
+function dataBlockers(period, lines, _overrides = {}, _opts = {}) {
   const out = [];
-  for (const f of REQUIRED_PERIOD_FIELDS) {
-    if (isMissing(period[f])) {
-      const code = `required_value_missing:${f}`;
-      if (forPublish) { out.push({ ...blocker(code, `Required value "${f}" is missing.${PUBLISH_MISSING}`, false), alt: REQUIRED_FIELD_WARNINGS[f] || null }); continue; }
-      const alt = REQUIRED_FIELD_WARNINGS[f] || null;
-      // The reporting cutoff cannot be deferred; any other missing total can
-      // be left blank for now with a written reason (corrected later).
-      if (f === 'reporting_cutoff_date' || !clearedBy(code, alt, overrides)) {
-        out.push({ ...blocker(code, `Required value "${f}" is missing from the import.`, f !== 'reporting_cutoff_date'), alt });
-      }
-    }
+  if (isMissing(period.reporting_cutoff_date)) {
+    out.push(blocker('required_value_missing:reporting_cutoff_date', 'The reporting cutoff date is missing, so the report cannot be placed in a month.'));
   }
   const expected = elapsedMonthsFromCutoff(period.reporting_cutoff_date);
   if (period.reporting_cutoff_date && expected === null) {
@@ -125,73 +97,50 @@ function dataBlockers(period, lines, overrides, { forPublish = false } = {}) {
       out.push(blocker('cutoff_period_mismatch', 'The reporting cutoff date is neither in this reporting month nor the month before it.'));
     }
   }
-
+  // The import must hold the income lines and all three expense groups.
   const summaries = lines.filter((l) => !l.bva_detail);
   const missingGroups = EXPENSE_GROUPS.filter((g) => !summaries.some((l) => l.budget_group === g));
   if (missingGroups.length || !summaries.some((l) => l.budget_group === 'income')) {
     out.push(blocker('import_incomplete', `Imported budget lines are incomplete (missing: ${[...missingGroups, ...(summaries.some((l) => l.budget_group === 'income') ? [] : ['income'])].join(', ')}).`));
   }
-  // Primary figures: a blank is missing, never $0.00, and blocks until
-  // corrected or deferred with a written reason ("leave blank for now,
-  // correct later"). Summary lines need both. A watch-list DETAIL row with no
-  // figures at all is not material; one with only one of the two is missing
-  // the other.
-  for (const l of lines) {
-    const missing = ['ytd_actual', 'annual_budget'].filter((f) => isMissing(l[f]));
-    if (l.bva_detail && missing.length !== 1) continue;
-    const alt = l.bva_detail ? 'source_value_missing:detail' : l.budget_group === 'income' ? 'source_value_missing:income' : 'source_value_missing:expenses';
-    for (const f of missing) {
-      const code = `required_line_value_missing:${l.id}:${f}`;
-      if (forPublish) out.push({ ...blocker(code, `"${l.category}" is missing ${f}.${PUBLISH_MISSING}`, false), alt });
-      else if (!clearedBy(code, alt, overrides)) out.push({ ...blocker(code, `"${l.category}" is missing ${f}.`, true), alt });
-    }
-  }
-
-  // At publish, a missing source value blocks even after a deferral (the
-  // warning is marked overridden at finalize, so it is checked separately).
-  if (forPublish) {
-    for (const w of Array.isArray(period.bva_validation_warnings) ? period.bva_validation_warnings : []) {
-      if (w && /^source_value_missing(:|$)/.test(String(w.code))) {
-        out.push(blocker(`open_reconciliation:${w.code}`, `${w.message || `A source value is missing (${w.code}).`}${PUBLISH_MISSING}`, false));
-      }
-    }
-  }
-
+  // Structural findings from the workbook itself (judged by code, so an
+  // import stored under older rules is judged by these rules).
   for (const w of Array.isArray(period.bva_validation_warnings) ? period.bva_validation_warnings : []) {
-    if (!w || !w.blocksFinalize) continue;
-    if (forPublish && /^source_value_missing(:|$)/.test(String(w.code))) continue; // handled above, strictly
-    const code = `open_reconciliation:${w.code}`;
-    // A warning marked not overridable (a missing value, a conflicting
-    // section, a wrong reporting month) must be fixed in the workbook.
-    if (w.overridable === false) {
-      out.push(blocker(code, w.message || `Validation ${w.code} must be corrected in the workbook.`, false));
-      continue;
-    }
-    if (w.overridden) continue;
-    if (!hasReason(overrides[code]) && !hasReason(overrides[w.code])) {
-      out.push(blocker(code, w.message || `Reconciliation ${w.code} is open.`, true));
-    }
-  }
-
-  for (const l of lines.filter(isMaterialUnassignedDetail)) {
-    const code = `detail_unassigned:${l.id}`;
-    if (!hasReason(overrides[code])) {
-      out.push(blocker(code, `"${l.category}" has figures but no confirmed group. Classify it, or exclude it with a documented reason.`, true));
+    if (w && isHardValidation(String(w.code))) {
+      out.push(blocker(`open_reconciliation:${w.code}`, w.message || `The workbook could not be read reliably (${w.code}).`));
     }
   }
   return out;
 }
 
-// Cross-period findings (crossPeriod.ts) as blockers: 'block' cannot be
-// overridden; 'override' blocks until accepted with a written reason (codes
-// prefixed cross_period:); 'warn' and 'info' never block. `findings` is null
-// when the caller did not evaluate them (browser explanations, older tests).
-export function crossPeriodBlockers(findings, overrides = {}) {
+// What the review highlights about the data itself (never blocks): missing
+// totals and line figures (shown as missing, never $0.00), and watch-list rows
+// with figures but no group (shown as Unassigned).
+export function dataWarnings(rawPeriod, lines = []) {
+  const period = effectiveRecord(rawPeriod) || {};
+  const out = [];
+  for (const f of REQUIRED_PERIOD_FIELDS) {
+    if (f !== 'reporting_cutoff_date' && isMissing(period[f])) out.push({ code: `required_value_missing:${f}`, message: `"${f}" is blank in the workbook; it is shown as missing (never $0.00).` });
+  }
+  for (const l of lines) {
+    const missing = ['ytd_actual', 'annual_budget'].filter((f) => isMissing(l[f]));
+    if (l.bva_detail && missing.length !== 1) continue;
+    for (const f of missing) out.push({ code: `required_line_value_missing:${l.id}:${f}`, message: `"${l.category}" has a blank ${f}; it is shown as missing (never $0.00).` });
+  }
+  for (const l of lines.filter(isMaterialUnassignedDetail)) {
+    out.push({ code: `detail_unassigned:${l.id}`, message: `"${l.category}" has figures but no confirmed group; it is shown as Unassigned and is not counted in any group.` });
+  }
+  return out;
+}
+
+// Cross-period findings (crossPeriod.ts) as blockers: only 'block' (a
+// conflicting or duplicate period/version, or checks that could not run)
+// blocks; 'warn' and 'info' are for review. Codes are prefixed cross_period:.
+// `findings` is null when the caller did not evaluate them.
+export function crossPeriodBlockers(findings, _overrides = {}) {
   const out = [];
   for (const f of Array.isArray(findings) ? findings : []) {
-    const code = `${CROSS_PERIOD_PREFIX}${f.code}`;
-    if (f.severity === 'block') out.push(blocker(code, f.message, false));
-    else if (f.severity === 'override' && !hasReason(overrides[code])) out.push(blocker(code, f.message, true));
+    if (f.severity === 'block') out.push(blocker(`${CROSS_PERIOD_PREFIX}${f.code}`, f.message, false));
   }
   return out;
 }
@@ -233,11 +182,7 @@ export function evaluatePublish(rawPeriod, lines = [], crossFindings = null, che
     out.push(blocker('not_final', 'Only a finalized period (validated BVA import) can be published.'));
   }
   out.push(...dataBlockers(period, lines, period.bva_overrides || {}, { forPublish: true }));
-  // A cross-period finding accepted at finalize stays accepted; a new one
-  // (e.g. the previous month was revised since) needs a reopen and a reason.
-  out.push(...crossPeriodBlockers(crossFindings, period.bva_overrides || {}).map((b) => (b.overridable
-    ? { ...b, message: `${b.message} Not accepted at finalize: reopen to draft and finalize again with a written reason.` }
-    : b)));
+  out.push(...crossPeriodBlockers(crossFindings));
   if (Array.isArray(checklistItems)) {
     for (const s of checklistItems) if (s.state !== 'confirmed') out.push(blocker(`checklist_incomplete:${s.key}`, itemMessage(s)));
   } else {
@@ -249,17 +194,9 @@ export function evaluatePublish(rawPeriod, lines = [], crossFindings = null, che
   return { ok: out.length === 0, blockers: out };
 }
 
-// The overrides that finalize records: only those that clear a blocker that
-// was actually present, each with its reason, who and when.
-export function recordedOverrides(period, lines, overrides, by, at, crossFindings = null) {
-  const blockers = [...dataBlockers(period, lines, {}), ...crossPeriodBlockers(crossFindings, {})].filter((b) => b.overridable);
-  const out = { ...(period.bva_overrides || {}) };
-  for (const b of blockers) {
-    const o =
-      overrides[b.code] ||
-      overrides[String(b.code).replace(/^open_reconciliation:/, '')] ||
-      (b.alt ? overrides[b.alt] || overrides[`open_reconciliation:${b.alt}`] : null);
-    if (hasReason(o)) out[b.code] = { reason: o.reason.trim(), by, at };
-  }
-  return out;
+// The overrides that finalize records. No finding needs a written reason any
+// more, so nothing new is recorded; reasons recorded under the earlier rules
+// are kept as they were.
+export function recordedOverrides(period, _lines = [], _overrides = {}, _by = '', _at = '', _crossFindings = null) {
+  return { ...(period?.bva_overrides || {}) };
 }

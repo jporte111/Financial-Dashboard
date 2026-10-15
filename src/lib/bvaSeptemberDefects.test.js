@@ -50,16 +50,15 @@ describe('defect 1: blank YTD / budget cells stay missing (never 0)', () => {
     expect(p.detail.categories[0].actualYtd).toBe(null);
   });
 
-  it('validation leaves the affected totals missing; a written reason defers the block', () => {
-    const v = validateBva(p, { cutoffDate: '2026-08-31', overrides: { 'source_value_missing:expenses': { reason: 'x' } } });
+  it('validation leaves the affected totals missing and highlights them (never blocking)', () => {
+    const v = validateBva(p, { cutoffDate: '2026-08-31' });
     expect(v.reconciled.expenses.actualTotal).toBe(null);
     expect(v.reconciled.expenses.budgetTotal).toBe(null);
     expect(v.reconciled.expenses.groups[0]).toMatchObject({ actual: null, remaining: null, status: null });
     const w = v.warnings.find((x) => x.code === 'source_value_missing:expenses');
-    expect(w).toMatchObject({ blocksFinalize: false, overridable: true });
-    // Without the override it still blocks; the detail one stays open.
-    expect(validateBva(p, { cutoffDate: '2026-08-31' }).warnings.find((x) => x.code === 'source_value_missing:expenses')).toMatchObject({ blocksFinalize: true });
-    expect(v.warnings.find((x) => x.code === 'source_value_missing:detail')).toMatchObject({ overridable: true, blocksFinalize: true });
+    expect(w).toMatchObject({ blocksFinalize: false });
+    expect(v.warnings.find((x) => x.code === 'source_value_missing:detail')).toMatchObject({ blocksFinalize: false });
+    expect(v.blocksFinalize).toBe(false);
   });
 
   it('the plan writes no null and no 0 for them, and lists the period totals as missing', () => {
@@ -167,9 +166,9 @@ describe('defect 7: title month vs cutoff date', () => {
     expect(v.openReconciliations.filter((c) => /month|cutoff/.test(c))).toEqual([]);
   });
 
-  it('importing into a month the title does not name needs a reason', () => {
+  it('importing into a month the title does not name is a warning (the title is only text)', () => {
     const v = validateBva(p, { cutoffDate: '2026-08-31', period: { month: 8, year: 2026 } });
-    expect(v.warnings.find((w) => w.code === 'title_month_mismatch')).toMatchObject({ blocksFinalize: true, overridable: true });
+    expect(v.warnings.find((w) => w.code === 'title_month_mismatch')).toMatchObject({ blocksFinalize: false });
     expect(v.warnings.find((w) => w.code === 'period_is_cutoff_month')).toBeDefined();
   });
 

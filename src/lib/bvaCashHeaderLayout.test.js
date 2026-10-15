@@ -100,10 +100,10 @@ describe('workbook title: report month or data month', () => {
     expect(c.map((x) => x[0])).not.toContain('title_month_mismatch');
     expect(c).toContainEqual(['title_names_data_month', false]);
   });
-  it('a title naming neither month still blocks', () => {
-    expect(codes('BVA July 2030', { month: 10, year: 2030 })).toContainEqual(['title_month_mismatch', true]);
+  it('a title naming neither month is a warning (the title is only text; the cutoff decides)', () => {
+    expect(codes('BVA July 2030', { month: 10, year: 2030 })).toContainEqual(['title_month_mismatch', false]);
   });
-  it('a data-month title the cutoff does not support still blocks', () => {
-    expect(codes('BVA August 2030', { month: 10, year: 2030 })).toContainEqual(['title_month_mismatch', true]);
+  it('a data-month title the cutoff does not support is a warning too', () => {
+    expect(codes('BVA August 2030', { month: 10, year: 2030 })).toContainEqual(['title_month_mismatch', false]);
   });
 });

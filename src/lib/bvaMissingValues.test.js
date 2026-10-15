@@ -4,7 +4,7 @@ import { planBvaImport } from './bvaImport.js';
 import { totalsWrite } from './periodTotals.js';
 import { buildBvaDashboard } from './bvaDashboard.js';
 import { effectiveRecord, isSourceMissing, withoutNulls, nextMissingList } from '../../base44/shared/sourceMissing.ts';
-import { evaluateFinalize, evaluatePublish, PUBLISH_CHECKLIST } from '../../base44/shared/publishGate.ts';
+import { evaluateFinalize, evaluatePublish, PUBLISH_CHECKLIST, dataWarnings } from '../../base44/shared/publishGate.ts';
 import { publicPeriod } from '../../base44/shared/publicDashboardCore.ts';
 
 // Missing values without null (Base44 rejects null in number / string fields),
@@ -43,9 +43,9 @@ const v = (p, extra = {}) => validateBva(p, { cutoffDate: '2026-08-31', period: 
 const find = (val, code) => val.warnings.find((w) => w.code === code);
 
 describe('expected sections: absent, empty, or missing rows compared with the previous period', () => {
-  it('no watch list when the previous period had one blocks (overridable with a reason)', () => {
+  it('no watch list when the previous period had one is a warning (no reason needed)', () => {
     const val = v(parsed({ detail: false }), { previous: PREVIOUS });
-    expect(find(val, 'detail_section_expected')).toMatchObject({ blocksFinalize: true, overridable: true });
+    expect(find(val, 'detail_section_expected')).toMatchObject({ blocksFinalize: false });
     expect(val.warnings.find((w) => w.code === 'detail_section_expected').message).toContain('2 watch-list categories');
   });
 
@@ -55,10 +55,10 @@ describe('expected sections: absent, empty, or missing rows compared with the pr
     expect(find(val, 'detail_section_expected')).toBeUndefined();
   });
 
-  it('a found-but-empty watch list blocks', () => {
+  it('a found-but-empty watch list is a warning', () => {
     const p = parsed({ detail: false });
     p.sections.detail.status = 'empty';
-    expect(find(v(p), 'detail_section_empty')).toMatchObject({ blocksFinalize: true });
+    expect(find(v(p), 'detail_section_empty')).toMatchObject({ blocksFinalize: false });
   });
 
   it('watch-list categories present last period but missing now are named', () => {
@@ -66,8 +66,8 @@ describe('expected sections: absent, empty, or missing rows compared with the pr
     expect(find(val, 'detail_rows_missing_vs_prior').message).toContain('6300');
   });
 
-  it('no transfers when the previous period had some blocks; none expected is a notice', () => {
-    expect(find(v(parsed({ transfers: false }), { previous: PREVIOUS }), 'transfers_section_expected')).toMatchObject({ blocksFinalize: true });
+  it('no transfers when the previous period had some is a warning; none expected is a notice', () => {
+    expect(find(v(parsed({ transfers: false }), { previous: PREVIOUS }), 'transfers_section_expected')).toMatchObject({ blocksFinalize: false });
     expect(find(v(parsed({ transfers: false })), 'transfers_section_absent')).toMatchObject({ blocksFinalize: false });
   });
 
@@ -76,8 +76,7 @@ describe('expected sections: absent, empty, or missing rows compared with the pr
     p.transfers.items.push({ amount: null, source: 'Acct B', purpose: 'Insurance' });
     const val = v(p);
     expect(val.reconciled.transfers.total).toBe(null);
-    expect(find(val, 'source_value_missing:transfers')).toMatchObject({ overridable: true, blocksFinalize: true });
-    expect(find(v(p, { overrides: { 'source_value_missing:transfers': { reason: 'left blank; correct later' } } }), 'source_value_missing:transfers')).toMatchObject({ blocksFinalize: false });
+    expect(find(val, 'source_value_missing:transfers')).toMatchObject({ blocksFinalize: false });
   });
 
   it('a stored parse from before the multi-sheet parser (no section inventory) is not re-judged for sections', () => {
@@ -88,8 +87,8 @@ describe('expected sections: absent, empty, or missing rows compared with the pr
 });
 
 describe('cutoff and reporting convention', () => {
-  it('a cutoff that is not a month end needs a reason', () => {
-    expect(find(validateBva(parsed(), { cutoffDate: '2026-08-30' }), 'cutoff_not_month_end')).toMatchObject({ blocksFinalize: true, overridable: true });
+  it('a cutoff that is not a month end is a warning', () => {
+    expect(find(validateBva(parsed(), { cutoffDate: '2026-08-30' }), 'cutoff_not_month_end')).toMatchObject({ blocksFinalize: false });
   });
 
   it('no cutoff date blocks and cannot be overridden; pace is missing, not zero months', () => {
@@ -97,13 +96,13 @@ describe('cutoff and reporting convention', () => {
     p.meta.cutoffDate = null;
     const val = validateBva(p, {});
     expect(val.elapsedMonths).toBe(null);
-    expect(find(val, 'cutoff_date_required')).toMatchObject({ overridable: false });
+    expect(find(val, 'cutoff_date_required')).toMatchObject({ overridable: false, blocksFinalize: true });
   });
 
-  it('the same cutoff as the previous period, or a changed convention, needs a reason', () => {
-    expect(find(v(parsed(), { previous: { ...PREVIOUS, cutoffDate: '2026-08-31' } }), 'cutoff_already_reported')).toMatchObject({ blocksFinalize: true });
+  it('the same cutoff as the previous period blocks (a duplicate); a changed convention is a warning', () => {
+    expect(find(v(parsed(), { previous: { ...PREVIOUS, cutoffDate: '2026-08-31' } }), 'cutoff_already_reported')).toMatchObject({ blocksFinalize: true, overridable: false });
     const sameMonth = validateBva(parsed(), { cutoffDate: '2026-08-31', period: { month: 8, year: 2026 }, previous: { ...PREVIOUS, month: 7, year: 2026, cutoffDate: '2026-06-30' } });
-    expect(find(sameMonth, 'reporting_convention_changed')).toMatchObject({ blocksFinalize: true });
+    expect(find(sameMonth, 'reporting_convention_changed')).toMatchObject({ blocksFinalize: false });
   });
 
   it('a blank distribution cell for a quarter that has begun is pointed out (and adds nothing)', () => {
@@ -200,10 +199,10 @@ describe('the missing-field list is honoured by every reader', () => {
     expect(vm.savingsDistributions.distributionsYtd ?? null).not.toBe(7);
   });
 
-  it('the publish gate treats a listed required total as missing, and cannot be talked out of it', () => {
+  it('the publish gate treats a listed required total as missing (a warning, never $0.00)', () => {
     const p = { ...period, label: 'September 2026', status: 'final', published: false, bva_import_status: 'final', finalized_at: 't', reporting_cutoff_date: '2026-08-31', months_elapsed: 8, ytd_income: 1, ytd_expenses: 1, annual_budgeted_income: 1, annual_budgeted_expenses: 1, distributions_ytd: 0, checklist: Object.fromEntries(PUBLISH_CHECKLIST.map(([k]) => [k, true])) };
-    const codes = evaluatePublish(p, []).blockers.map((b) => b.code);
-    expect(codes).toContain('required_value_missing:total_cash');
+    expect(evaluatePublish(p, []).blockers.map((b) => b.code)).not.toContain('required_value_missing:total_cash');
+    expect(dataWarnings(p, []).map((w) => w.code)).toContain('required_value_missing:total_cash');
   });
 });
 
@@ -224,10 +223,11 @@ describe('publish gate additions', () => {
     expect(codes(evaluateFinalize(base, lines))).not.toContain('cutoff_period_mismatch');
   });
 
-  it('a watch-list row with only one of YTD / budget blocks; one with neither does not', () => {
+  it('a watch-list row with only one of YTD / budget is highlighted; one with neither is not', () => {
     const half = { id: 'd1', bva_detail: true, budget_group: 'variable', group_confirmed: true, ytd_actual: 5, category: 'Half' };
     const none = { id: 'd2', bva_detail: true, budget_group: 'variable', group_confirmed: true, category: 'None' };
-    const c = codes(evaluateFinalize(base, [...lines, half, none]));
+    expect(evaluateFinalize(base, [...lines, half, none]).ok).toBe(true);
+    const c = dataWarnings(base, [...lines, half, none]).map((w) => w.code);
     expect(c).toContain('required_line_value_missing:d1:annual_budget');
     expect(c.some((x) => x.includes(':d2:'))).toBe(false);
   });

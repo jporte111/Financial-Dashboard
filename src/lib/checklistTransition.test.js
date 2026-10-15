@@ -56,15 +56,15 @@ describe('confirm / unconfirm', () => {
     expect(db.tables.ReportingPeriod.get('aug').checklist.cash_confirmed).toBe(false);
   });
 
-  it('refused, writing nothing: a published period, an unknown item, an item with an open linked blocker', async () => {
-    const db = fakeService(seed([period('jul', 7, 'published'), period('aug', 8, 'final', { distributions_ytd: 0 })]));
+  it('refused, writing nothing: a published period, an unknown item, an item with an open linked structural blocker', async () => {
+    const db = fakeService(seed([period('jul', 7, 'published'), period('aug', 8, 'final', { bva_validation_warnings: [{ code: 'section_missing:distributions', blocksFinalize: true, overridable: false, message: 'No distributions block.' }] })]));
     const before = db.log.length;
     expect((await call(db, 'confirm_checklist', 'jul', { item: 'cash_confirmed' })).status).toBe(409);
     expect((await call(db, 'confirm_checklist', 'aug', { item: 'nonsense' })).status).toBe(400);
     const blocked = await call(db, 'confirm_checklist', 'aug', { item: 'distributions_confirmed' });
     expect(blocked.status).toBe(409);
     expect(blocked.body.blockers[0]).toMatchObject({ code: 'checklist_item_blocked', overridable: false });
-    expect(blocked.body.blockers[0].message).toMatch(/Distributions YTD went down/);
+    expect(blocked.body.blockers[0].message).toMatch(/A required workbook section is missing/);
     expect(db.log.length).toBe(before);
     // ...an unrelated item is not blocked by it
     expect((await call(db, 'confirm_checklist', 'aug', { item: 'cash_confirmed' })).status).toBe(200);

@@ -53,18 +53,13 @@ describe('finalize', () => {
     expect(writes(db)).toHaveLength(1); // still exactly one ReportingPeriod write
   });
 
-  it('a year-to-date decrease is refused until accepted with a written reason, which is recorded', async () => {
+  it('a year-to-date decrease is a warning: finalize goes through with no written reason', async () => {
     const db = fakeService(seed([period('jul', 7, 'published'), period('aug', 8, 'draft', { ytd_income: 100, month_income: -5900 })]));
-    const refused = await call(db, 'finalize', 'aug');
-    expect(refused.status).toBe(409);
-    expect(codes(refused)).toContain('cross_period:ytd_income_decreased');
-    expect(refused.body.blockers.find((b) => b.code === 'cross_period:ytd_income_decreased').overridable).toBe(true);
-    expect(writes(db)).toHaveLength(0);
-
-    const ok = await call(db, 'finalize', 'aug', { overrides: { 'cross_period:ytd_income_decreased': { reason: 'Refund booked in July.' } } });
+    const chk = await call(db, 'check', 'aug');
+    expect(chk.body.review.warnings.map((w) => w.code)).toContain('ytd_income_decreased');
+    const ok = await call(db, 'finalize', 'aug');
     expect(ok.status).toBe(200);
-    const stored = db.tables.ReportingPeriod.get('aug');
-    expect(stored.bva_overrides['cross_period:ytd_income_decreased']).toMatchObject({ reason: 'Refund booked in July.', by: 'admin@example.invalid' });
+    expect(db.tables.ReportingPeriod.get('aug').bva_overrides || {}).toEqual({});
   });
 
   it('a hard cross-period block cannot be overridden', async () => {
@@ -102,12 +97,10 @@ describe('publish', () => {
     expect(res.status).toBe(200);
   });
 
-  it('a new finding at publish (previous month changed since finalize) is refused, with how to proceed', async () => {
+  it('a new finding at publish (previous month changed since finalize) is a warning, never a blocker', async () => {
     const db = fakeService(seed([period('jul', 7, 'published', { ytd_income: 99999 }), period('aug', 8, 'final')]));
     const res = await call(db, 'publish', 'aug');
-    expect(res.status).toBe(409);
-    expect(res.body.blockers.find((b) => b.code === 'cross_period:ytd_income_decreased').message).toMatch(/reopen to draft/);
-    expect(writes(db)).toHaveLength(0);
+    expect(codes(res).filter((c) => c.startsWith('cross_period:'))).toEqual([]);
   });
 
   it('publishing a revision of an earlier month: later published months produce warnings, never blockers', async () => {
@@ -129,7 +122,9 @@ describe('check', () => {
     const res = await call(db, 'check', 'aug');
     expect(res.status).toBe(200);
     expect(res.body.cross_period.previous).toEqual({ id: 'jul', label: 'Month 7 2030' });
-    expect(res.body.finalize.blockers.map((b) => b.code)).toContain('cross_period:distributions_ytd_decreased');
+    expect(res.body.cross_period.findings).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'distributions_ytd_decreased', severity: 'warn' })]));
+    expect(res.body.finalize.blockers.map((b) => b.code)).not.toContain('cross_period:distributions_ytd_decreased');
+    expect(res.body.review.warnings.map((w) => w.code)).toContain('distributions_ytd_decreased');
     expect(writes(db)).toHaveLength(0);
   });
 

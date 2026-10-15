@@ -205,14 +205,14 @@ describe('labelled single-sheet layout (headers on the section row)', () => {
 });
 
 describe('figures outside every recognized section are reported, never dropped silently', () => {
-  it('an extra sheet of figures blocks finalization until reviewed (overridable with a reason)', () => {
+  it('an extra sheet of figures is highlighted for review (named rows; never blocking)', () => {
     const p = parseBvaWorkbook(twoSheet({ extraSheet: ['Scratch', [['Something'], ['Row A', 5, 6], ['Row B', 7, 8]]] }));
     const w = p.parseWarnings.find((x) => x.code === 'unrecognized_content:3');
-    expect(w).toMatchObject({ blocksFinalize: true, overridable: true });
+    expect(w).toMatchObject({ blocksFinalize: false });
     expect(w.message).toContain('rows 2, 3');
     const v = validateBva(p, { cutoffDate: '2026-08-31' });
-    expect(v.openReconciliations).toContain('unrecognized_content:3');
-    expect(validateBva(p, { cutoffDate: '2026-08-31', overrides: { 'unrecognized_content:3': { reason: 'scratch sheet' } } }).openReconciliations).not.toContain('unrecognized_content:3');
+    expect(v.warnings.map((x) => x.code)).toContain('unrecognized_content:3');
+    expect(v.openReconciliations).not.toContain('unrecognized_content:3');
   });
 
   it('a watch list the parser cannot recognize surfaces as unrecognized figures', () => {

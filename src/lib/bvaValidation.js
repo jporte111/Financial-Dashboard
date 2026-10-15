@@ -4,31 +4,27 @@
 // derived figure and every parts-vs-total reconciliation is recomputed here
 // from the raw primitives and compared against what the workbook displayed.
 //
-// Policy (from the requirements + explicit corrections):
-//   - When a computed value conflicts with the workbook value, keep BOTH and
-//     raise a warning. Use the CALCULATED value unless an authorized override
-//     with a reason is saved.
+// Policy:
+//   - The dashboard shows what the workbook contains. Missing and unusual
+//     values are WARNINGS: highlighted for review, never a reason to block
+//     finalize or publish, and no written reason is needed to publish them.
+//     Only structural / integrity failures block (base44/shared/hardRules.ts):
+//     the app cannot tell what the workbook says or which period it is.
+//   - When a computed total conflicts with the workbook's displayed total,
+//     keep BOTH and raise a warning; the total calculated from the workbook's
+//     own parts is used.
 //   - Annual income budget: use the independently calculated total; record the
 //     workbook's displayed total as a discrepancy (it omits sub-cent lines).
 //   - Distributions YTD: the sum of each entity's own quarters (q1+q2+q3+q4)
 //     is authoritative. The workbook's displayed grand total is kept only as
-//     an audit-trail source value — it is a manually-typed cell range and has
-//     been wrong before (e.g. a column subtotal formula that silently skips
-//     one entity's row). When the two disagree, this does NOT block
-//     finalization and needs no override: the arithmetic is simply corrected,
-//     and a non-blocking notice records what happened for Admin review so the
-//     source spreadsheet's formula can be fixed.
-//   - A period cannot be marked Final while a required reconciliation fails
-//     unless an explicit override is recorded for it.
+//     an audit-trail source value -- it is a manually-typed cell range and has
+//     been wrong before. A disagreement is a notice for Admin review.
 //   - Missing vs zero: a blank source value stays null all the way through.
 //     A total with a missing part is itself missing (null), never a partial
-//     sum. A missing Actual YTD / Annual Budget / balance / amount blocks
-//     finalization, but it can be DEFERRED: accept the warning with a
-//     written reason to leave it blank for now and correct it later. The
-//     value is never read as $0.00.
-//   - Warnings carry `overridable`: false means no reason can clear it.
+//     sum. It is shown as missing, never as $0.00.
 
 import { n, round2, expectedPacePct, computeYtd, elapsedMonthsFromCutoff } from './bva.js';
+import { isHardValidation, CLIENT_ONLY_HARD } from '../../base44/shared/hardRules.ts';
 
 export const SEVERITY = { ERROR: 'error', WARNING: 'warning' };
 
@@ -121,8 +117,7 @@ const ymLabel = (ym) => `${MONTH_NAMES[ym.month - 1]} ${ym.year}`;
 /**
  * @param {object} parsed  output of parseBvaWorkbook()
  * @param {object} opts     { elapsedMonths?, cutoffDate?, overrides?, period?, previous? }
- *   overrides: { [warningCode]: { reason, by, at } } — clears blocksFinalize
- *              for overridable warnings only.
+ *   overrides: accepted for compatibility; no warning needs one any more.
  *   period:    { month, year } — the reporting period being imported into.
  *   previousUnavailable: true when the previous period could not be loaded —
  *              its checks did not run, which blocks (never skipped silently).
@@ -132,12 +127,12 @@ const ymLabel = (ym) => `${MONTH_NAMES[ym.month - 1]} ${ym.year}`;
  */
 export function validateBva(parsed, opts = {}) {
   const warnings = [];
-  const overrides = opts.overrides || {};
   // Confirmed group mappings (saved BudgetLine rows or import corrections),
   // keyed by normalized category code. The parsed workbook itself carries no
   // group for watch-list rows.
   const groupMap = opts.groupMap || {};
-  const cleared = (code) => !!overrides[code];
+  // Only structural / integrity findings block (hardRules.ts); no reason clears them.
+  const isHard = (code) => isHardValidation(code) || CLIENT_ONLY_HARD.has(code);
   const cutoffDate = opts.cutoffDate || parsed?.meta?.cutoffDate || null;
   const elapsedMonths = opts.elapsedMonths != null ? opts.elapsedMonths : cutoffDate ? elapsedMonthsFromCutoff(cutoffDate) : null;
   const pacePct = expectedPacePct(elapsedMonths);
@@ -145,27 +140,28 @@ export function validateBva(parsed, opts = {}) {
 
   // Carry through any structural problems the parser reported.
   for (const pw of parsed?.parseWarnings || []) {
-    const overridable = pw.overridable !== false;
+    const hard = isHard(pw.code || 'parse_warning');
     warn(warnings, {
       code: pw.code || 'parse_warning',
       section: pw.section || 'workbook',
       message: pw.message,
       requiresAdminReview: true,
-      overridable,
-      blocksFinalize: !!pw.blocksFinalize && !(overridable && cleared(pw.code || 'parse_warning')),
+      overridable: !hard,
+      blocksFinalize: hard,
     });
   }
   const has = (code) => warnings.some((w) => w.code === code);
-  const block = (w) => warn(warnings, { requiresAdminReview: true, ...w, blocksFinalize: w.overridable === false ? true : !cleared(w.code) });
+  // A finding for review; it blocks only when it is structural (isHard).
+  const block = (w) => warn(warnings, { requiresAdminReview: true, ...w, blocksFinalize: isHard(w.code), overridable: !isHard(w.code) });
 
   if (opts.previousUnavailable) {
-    block({ code: 'previous_period_unavailable', section: 'meta', message: 'The previous period could not be loaded, so the checks against it did not run. Retry before finalizing.', overridable: false });
+    block({ code: 'previous_period_unavailable', section: 'meta', message: 'The previous period could not be loaded, so the comparison with it did not run. Retry.', overridable: false });
   }
 
   // ---- Cutoff date and reporting month -----------------------------------
   if (!cutoffDate) {
     if (!has('cutoff_date_conflict')) {
-      block({ code: 'cutoff_date_required', section: 'meta', message: 'No reporting cutoff date is set. Confirm it before finalizing; pace is not calculated without it.', overridable: false });
+      block({ code: 'cutoff_date_required', section: 'meta', message: 'No reporting cutoff date is set, so the report cannot be placed in a month. Confirm the cutoff date.', overridable: false });
     }
   } else if (!isMonthEnd(cutoffDate)) {
     block({ code: 'cutoff_not_month_end', section: 'meta', message: `The cutoff date ${cutoffDate} is not the last day of a month; elapsed-month pace assumes it is.` });
@@ -224,7 +220,7 @@ export function validateBva(parsed, opts = {}) {
     const expectDetail = !!(prev && Array.isArray(prev.detailCodes) && prev.detailCodes.length);
     if (status('detail') === 'absent') {
       if (expectDetail) {
-        block({ code: 'detail_section_expected', section: 'detail', message: `No DETAIL (watch-list) section was found, but ${prev.label || 'the previous period'} had ${prev.detailCodes.length} watch-list categories. Correct the workbook, or record why the watch list is intentionally absent.` });
+        block({ code: 'detail_section_expected', section: 'detail', message: `No DETAIL (watch-list) section was found, but ${prev.label || 'the previous period'} had ${prev.detailCodes.length} watch-list categories. Check whether it was left out on purpose.` });
       } else {
         warn(warnings, { code: 'detail_section_absent', section: 'detail', message: 'This workbook has no DETAIL (watch-list) section, and none is expected from the previous period.', requiresAdminReview: true });
       }
@@ -234,7 +230,7 @@ export function validateBva(parsed, opts = {}) {
     const expectTransfers = !!(prev && prev.transferCount > 0);
     if (status('transfers') === 'absent') {
       if (expectTransfers) {
-        block({ code: 'transfers_section_expected', section: 'transfers', message: `No recurring transfers were found, but ${prev.label || 'the previous period'} had ${prev.transferCount}. Correct the workbook, or record why there are none this month.` });
+        block({ code: 'transfers_section_expected', section: 'transfers', message: `No recurring transfers were found, but ${prev.label || 'the previous period'} had ${prev.transferCount}. Check whether there are none this month.` });
       } else {
         warn(warnings, { code: 'transfers_section_absent', section: 'transfers', message: 'This workbook has no recurring transfers section, and none is expected from the previous period.', requiresAdminReview: true });
       }
@@ -258,7 +254,7 @@ export function validateBva(parsed, opts = {}) {
       block({
         code: `source_value_missing:${key}`,
         section: key,
-        message: `${label}: ${bad.map((x) => x.name || x.code || 'unnamed row').join(', ')} ${bad.length > 1 ? 'have' : 'has'} a blank ${fields.join(' / ')} in the workbook. A blank is not $0.00 and stays blank; correct the workbook, or accept with a reason to leave it blank for now and correct it later.`,
+        message: `${label}: ${bad.map((x) => x.name || x.code || 'unnamed row').join(', ')} ${bad.length > 1 ? 'have' : 'has'} a blank ${fields.join(' / ')} in the workbook. It is shown as missing (never $0.00); ask the bookkeeper to fill it in if it should have a value.`,
       });
     }
   };
@@ -290,7 +286,7 @@ export function validateBva(parsed, opts = {}) {
       sourceValue: cashReported,
       calculatedValue: cashSum,
       requiresAdminReview: true,
-      blocksFinalize: !overrides.cash_total_mismatch,
+      blocksFinalize: false,
     });
   }
 
@@ -316,7 +312,7 @@ export function validateBva(parsed, opts = {}) {
       sourceValue: incomeActualReported,
       calculatedValue: incomeActualSum,
       requiresAdminReview: true,
-      blocksFinalize: !overrides.income_actual_mismatch,
+      blocksFinalize: false,
     });
   }
   if (incomeBudgetReported != null && incomeBudgetSum != null && !eq(incomeBudgetSum, incomeBudgetReported)) {
@@ -371,7 +367,7 @@ export function validateBva(parsed, opts = {}) {
       sourceValue: expActualReported,
       calculatedValue: expActualSum,
       requiresAdminReview: true,
-      blocksFinalize: !overrides.expense_actual_mismatch,
+      blocksFinalize: false,
     });
   }
   if (expBudgetReported != null && expBudgetSum != null && !eq(expBudgetSum, expBudgetReported)) {
@@ -383,7 +379,7 @@ export function validateBva(parsed, opts = {}) {
       sourceValue: expBudgetReported,
       calculatedValue: expBudgetSum,
       requiresAdminReview: true,
-      blocksFinalize: !overrides.expense_budget_mismatch,
+      blocksFinalize: false,
     });
   }
 

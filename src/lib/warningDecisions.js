@@ -19,8 +19,8 @@ export const MIN_REASON = 10;
 
 const norm = (s) => String(s || '').trim().toLowerCase();
 
-// Which inline decisions a warning offers. Only warnings that can actually be
-// decided here get controls; everything else keeps its "Open Admin" guidance.
+// Which optional inline actions a warning offers (none is ever required).
+// Everything else keeps its "Open Admin" guidance.
 export function decisionOptions(warning) {
   if (!warning || warning.resolution !== 'unresolved') return [];
   if (warning.code === 'distribution_quarter_blank') {
@@ -29,9 +29,8 @@ export function decisionOptions(warning) {
       { mode: 'enter_amounts', label: 'Enter the amounts' },
     ];
   }
-  if (warning.blocksFinalize && warning.overridable !== false) {
-    return [{ mode: 'accept', label: 'Accept with a reason' }];
-  }
+  // Warnings never block and need no written reason, so there is nothing to
+  // "accept"; structural problems are fixed in the workbook.
   return [];
 }
 
@@ -48,13 +47,9 @@ export function decisionBlockedReason(period) {
   return null;
 }
 
-// The audit records for a decision: one per confirmed or entered quarter, or
-// one override record. Paths point into the stored parse, as the BVA Import
+// The audit records for a decision: one per confirmed or entered quarter. Paths point into the stored parse, as the BVA Import
 // screen's corrections do, so a later re-import keeps the confirmed values.
 function decisionCorrections({ period, warning, mode, why, by, at, blanks, values }) {
-  if (mode === 'accept') {
-    return [makeCorrection({ kind: 'override', target: warning.code, value: null, reason: why, by, at })];
-  }
   const entities = period?.bva_parsed_source?.distributions?.entities || [];
   return blanks.map(({ entity, quarter }) => {
     const idx = entities.findIndex((e) => norm(e.name) === norm(entity));
@@ -93,7 +88,7 @@ async function writeQuarters({ periodId, blanks, values }) {
  * @param {object} args
  *   period   the ReportingPeriod the decision applies to
  *   warning  the classified unresolved warning
- *   mode     'confirm_zero' | 'enter_amounts' | 'accept'
+ *   mode     'confirm_zero' | 'enter_amounts'
  *   reason   written reason (required, >= MIN_REASON characters)
  *   amounts  for 'enter_amounts': { "Alpha:q1": 1200, ... }
  */
@@ -131,8 +126,7 @@ export async function applyWarningDecision({ period, warning, mode, reason, amou
   if (blanks.length) await writeQuarters({ periodId: period.id, blanks, values });
 
   // 3. Finalize the draft through the server gate (never reopen, never publish).
-  const overrides = mode === 'accept' ? { [`open_reconciliation:${warning.code}`]: { reason: why } } : {};
-  const fin = await periodTransition('finalize', period.id, { overrides });
+  const fin = await periodTransition('finalize', period.id, {});
   if (!fin.ok) {
     throw new Error(
       `${(fin.blockers || []).map((b) => b.message).join(' ') || fin.error || 'Finalizing was refused.'} The decision and its audit record were saved; the period stays a draft.`

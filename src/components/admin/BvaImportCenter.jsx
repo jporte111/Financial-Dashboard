@@ -228,9 +228,7 @@ export default function BvaImportCenter() {
   }, [adjusted, confirm.cutoffDate, confirm.month, confirm.year, previous, previousError, overrideMap, mergedGroupMap]);
 
   // The server's review of the applied draft: every finding (this workbook's and
-  // the checks against the previous month), grouped by root cause. Fetched
-  // without override reasons, so each overridable finding stays listed and the
-  // reasons saved here are shown against it.
+  // the checks against the previous month), grouped by root cause.
   const appliedId = applied && !applied.finalized ? applied.periodId : null;
   useEffect(() => {
     if (!appliedId) { setServerReview(null); return undefined; }
@@ -245,21 +243,10 @@ export default function BvaImportCenter() {
     if (!validation) return [];
     return groupByCause(validation.warnings.map((w) => {
       const e = explain(w.code);
-      const kind = w.blocksFinalize && w.overridable === false ? 'blocker' : w.blocksFinalize || overrideMap[w.code] ? 'reason' : 'warning';
+      const kind = w.blocksFinalize ? 'blocker' : 'warning';
       return { code: w.code, title: e.title, problem: w.message || e.title, action: e.action, where: e.where, kind };
     }), { previousLabel: previous?.label || null });
-  }, [serverReview, validation, overrideMap, previous]);
-  // Reasons already saved, by the code the server or the workbook check uses.
-  const reasons = useMemo(() => {
-    const out = {};
-    for (const c of corrections) if (c.kind === 'override' && c.reason) { out[c.target] = c.reason; out[`open_reconciliation:${c.target}`] = c.reason; }
-    return out;
-  }, [corrections]);
-  // One written reason for every overridable member of a cause: saved as one
-  // override per member, exactly as if each had been given separately.
-  const acceptCause = (codes, reason) => {
-    for (const code of codes) setSaveCorrection({ kind: 'override', target: code, originalValue: null, value: null, reason, by });
-  };
+  }, [serverReview, validation, previous]);
 
   const onFile = async (f) => {
     setFile(f);
@@ -397,8 +384,8 @@ export default function BvaImportCenter() {
 
   // Finalize runs on the server: every rule is re-checked there and the period
   // becomes Final (validated, locked) in one write. It is NOT published --
-  // publishing is a separate step in Review & Publish. Override reasons come
-  // from the persisted corrections, so a failed finalize never loses them.
+  // publishing is a separate step in Review & Publish. Only structural
+  // problems block; warnings never do.
   const finalize = async () => {
     if (!applied || !validation) return;
     setBusy(true);
@@ -411,7 +398,7 @@ export default function BvaImportCenter() {
       } else {
         setBlockers(res.blockers);
         setReviewAttempt((n) => n + 1);
-        addLog(`✗ Not finalized: ${res.blockers.length ? `${res.blockers.length} item(s) must be resolved (listed below)` : res.error}. Corrections and override reasons stay saved on the draft.`);
+        addLog(`✗ Not finalized: ${res.blockers.length ? `${res.blockers.length} item(s) must be resolved (listed below)` : res.error}. Corrections stay saved on the draft.`);
       }
     } finally {
       setBusy(false);
@@ -442,7 +429,6 @@ export default function BvaImportCenter() {
 
   const R = validation?.reconciled;
   const openWarnings = (validation?.warnings || []).filter((w) => w.blocksFinalize);
-  const mustFix = openWarnings.filter((w) => w.overridable === false);
   const canFinalize = applied && !applied.finalized && openWarnings.length === 0;
   const SECTION_LABEL = { cash: 'Cash', distributions: 'Distributions', income: 'Income', expenseSummary: 'Expense groups', detail: 'Watch list (DETAIL)', transfers: 'Recurring transfers' };
   const sectionCount = { cash: R?.cash.accounts.length, distributions: R?.distributions.entities.length, income: R?.income.categories.length, expenseSummary: R?.expenses.groups.length, detail: R?.detail.categories.length, transfers: R?.transfers.items.length };
@@ -472,7 +458,7 @@ export default function BvaImportCenter() {
 
         {drafts.length > 0 && (
           <div className="mt-4">
-            <CaptionLabel className="text-xs text-stone-500">Or open an existing import draft — corrections and override reasons are restored from it</CaptionLabel>
+            <CaptionLabel className="text-xs text-stone-500">Or open an existing import draft — corrections are restored from it</CaptionLabel>
             <select
               className="mt-1 w-full rounded-md border border-stone-200 bg-white px-3 py-2 text-sm"
               value=""
@@ -600,16 +586,16 @@ export default function BvaImportCenter() {
 
           {causes.length > 0 && (
             <div className="rounded-2xl border border-stone-200 bg-white p-6" data-testid="import-causes">
-              <p className="text-xs uppercase tracking-[0.14em] text-stone-500">What needs attention, by cause</p>
+              <p className="text-xs uppercase tracking-[0.14em] text-stone-500">Review before publishing, by cause</p>
               <p className="mt-1 text-xs text-stone-500">
                 {serverReview?.causes ? 'Includes the checks against the previous month, for the draft as last applied.' : 'This workbook\'s own checks; the checks against the previous month run once the draft is applied.'}
-                {' '}Every finding keeps its own rule: a reason given here is saved for each finding it covers, and findings that must be fixed cannot be accepted.
+                {' '}The dashboard shows what the workbook contains; blanks are shown as missing (never $0.00). Warnings never block and need no written reason. Only a problem that stops the workbook being shown faithfully must be fixed.
               </p>
-              {[['blockers', 'Must be fixed', 'text-rose-700'], ['needsReview', 'Needs a written reason', 'text-amber-700'], ['warnings', 'Worth a look (never blocks)', 'text-stone-600']].map(([bucket, label, tone]) => (
+              {[['blockers', 'Must be fixed — the workbook cannot be shown faithfully', 'text-rose-700'], ['warnings', 'Highlighted for review (never blocks)', 'text-amber-700']].map(([bucket, label, tone]) => (
                 causes.some((c) => c.bucket === bucket) ? (
                   <div key={bucket} className="mt-4 text-sm" data-testid={`import-causes-${bucket}`}>
                     <p className={`text-xs font-medium uppercase tracking-[0.12em] ${tone}`}>{label}</p>
-                    <CauseList causes={causes} bucket={bucket} reasons={reasons} onAccept={acceptCause} busy={busy} />
+                    <CauseList causes={causes} bucket={bucket} />
                   </div>
                 ) : null
               ))}
@@ -622,12 +608,11 @@ export default function BvaImportCenter() {
               <p className="mt-3 flex items-center gap-2 text-sm text-emerald-700"><CheckCircle2 className="h-4 w-4" /> No discrepancies — every reconciliation passed.</p>
             ) : (
               <details className="mt-3" open={validation.warnings.length <= 5} data-testid="finding-details">
-              <summary className="cursor-pointer text-sm text-stone-600">Each finding on its own ({validation.warnings.length}) — individual reasons and source-value corrections</summary>
+              <summary className="cursor-pointer text-sm text-stone-600">Each finding on its own ({validation.warnings.length}) — details and optional source-value corrections</summary>
               <div className="mt-3 space-y-3">
                 {validation.warnings.map((w) => {
                   const srcPath = WARNING_SOURCE_PATHS[w.code] || null;
                   const srcCorrection = srcPath ? corrections.find((c) => c.kind === 'source' && c.path === srcPath) : null;
-                  const ovrCorrection = corrections.find((c) => c.kind === 'override' && c.target === w.code);
                   return (
                     <div key={w.code} className={`rounded-xl border p-3 text-sm ${w.blocksFinalize ? 'border-rose-200 bg-rose-50' : 'border-amber-200 bg-amber-50'}`}>
                       <div className="flex items-start gap-2">
@@ -641,8 +626,8 @@ export default function BvaImportCenter() {
                               {w.difference != null && w.code !== 'pace_proxy_divergence' ? ` · Δ ${fmtCurrency(w.difference)}` : ''}
                             </p>
                           )}
-                          {w.blocksFinalize && w.overridable === false && (
-                            <p className="mt-2 text-xs font-medium text-rose-700">Must be corrected before finalizing — this cannot be overridden.</p>
+                          {w.blocksFinalize && (
+                            <p className="mt-2 text-xs font-medium text-rose-700">Must be fixed before finalizing: the workbook cannot be shown faithfully until it is.</p>
                           )}
                           {srcPath && (
                             <SourceValueControl
@@ -652,24 +637,6 @@ export default function BvaImportCenter() {
                               onRemove={removeCorrection}
                               by={by}
                             />
-                          )}
-                          {w.blocksFinalize && w.overridable !== false && !srcCorrection && (
-                            <div className="mt-2">
-                              <Input
-                                placeholder="Override reason (required to finalize; saved to the draft)"
-                                className="h-8 text-xs"
-                                key={`ovr-${w.code}-${ovrCorrection ? ovrCorrection.at : 'none'}`}
-                                defaultValue={ovrCorrection ? ovrCorrection.reason : ''}
-                                onBlur={(e) => {
-                                  const v = e.target.value.trim();
-                                  if (v) {
-                                    setSaveCorrection({ kind: 'override', target: w.code, originalValue: null, value: null, reason: v, by });
-                                  } else if (ovrCorrection) {
-                                    removeCorrection(ovrCorrection);
-                                  }
-                                }}
-                              />
-                            </div>
                           )}
                         </div>
                       </div>
@@ -711,9 +678,7 @@ export default function BvaImportCenter() {
           )}
           {applied && !applied.finalized && openWarnings.length > 0 && (
             <span className="text-xs text-rose-700">
-              {mustFix.length > 0
-                ? `${mustFix.length} issue(s) must be resolved before finalizing.`
-                : `${openWarnings.length} reconciliation(s) still open before finalizing.`}
+              {`${openWarnings.length} problem(s) must be fixed before finalizing.`}
             </span>
           )}
           {applied?.finalized && <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Final</span>}
@@ -731,32 +696,11 @@ export default function BvaImportCenter() {
 
       {blockers.length > 0 && (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-5">
-          <p className="mb-2 text-xs uppercase tracking-[0.12em] text-rose-700">Finalization blocked by the server</p>
+          <p className="mb-2 text-xs uppercase tracking-[0.12em] text-rose-700">Finalization blocked: the workbook cannot be shown faithfully</p>
           <div className="space-y-3 text-sm">
-            {blockers.map((b) => {
-              const ovrCorrection = corrections.find((c) => c.kind === 'override' && c.target === b.code);
-              return (
-                <div key={b.code}>
-                  <p className="text-stone-700">{b.message}</p>
-                  {b.overridable && (
-                    <Input
-                      placeholder="Override reason (required; saved to the draft)"
-                      className="mt-1 h-8 text-xs"
-                      key={`blk-${b.code}-${ovrCorrection ? ovrCorrection.at : 'none'}`}
-                      defaultValue={ovrCorrection ? ovrCorrection.reason : ''}
-                      onBlur={(e) => {
-                        const v = e.target.value.trim();
-                        if (v) {
-                          setSaveCorrection({ kind: 'override', target: b.code, originalValue: null, value: null, reason: v, by });
-                        } else if (ovrCorrection) {
-                          removeCorrection(ovrCorrection);
-                        }
-                      }}
-                    />
-                  )}
-                </div>
-              );
-            })}
+            {blockers.map((b) => (
+              <p key={b.code} className="text-stone-700">{b.message}</p>
+            ))}
           </div>
         </div>
       )}

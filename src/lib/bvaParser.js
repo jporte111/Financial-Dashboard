@@ -810,8 +810,8 @@ export function parseBvaWorkbook(data) {
       pushWarn(
         `unrecognized_content:${sh.index + 1}`,
         'workbook',
-        `${sheetLabel(sh.index)} has figures outside every recognized section (row${sh.unrecognizedRows.length > 1 ? 's' : ''} ${sh.unrecognizedRows.join(', ')}); they were not imported. Confirm they are not financial data the dashboard needs.`,
-        { blocksFinalize: true, overridable: true }
+        `${sheetLabel(sh.index)} has figures outside every recognized section (row${sh.unrecognizedRows.length > 1 ? 's' : ''} ${sh.unrecognizedRows.join(', ')}); they were not imported. Check they are not figures the dashboard should show.`,
+        { blocksFinalize: false }
       );
     }
   }

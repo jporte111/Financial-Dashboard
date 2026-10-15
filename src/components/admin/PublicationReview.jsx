@@ -73,21 +73,14 @@ function Entry({ e }) {
 }
 
 const GROUPS = [
-  ['blockers', 'Blockers — must be fixed', 'border-rose-200 bg-rose-50', 'Cannot be overridden. Fix the data or the workbook.'],
-  ['needsReview', 'Needs review', 'border-amber-200 bg-amber-50', 'A written reason, or a checklist item to confirm.'],
-  ['warnings', 'Warnings', 'border-stone-200 bg-stone-50', 'Worth a look; these never block.'],
+  ['blockers', 'Blockers — must be fixed', 'border-rose-200 bg-rose-50', 'The workbook cannot be shown faithfully until these are fixed.'],
+  ['needsReview', 'Needs review', 'border-amber-200 bg-amber-50', 'Checklist items to confirm.'],
+  ['warnings', 'Warnings', 'border-stone-200 bg-stone-50', 'Missing and unusual values, shown as the workbook has them. These never block and need no written reason.'],
 ];
 
-// One root cause, read once. Members keep their own rules: a member that cannot
-// be overridden is listed as such and is never accepted through the group.
-// `reasons` maps a member code to the written reason already saved for it;
-// `onAccept(codes, reason)` (import screen only) saves one reason for every
-// overridable member.
-export function CauseCard({ cause, reasons = {}, onAccept = null, busy = false }) {
-  const [text, setText] = React.useState('');
-  const hard = cause.members.filter((m) => m.kind === 'blocker');
-  const open = cause.acceptable.filter((c) => !reasons[c]);
-  const given = cause.acceptable.filter((c) => reasons[c]);
+// One root cause, read once: what it is, what to do, and each finding in it.
+// A structural member (it blocks) is marked; everything else is a warning.
+export function CauseCard({ cause }) {
   const many = cause.members.length > 1;
   return (
     <li className="py-3" data-testid={`cause-${cause.key}`} data-bucket={cause.bucket}>
@@ -103,51 +96,22 @@ export function CauseCard({ cause, reasons = {}, onAccept = null, busy = false }
           {cause.members.map((m, i) => (
             <li key={`${m.code}-${i}`}>
               {m.problem || m.title}
-              {m.kind === 'blocker' ? <span className="text-rose-700"> — must be fixed (cannot be accepted with a reason)</span> : null}
-              {m.kind === 'reason' && reasons[m.code] ? <span className="text-emerald-700"> — reason given</span> : null}
+              {m.kind === 'blocker' ? <span className="text-rose-700"> — must be fixed: the workbook cannot be shown faithfully until it is</span> : null}
             </li>
           ))}
         </ul>
-      )}
-      {hard.length > 0 && cause.acceptable.length > 0 && (
-        <p className="mt-1 text-xs font-medium text-rose-700">{hard.length} of these must be fixed; a reason cannot accept them.</p>
-      )}
-      {given.length > 0 && (
-        <p className="mt-1 text-xs text-emerald-700" data-testid={`cause-given-${cause.key}`}>
-          Reason given for {given.length} of {cause.acceptable.length}: “{reasons[given[0]]}” (recorded when the period is finalized).
-        </p>
-      )}
-      {onAccept && open.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <input
-            className="h-8 min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-2 text-xs"
-            placeholder={open.length > 1 ? `One written reason for all ${open.length}` : 'Written reason'}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            data-testid={`cause-reason-${cause.key}`}
-          />
-          <button
-            type="button"
-            className={`${btn} border-stone-300 bg-white text-stone-700 hover:bg-stone-100`}
-            disabled={busy || !text.trim()}
-            onClick={() => { onAccept(open, text.trim()); setText(''); }}
-            data-testid={`cause-accept-${cause.key}`}
-          >
-            {open.length > 1 ? `Accept all ${open.length} with this reason` : 'Accept with this reason'}
-          </button>
-        </div>
       )}
     </li>
   );
 }
 
 // The causes in one bucket, plus (needs review) the checklist entries.
-export function CauseList({ causes, bucket, extra = [], reasons = {}, onAccept = null, busy = false }) {
+export function CauseList({ causes, bucket, extra = [] }) {
   const list = (causes || []).filter((c) => c.bucket === bucket);
   if (!list.length && !extra.length) return null;
   return (
     <ul className="mt-1 divide-y divide-stone-200/70">
-      {list.map((c) => <CauseCard key={c.key} cause={c} reasons={reasons} onAccept={onAccept} busy={busy} />)}
+      {list.map((c) => <CauseCard key={c.key} cause={c} />)}
       {extra.map((e, i) => <Entry key={`${e.code}-${i}`} e={e} />)}
     </ul>
   );

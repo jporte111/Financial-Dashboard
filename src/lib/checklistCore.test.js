@@ -115,9 +115,9 @@ describe('warnings and blockers', () => {
     expect(Object.keys(c.parts).sort()).toEqual(['cash_accounts', 'total_cash']);
     expect(c.warnings).toEqual(['cash_accounts_changed']);
   });
-  it('warningCodes: non-blocking validation warnings and cross-period warnings, by code', () => {
-    const p = period({ bva_validation_warnings: [{ code: 'pace_proxy_divergence', blocksFinalize: false }, { code: 'cash_total_mismatch', blocksFinalize: true }, { code: 'x', blocksFinalize: false, overridden: true }] });
-    expect(warningCodes(p, [{ code: 'month_gap', severity: 'warn' }, { code: 'new_year', severity: 'info' }])).toEqual(['month_gap', 'pace_proxy_divergence']);
+  it('warningCodes: every non-structural validation warning and cross-period warnings, by code', () => {
+    const p = period({ bva_validation_warnings: [{ code: 'pace_proxy_divergence', blocksFinalize: false }, { code: 'cash_total_mismatch', blocksFinalize: true }, { code: 'section_missing:cash', blocksFinalize: true }] });
+    expect(warningCodes(p, [{ code: 'month_gap', severity: 'warn' }, { code: 'new_year', severity: 'info' }])).toEqual(['cash_total_mismatch', 'month_gap', 'pace_proxy_divergence']);
   });
   it('the reason an item is stale is spelled out', () => {
     const s = checklistStatus({ confirmations: confirmAll(rec), hashes: partHashes(records({ period: { total_cash: 1 } })), openBlockers: [], warnings: ['cash_accounts_changed'] }).find((x) => x.key === 'cash_confirmed');

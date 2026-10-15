@@ -18,7 +18,7 @@ describe('GroupMappingCard with carried groups', () => {
     const corrections = [{ kind: 'group', target: '9002', value: 'fixed' }];
     render(<GroupMappingCard validation={validation} corrections={corrections} onSave={() => {}} onRemove={() => {}} by="a" carried={carried} />);
     expect(screen.getByTestId('group-status-9001').textContent).toBe('carried from September 2030');
-    expect(screen.getByTestId('group-status-9002').textContent).toMatch(/differs from September 2030 \(Variable\) — needs a written reason/);
+    expect(screen.getByTestId('group-status-9002').textContent).toMatch(/differs from September 2030 \(Variable\) — shown as a warning/);
     expect(screen.getByTestId('group-status-9003').textContent).toBe('unassigned (new or renamed row)');
   });
 });

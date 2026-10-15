@@ -25,8 +25,19 @@ just copy from the sheet:
 - Variance % = Expected Pace % − Percent Used
 
 When an imported value conflicts with the independently calculated value, record and
-display a validation warning showing both, and use the calculated value unless an
-authorized override with a reason is saved.
+display a validation warning showing both, and use the calculated value.
+
+## What blocks (October 2026 owner decision)
+
+The dashboard faithfully shows what the workbook contains: upload → review warnings →
+publish. Missing and unusual values (blanks, decreases, budget changes, group changes,
+month-vs-YTD mismatches, totals that do not add up) are **warnings** in the grouped
+review. They never block finalize or publish and need no written reason. Only
+structural / integrity failures block — the list lives in
+`base44/shared/hardRules.ts` (plus no/invalid cutoff, elapsed months inconsistent with
+the cutoff, an incomplete import, a conflicting or duplicate period/version, and checks
+that could not run). Do not add a new blocker outside that list without the owner's
+approval.
 
 The income budget total is a known case: the workbook's displayed annual income budget
 omits one of the bank interest-income lines. Always use the independently calculated sum of every income
@@ -56,8 +67,9 @@ pipeline:
 - `PeriodTotalsForm` saves a blank input as missing, not `0` (see below).
 - The parser keeps every blank cell `null` (YTD, budget, balances, quarters, amounts).
   A total with a missing part is `null`, not a partial sum. A missing Actual YTD /
-  Annual Budget / balance / transfer amount blocks finalization and cannot be
-  overridden. A watch-list row with no figures at all is not imported (notice only).
+  Annual Budget / balance / transfer amount is shown as missing and highlighted as a
+  warning (it does not block). A watch-list row with no figures at all is not imported
+  (notice only).
 
 **Never write `null`.** Base44 rejects `null` in number / string fields (HTTP 422) and
 has no nullable schema type. So a missing value is written by *omission*: import
@@ -81,10 +93,11 @@ The parser scans **every sheet** and finds each block by its label (the watch li
 transfers have been moved to a second sheet before). Header-less fallbacks run only in
 the simplified layout (no EXPENSE header). Every numeric cell must be read by a section
 or recognized as informational (over/under, off-balance accounts, notes); anything else
-is reported as `unrecognized_content` and blocks until reviewed. Duplicate sections that
-disagree are never combined or chosen between. A section that is absent is a notice only
-when the previous validated period did not have it either. The workbook title names the
-report month; the period must be the cutoff month or the month after it.
+is reported as `unrecognized_content` (a warning). Duplicate sections that disagree are
+never combined or chosen between (this blocks). A required section that is absent or
+unreadable blocks; an optional one (watch list, transfers) is a warning. The title is
+only text (a mismatch is a warning); the period must be the cutoff month or the month
+after it (this blocks).
 
 ## Distributions YTD — entity-quarter sum is authoritative
 

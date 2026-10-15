@@ -103,7 +103,7 @@ export function GroupMappingCard({ validation, corrections = [], onSave, onRemov
             </select>
             <span className="text-xs text-stone-400" data-testid={`group-status-${key}`}>
               {carriedMap[key] && value !== carriedMap[key]
-                ? `differs from ${from} (${GROUP_LABEL[carriedMap[key]] || carriedMap[key]}) — needs a written reason`
+                ? `differs from ${from} (${GROUP_LABEL[carriedMap[key]] || carriedMap[key]}) — shown as a warning`
                 : carriedMap[key] && !correction
                   ? `carried from ${from}`
                   : correction ? 'adjusted here' : cat.groupConfirmed ? 'confirmed on the draft' : cat.code && !carriedMap[key] ? 'unassigned (new or renamed row)' : 'unassigned'}
