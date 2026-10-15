@@ -149,12 +149,14 @@ check('6  a figure becoming missing resets income (and the budget report)', same
 await E.ReportingPeriod.update(aug, { source_missing_fields: [] });
 await checkUntil(aug, (b) => notConfirmed(b).length === 0);
 
-// 7. a linked open blocker: the item cannot be confirmed
-await E.ReportingPeriod.update(aug, { distributions_ytd: 300 });
+// 7. a linked open STRUCTURAL blocker (the distributions block could not be
+// found): the item cannot be confirmed. (Financial anomalies only warn.)
+const savedWarnings = (await E.ReportingPeriod.get(aug)).bva_validation_warnings || [];
+await E.ReportingPeriod.update(aug, { bva_validation_warnings: [...savedWarnings, { code: 'section_missing:distributions', section: 'distributions', message: 'Fictional: the workbook has no distributions block.', blocksFinalize: true, overridable: false }] });
 await checkUntil(aug, (b) => states(b).distributions_confirmed === 'blocked');
 const blocked = await confirmRetry(aug, 'distributions_confirmed');
-check('7  an item with an open linked blocker cannot be confirmed', blocked.status === 409 && codes(blocked)[0] === 'checklist_item_blocked' && /Distributions YTD went down/.test(blocked.body.blockers[0].message), `${blocked.status} ${(blocked.body?.blockers?.[0]?.message || '').slice(0, 90)}`);
-await E.ReportingPeriod.update(aug, { distributions_ytd: 307 });
+check('7  an item with an open linked structural blocker cannot be confirmed', blocked.status === 409 && codes(blocked)[0] === 'checklist_item_blocked' && /A required workbook section is missing/.test(blocked.body.blockers[0].message), `${blocked.status} ${(blocked.body?.blockers?.[0]?.message || '').slice(0, 90)}`);
+await E.ReportingPeriod.update(aug, { bva_validation_warnings: savedWarnings });
 await checkUntil(aug, (b) => notConfirmed(b).length === 0);
 
 // 8. publish once everything is current

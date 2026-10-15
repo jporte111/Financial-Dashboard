@@ -1,5 +1,5 @@
-// October cleanup hosted staging test: the grouped review (item 6) and missing
-// figures (item 1) on the hosted backend.
+// Hosted staging test: the grouped review and the faithful-display model
+// (warnings never block; only structural problems do) on the hosted backend.
 // STAGING APP ONLY, fictional data. Run from the staging checkout with its
 // owner-only .staging.env:  node scripts/verify-staging-crossperiod.mjs
 // Each scenario uses its own unused fictional year. A legacy month (no
@@ -130,8 +130,8 @@ const reason = (list) => Object.fromEntries(list.map((c) => [c, { reason: 'Ficti
 
 // ---- an October-like month after a clean previous month --------------------
 // Fictional: three month-vs-year-to-date mismatches (one upstream cause), a
-// revised budget, Total Cash left blank (deferrable at finalize, never
-// publishable) and a closed distribution quarter left blank (a hard blocker).
+// revised budget, Total Cash left blank and a closed distribution quarter left
+// blank. All are warnings: upload -> review warnings -> publish, no reasons.
 const year = freshYear();
 const prevId = await makeMonth(year, 9);
 const k = 9;
@@ -142,7 +142,7 @@ const c = await transition('create', null, { data: periodData(year, 10, {
 const pid = c.body?.period_id;
 if (!pid) throw new Error(`create 10/${year}: ${c.status} ${JSON.stringify(c.body)}`);
 await E.BudgetLine.bulkCreate(lines.map((l) => ({ ...l, period_id: pid })));
-const dist = await E.Distribution.create({ period_id: pid, entity_name: 'ZZ Entity', q2: 203, q3: 5 });
+await E.Distribution.create({ period_id: pid, entity_name: 'ZZ Entity', q2: 203, q3: 5 });
 await E.RecurringTransfer.create({ period_id: pid, source: 'ZZ Bank', purpose: 'ZZ Savings', amount: 17 });
 await E.CashAccount.create({ period_id: pid, name: 'ZZ Checking', balance: 4409 });
 await visible(pid);
@@ -155,36 +155,41 @@ const by = Object.fromEntries((causes || []).map((x) => [x.key, x]));
 const up = by.previous_month_incomplete;
 check('several month-vs-YTD mismatches are ONE upstream cause naming the previous month', !!up && up.members.length === 3 && up.title.includes(`9/${year}`) && !by.month_vs_ytd, up ? `${up.members.length} members` : 'missing');
 const gaps = by.workbook_gaps;
-check('workbook gaps are one cause with a bookkeeper action', !!gaps && /bookkeeper/.test(gaps.action));
-check('the blank closed quarter in it stays a hard blocker (not acceptable by reason)', !!gaps && gaps.bucket === 'blockers' && gaps.members.some((m) => m.kind === 'blocker' && m.code.includes('closed_quarter_missing')) && !gaps.acceptable.some((x) => x.includes('closed_quarter_missing')));
-check('the blank Total Cash may be deferred at finalize (acceptable by reason)', !!gaps && gaps.acceptable.includes('required_value_missing:total_cash'));
+check('workbook gaps (blank Total Cash, blank closed quarter) are one cause with a bookkeeper action', !!gaps && /bookkeeper/.test(gaps.action)
+  && gaps.members.some((m) => m.code.includes('closed_quarter_missing')) && gaps.members.some((m) => m.code === 'required_value_missing:total_cash'));
 check('the budget revision is one cause', !!by.budget_revision && by.budget_revision.members.length >= 2, by.budget_revision ? `${by.budget_revision.members.length} members` : 'missing');
+check('nothing blocks and nothing asks for a written reason', (causes || []).every((x) => x.bucket !== 'blockers' && x.acceptable.length === 0) && (r.body?.finalize?.blockers || []).length === 0, (r.body?.finalize?.blockers || []).map((x) => x.code).join(','));
 const flat = (causes || []).flatMap((x) => x.members.map((m) => m.code));
 check('every finding appears in exactly one cause', new Set(flat).size === flat.length);
 
-// One reason per cause, saved as one override per overridable member.
+// upload -> review warnings -> publish: no reasons anywhere.
 // The function's reads can lag just-created lines (import_incomplete): retry
-// while that refusal is present, whatever else is refused alongside it.
-const finalizeSettled = async (extra) => {
-  let r = await finalizeAfterLag(pid, extra);
-  for (let i = 0; i < 10 && r.status === 409 && codes(r).includes('import_incomplete'); i++) { await sleep(1500); r = await transition('finalize', pid, extra); }
-  return r;
-};
-const group = reason((causes || []).flatMap((x) => x.acceptable));
-let f = await finalizeSettled({ overrides: group });
-check('with every group accepted, finalize is refused ONLY by the hard blocker', f.status === 409 && codes(f).length > 0 && codes(f).every((x) => x.includes('closed_quarter_missing')), codes(f).join(','));
-f = await finalizeSettled({ overrides: { ...group, ...reason(codes(f)) } });
-check('a reason given for the hard blocker changes nothing', f.status === 409 && codes(f).every((x) => x.includes('closed_quarter_missing')));
-await E.Distribution.update(dist.id, { q1: 101 });
-for (let i = 0; i < 20; i++) { const d = await E.Distribution.filter({ period_id: pid }); if (d[0]?.q1 === 101) break; await sleep(500); }
-f = await finalizeAfterLag(pid, { overrides: group });
-for (let i = 0; i < 6 && f.status === 409 && codes(f).some((x) => x.includes('closed_quarter_missing') || x.includes('checks_unavailable')); i++) { await sleep(3000); f = await finalizeAfterLag(pid, { overrides: group }); }
-check('once the workbook gap is fixed, the same group reasons finalize (Total Cash deferred)', f.status === 200, `${f.status} ${codes(f).join(',')}`);
-const p = await publishRetry(pid);
-const tc = (p.body?.blockers || []).find((b) => b.code === 'required_value_missing:total_cash');
-check('publish is refused: the deferred Total Cash is a non-overridable blocker', p.status === 409 && !!tc && tc.overridable === false, `${p.status}`);
+// while that refusal is present.
+let f = await finalizeAfterLag(pid);
+for (let i = 0; i < 10 && f.status === 409 && codes(f).includes('import_incomplete'); i++) { await sleep(1500); f = await transition('finalize', pid); }
+check('finalizes with no written reason', f.status === 200, `${f.status} ${codes(f).join(',')}`);
+await confirmChecklist(pid); // checked, transient-only retry
+let p = await publishRetry(pid);
+for (let i = 0; i < 6 && p.status === 409 && codes(p).every((x) => x.startsWith('checklist_incomplete')); i++) { await sleep(4000); p = await publishRetry(pid); }
+check('publishes with no written reason (the checklist confirmed)', p.status === 200, `${p.status} ${codes(p).join(',')}`);
 const after = await E.ReportingPeriod.get(pid);
-check('the month stays unpublished; Total Cash is still missing, never $0.00', !after.published && (after.total_cash === undefined || after.total_cash === null) && (after.source_missing_fields || []).includes('total_cash'));
+check('published with Total Cash still missing, never $0.00', after.published === true && (after.total_cash === undefined || after.total_cash === null) && (after.source_missing_fields || []).includes('total_cash'));
+const q1 = (await E.Distribution.filter({ period_id: pid }))[0]?.q1;
+check('the blank closed quarter is still blank (never $0.00)', q1 === undefined || q1 === null);
+
+// A structural problem still blocks (a duplicate cash block with different
+// figures), and no reason clears it.
+const dup = await transition('create', null, { data: periodData(year, 11, { bva_validation_warnings: [{ code: 'duplicate_section_conflict:cash', section: 'cash', message: 'Fictional: two cash blocks with different figures.', blocksFinalize: true, overridable: false }] }) });
+const dupId = dup.body?.period_id;
+await E.BudgetLine.bulkCreate(lineData(10).map((l) => ({ ...l, period_id: dupId })));
+await E.Distribution.create({ period_id: dupId, entity_name: 'ZZ Entity', q1: 101, q2: 203, q3: 5 });
+await E.RecurringTransfer.create({ period_id: dupId, source: 'ZZ Bank', purpose: 'ZZ Savings', amount: 17 });
+await E.CashAccount.create({ period_id: dupId, name: 'ZZ Checking', balance: 4409 });
+await visible(dupId);
+let d = await finalizeAfterLag(dupId, { overrides: reason(['open_reconciliation:duplicate_section_conflict:cash']) });
+for (let i = 0; i < 10 && d.status === 409 && codes(d).includes('import_incomplete'); i++) { await sleep(1500); d = await transition('finalize', dupId, { overrides: reason(['open_reconciliation:duplicate_section_conflict:cash']) }); }
+const db = (d.body?.blockers || []).find((x) => x.code === 'open_reconciliation:duplicate_section_conflict:cash');
+check('a structural problem (conflicting duplicate section) blocks; a reason does not clear it', d.status === 409 && !!db && db.overridable === false, `${d.status} ${codes(d).join(',')}`);
 
 const failed = results.filter((x) => !x).length;
 log(`\n${results.length - failed} passed, ${failed} failed`);

@@ -143,39 +143,37 @@ const scenarioYears = {};
   check('A4 a published period is never re-judged (no cross-period evaluation)', pubChk.body?.cross_period === null);
 }
 
-// ---- B. a year-to-date decrease needs a written reason ---------------------
+// ---- B. a year-to-date decrease is a warning (no reason needed) -----------
 {
   const y = (scenarioYears.B = freshYear());
   await makeMonth(y, 5); await makeMonth(y, 6);
   const jul = await makeMonth(y, 7, { finalize: false, period: { ytd_income: 1013 * 4, month_income: -1013 } });
-  const f1 = await transition('finalize', jul);
-  const blk = (f1.body?.blockers || []).find((b) => b.code === 'cross_period:ytd_income_decreased');
-  check('B1 finalize refused: total income year-to-date decreased', f1.status === 409 && !!blk && blk.overridable === true, `HTTP ${f1.status} ${xcodes(f1).join(',')}`);
-  check('B2 nothing was written by the refusal', (await E.ReportingPeriod.get(jul)).status === 'draft');
-  const f2 = await transition('finalize', jul, { overrides: reason(xcodes(f1)) });
+  const chk = await checkRan(jul);
+  check('B1 the decrease is shown as a warning in the review', findings(chk, 'warn').includes('ytd_income_decreased') && (chk.body?.review?.warnings || []).some((w) => w.code === 'ytd_income_decreased'), findings(chk, 'warn').join(','));
+  const f = await finalizeAfterLag(jul);
   const stored = await E.ReportingPeriod.get(jul);
-  check('B3 accepted with a written reason: finalizes, reason recorded with who/when', f2.status === 200 && !!stored.bva_overrides?.['cross_period:ytd_income_decreased']?.by, `HTTP ${f2.status}`);
-    await confirmChecklist(jul); // checked, transient-only retry
+  check('B2 finalize goes through with no written reason', f.status === 200 && Object.keys(stored.bva_overrides || {}).length === 0, `HTTP ${f.status} ${xcodes(f).join(',')}`);
+  await confirmChecklist(jul); // checked, transient-only retry
   const p = await publishRetry(jul);
-  check('B4 the reason given at finalize satisfies publish', p.status === 200, `HTTP ${p.status} ${xcodes(p).join(',')}`);
+  check('B3 ...and publishes with no written reason', p.status === 200, `HTTP ${p.status} ${codes(p).join(',')}`);
 }
 
-// ---- C. closed distribution quarters ---------------------------------------
+// ---- C. closed distribution quarters: changes and blanks are warnings ------
 {
   const y = (scenarioYears.C = freshYear());
   await makeMonth(y, 7); await makeMonth(y, 8, { dist: { q1: 101, q2: 203, q3: 11 } });
   const sep = await makeMonth(y, 9, { finalize: false, dist: { q1: 999, q2: 203, q3: 23 } });
-  const f1 = await transition('finalize', sep);
-  check('C1 a changed closed quarter needs a reason', f1.status === 409 && xcodes(f1).includes('cross_period:closed_quarter_changed:zz entity:q1'), xcodes(f1).join(','));
+  const c1 = await checkRan(sep);
+  check('C1 a changed closed quarter is a warning', findings(c1, 'warn').includes('closed_quarter_changed:zz entity:q1') && !findings(c1, 'block').length, findings(c1).join(','));
   const d = (await E.Distribution.filter({ period_id: sep }))[0];
   await E.Distribution.delete(d.id);
   await E.Distribution.create({ period_id: sep, entity_name: 'ZZ Entity', q2: 203, q3: 23 }); // Q1 now blank (omitted)
-  const f2 = await transition('finalize', sep, { overrides: reason(['cross_period:closed_quarter_missing:zz entity:q1', 'cross_period:closed_quarter_changed:zz entity:q1']) });
-  const b = (f2.body?.blockers || []).find((x) => x.code === 'cross_period:closed_quarter_missing:zz entity:q1');
-  check('C2 a closed quarter now blank blocks and cannot be overridden (blank is not $0.00)', f2.status === 409 && !!b && b.overridable === false, xcodes(f2).join(','));
-  const d2 = (await E.Distribution.filter({ period_id: sep }))[0];
-  await E.Distribution.update(d2.id, { q1: 101 });
-  check('C3 restored: finalizes; the open quarter may change freely', (await transition('finalize', sep)).status === 200);
+  let c2;
+  for (let i = 0; i < 10; i++) { c2 = await checkRan(sep); if (findings(c2).includes('closed_quarter_missing:zz entity:q1')) break; await sleep(1000); }
+  check('C2 a closed quarter now blank is a warning (shown as missing, never $0.00)', findings(c2, 'warn').includes('closed_quarter_missing:zz entity:q1') && !findings(c2, 'block').length, findings(c2).join(','));
+  const f = await finalizeAfterLag(sep);
+  const q1 = (await E.Distribution.filter({ period_id: sep }))[0]?.q1;
+  check('C3 ...and finalizes with Q1 still blank', f.status === 200 && (q1 === undefined || q1 === null), `HTTP ${f.status} ${xcodes(f).join(',')}`);
 }
 
 // ---- D. missing month column is not a mismatch -----------------------------
@@ -205,12 +203,21 @@ const scenarioYears = {};
   const legacy = c.body.period_id;
   privileged(`await base44.entities.ReportingPeriod.update('${legacy}', { status: 'final', published: true, publication_date: '${y}-08-02' });`);
   const aug = await makeMonth(y, 8, { finalize: false, period: { reporting_cutoff_date: `${y}-07-31`, months_elapsed: 7 } });
-  const f1 = await transition('finalize', aug);
-  const b = (f1.body?.blockers || []).find((x) => x.code === 'cross_period:cutoff_not_after_previous');
-  check('E1 same cutoff as a legacy month: needs a written reason (overridable)', f1.status === 409 && !!b && b.overridable === true, xcodes(f1).join(','));
   const chk = await checkRan(aug);
+  check('E1 same cutoff as a legacy month: a warning (the convention switch)', findings(chk, 'warn').includes('cutoff_not_after_previous') && !findings(chk, 'block').length, findings(chk).join(','));
   check('E2 a legacy previous month is not compared figure by figure', !findings(chk).some((x) => /decreased|budget_changed|month_vs_ytd/.test(x)), findings(chk).join(','));
-  check('E3 accepted with a reason: finalizes', (await transition('finalize', aug, { overrides: reason(xcodes(f1)) })).status === 200);
+  check('E3 finalizes with no written reason', (await finalizeAfterLag(aug)).status === 200);
+}
+
+// ---- G. a duplicate period still blocks (structural), whatever the reason --
+{
+  const y = (scenarioYears.G = freshYear());
+  await makeMonth(y, 6, { period: { reporting_cutoff_date: `${y}-06-30`, months_elapsed: 6 } }); // June reports June
+  const jul = await makeMonth(y, 7, { finalize: false, period: { reporting_cutoff_date: `${y}-06-30`, months_elapsed: 6 } }); // ...and July repeats it
+  const f = await finalizeAfterLag(jul, { overrides: reason(['cross_period:cutoff_not_after_previous']) });
+  const b = (f.body?.blockers || []).find((x) => x.code === 'cross_period:cutoff_not_after_previous');
+  check('G1 a month that repeats the previous month\'s data is refused; no reason clears it', f.status === 409 && !!b && b.overridable === false, `HTTP ${f.status} ${xcodes(f).join(',')}`);
+  check('G2 nothing was written by the refusal', (await E.ReportingPeriod.get(jul)).status === 'draft');
 }
 
 // ---- F. revising a month after a later month is published (Phase 4) ---------
