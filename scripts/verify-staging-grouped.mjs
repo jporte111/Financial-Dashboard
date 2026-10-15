@@ -168,10 +168,9 @@ check('every finding appears in exactly one cause', new Set(flat).size === flat.
 let f = await finalizeAfterLag(pid);
 for (let i = 0; i < 10 && f.status === 409 && codes(f).includes('import_incomplete'); i++) { await sleep(1500); f = await transition('finalize', pid); }
 check('finalizes with no written reason', f.status === 200, `${f.status} ${codes(f).join(',')}`);
-await confirmChecklist(pid); // checked, transient-only retry
-let p = await publishRetry(pid);
-for (let i = 0; i < 6 && p.status === 409 && codes(p).every((x) => x.startsWith('checklist_incomplete')); i++) { await sleep(4000); p = await publishRetry(pid); }
-check('publishes with no written reason (the checklist confirmed)', p.status === 200, `${p.status} ${codes(p).join(',')}`);
+// The checklist is optional: publish without confirming any item.
+const p = await publishRetry(pid);
+check('publishes with no written reason and no checklist item confirmed', p.status === 200, `${p.status} ${codes(p).join(',')}`);
 const after = await E.ReportingPeriod.get(pid);
 check('published with Total Cash still missing, never $0.00', after.published === true && (after.total_cash === undefined || after.total_cash === null) && (after.source_missing_fields || []).includes('total_cash'));
 const q1 = (await E.Distribution.filter({ period_id: pid }))[0]?.q1;

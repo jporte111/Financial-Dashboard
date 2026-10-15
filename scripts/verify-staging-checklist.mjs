@@ -103,7 +103,9 @@ const aug = await makeMonth(year, 8, { publish: false });
 const c0 = await checkUntil(aug, (b) => notConfirmed(b).length === 7 && !!b.review);
 check('1a a finalized month starts with all 7 items not confirmed', notConfirmed(c0.body).length === 7 && Object.values(states(c0.body)).every((s) => s === 'unconfirmed'), JSON.stringify(states(c0.body)));
 check('1b the review has the four groups, with plain-language actions', ['blockers', 'needsReview', 'warnings', 'completed'].every((g) => Array.isArray(c0.body.review?.[g])) && c0.body.review.needsReview.every((e) => e.action && e.title));
-check('1c the old true/false checklist alone cannot publish', codes(await transition('publish', aug)).filter((c) => c.startsWith('checklist_incomplete:')).length === 7);
+// The checklist is an optional review aid: unconfirmed items never block
+// publish (checked without publishing, so the scenario carries on).
+check('1c unconfirmed items do not block publish (optional review aid)', c0.body.publish?.ok === true && !(c0.body.publish?.blockers || []).some((b) => String(b.code).startsWith('checklist_incomplete')), (c0.body.publish?.blockers || []).map((b) => b.code).join(','));
 
 // 2. confirm each item: who and when recorded
 for (const k of KEYS) await confirmRetry(aug, k);
@@ -119,8 +121,7 @@ const c2 = await checkUntil(aug, (b) => notConfirmed(b).length > 0);
 check('3a only cash and the budget report need confirming again', same(notConfirmed(c2.body), ['budget_report_reviewed', 'cash_confirmed']), notConfirmed(c2.body).join(','));
 const cashItem = (c2.body.checklist.items || []).find((s) => s.key === 'cash_confirmed');
 check('3b ...and it says what changed', cashItem?.state === 'stale' && same(cashItem.changedParts, ['cash_accounts']));
-const pubStale = await transition('publish', aug);
-check('3c publish is refused while they are stale', pubStale.status === 409 && same(codes(pubStale).sort(), ['checklist_incomplete:budget_report_reviewed', 'checklist_incomplete:cash_confirmed']), codes(pubStale).join(','));
+check('3c stale items do not block publish either', c2.body.publish?.ok === true, (c2.body.publish?.blockers || []).map((b) => b.code).join(','));
 await E.CashAccount.update(cash.id, { balance: 4409 });
 await checkUntil(aug, (b) => notConfirmed(b).length === 0);
 
