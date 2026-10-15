@@ -112,11 +112,11 @@ export function GroupMappingCard({ validation, corrections = [], onSave, onRemov
 export function TransferLabelsCard({ validation, corrections = [], onSave, onRemove, by }) {
   const items = validation?.reconciled?.transfers?.items || [];
   return (
-    <Card title="Transfer labels" subtitle="Source and purpose for each recurring transfer, as carried into the dashboard.">
+    <Card title="Transfer labels" subtitle="Source, purpose and destination account for each recurring transfer, as carried into the dashboard.">
       {items.map((t, i) => (
         <div key={i} className="rounded-lg border border-stone-100 p-2">
           <p className="text-xs text-stone-500 tabular-nums">{fmtCurrency(t.amount)}</p>
-          {['source', 'purpose'].map((field) => {
+          {['source', 'purpose', 'destination'].map((field) => {
             const path = `transfers.items.${i}.${field}`;
             const correction = corrections.find((c) => c.kind === 'transfer' && c.path === path);
             const original = correction ? correction.original_value : t[field];

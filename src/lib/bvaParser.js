@@ -66,6 +66,16 @@ function toISODate(v) {
   if (m) return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (m) return `${m[3].length === 2 ? `20${m[3]}` : m[3]}-${pad(m[1])}-${pad(m[2])}`;
+  // "Sept 30 2026" / "September 30, 2026" — month-name headers, including the
+  // abbreviated "Sept" the workbook uses. Matched by the month's first three
+  // letters, so a day and year are still required (never a generic fallback
+  // that could misread an account name).
+  m = s.match(/^([A-Za-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/);
+  if (m) {
+    const prefix = m[1].toLowerCase().slice(0, 3); // 'sept' -> 'sep'
+    const mon = MONTHS.findIndex((mo) => mo.startsWith(prefix));
+    if (mon >= 0) return `${m[3]}-${pad(mon + 1)}-${pad(m[2])}`;
+  }
   return null;
 }
 
@@ -223,6 +233,7 @@ export function parseBvaWorkbook(data) {
     const accounts = [];
     let reportedTotal = null;
     let totalFound = false;
+    let balanceCol = 1; // set to the dated column when the block has a header row
     for (let r = r0 + 1; r < end; r++) {
       const row = sheets[s].aoa[r] || [];
       const label = norm(row[0]);
@@ -233,19 +244,45 @@ export function parseBvaWorkbook(data) {
         claim(s, r, 0, 2);
         continue;
       }
-      if (c === 'account' || /^current bank balances/.test(c)) {
+      if (/^current bank balances/.test(c)) {
         addCutoff(toISODate(row[1]), 'cash header date', s, r);
         claim(s, r, 0, 2);
         continue;
       }
+      // A cash header row: no balances on it, and its columns are labels —
+      // e.g. "Bank | Last Month | Sept 30 2026" or "Account | 08/31/2026".
+      // The balances for this report live under the DATE column, never under
+      // "Last Month", and a date header is itself a cutoff-date source.
+      if (!row.some(isNumericCell)) {
+        const dateCols = [];
+        let headerish = /^(bank|account)$/.test(c);
+        for (let i = 1; i <= 4; i++) {
+          const h = row[i];
+          if (h == null || norm(h) === '') continue;
+          // The header cell may be a real Excel date (read as a Date object
+          // under cellDates) or text like "Sept 30 2026" — both accepted.
+          const d = toISODate(h);
+          if (d) dateCols.push([i, d]);
+          if (/^(last month|current)$/.test(canon(h))) headerish = true;
+        }
+        if (headerish || dateCols.length) {
+          if (dateCols.length) {
+            const [dc, d] = dateCols[dateCols.length - 1]; // the latest date column is this report's "as of"
+            balanceCol = dc;
+            addCutoff(d, 'cash header date', s, r);
+          }
+          claim(s, r, 0, 2);
+          continue;
+        }
+      }
       if (/^total\s*cash/.test(c)) {
-        reportedTotal = toNum(row[1]);
+        reportedTotal = toNum(row[balanceCol]);
         totalFound = true;
         claim(s, r, 0, 2);
         break;
       }
       if (!label) continue; // blank row, or unlabeled figures (left unclaimed -> reported)
-      accounts.push({ name: label, balance: toNum(row[1]), src: src(s, r) });
+      accounts.push({ name: label, balance: toNum(row[balanceCol]), src: src(s, r) });
       claim(s, r, 0, 2);
     }
     if (!totalFound) pushWarn('cash_total_row_missing', 'cash', 'The cash block has no "Total Cash" row; the calculated total is used.');
@@ -730,12 +767,15 @@ export function parseBvaWorkbook(data) {
   const transfers = pick('transfers', null) || { items: [], reportedTotal: null, misaligned: false };
 
   if (transfers.items.length) {
+    const withDestination = transfers.items.filter((t) => t.destination).length;
     pushWarn(
       'transfer_labels_misaligned',
       'transfers',
       transfers.misaligned
         ? 'Recurring transfer amounts parsed cleanly, but the source / purpose / destination label columns are misaligned in the workbook. Confirm each transfer in Admin.'
-        : 'Recurring transfer labels vary between workbook layouts; confirm the source and purpose of each transfer in Admin.'
+        : withDestination
+          ? `Recurring transfers parsed as amount, source, purpose and destination account (${withDestination} of ${transfers.items.length} rows carry a destination). The workbook does not label these columns; confirm each transfer in Admin.`
+          : 'Recurring transfer labels vary between workbook layouts; confirm the source and purpose of each transfer in Admin.'
     );
   }
 

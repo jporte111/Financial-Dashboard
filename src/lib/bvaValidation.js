@@ -311,11 +311,17 @@ export function validateBva(parsed, opts = {}) {
     });
   }
   if (incomeBudgetReported != null && incomeBudgetSum != null && !eq(incomeBudgetSum, incomeBudgetReported)) {
+    // Name the exact cause when the gap is explained by specific lines whose
+    // budgets the workbook's Total row leaves out (both values are kept).
+    const gap = round2(n(incomeBudgetSum) - n(incomeBudgetReported));
+    const omitted = gap > 0 ? incomeCats.filter((c) => c.annualBudget != null && eq(n(c.annualBudget), gap)) : [];
+    const cause = omitted.length
+      ? ` Its Total row omits the budget of: ${omitted.map((c) => `${c.name} (${money(n(c.annualBudget))})`).join(', ')}.`
+      : '';
     warn(warnings, {
       code: 'income_budget_workbook_mismatch',
       section: 'income',
-      message:
-        "The workbook's displayed annual income budget omits one or more sub-cent lines. The independently calculated total is used.",
+      message: `The workbook's displayed annual income budget total is less than the sum of the income lines' budgets.${cause} The independently calculated total is used.`,
       sourceValue: incomeBudgetReported,
       calculatedValue: incomeBudgetSum,
       requiresAdminReview: true,
@@ -413,8 +419,28 @@ export function validateBva(parsed, opts = {}) {
   const distWorkbookTotal = parsed?.distributions?.reportedTotal ?? null;
   let distributionsReconciled = false;
   if (distWorkbookTotal != null && distEntitySum != null) {
-    distributionsReconciled = eq(distEntitySum, distWorkbookTotal) && distEntities.every((e) => e.matches !== false);
-    if (!distributionsReconciled) {
+    // Cent-based comparison (eq rounds to cents): the grand total can agree to
+    // the cent while an entity's own YTD cell is stale, so the two mismatches
+    // are checked and reported separately.
+    const grandTotalMatches = eq(distEntitySum, distWorkbookTotal);
+    const entityMismatches = distEntities.filter((e) => e.matches === false);
+    distributionsReconciled = grandTotalMatches && entityMismatches.length === 0;
+    // A per-entity YTD cell that disagrees with the sum of that entity's own
+    // quarters is a per-line formula error. It is reported on its own, with
+    // that entity's figures — never as a grand-total discrepancy with a
+    // misleading Δ $0.00.
+    for (const e of entityMismatches) {
+      warn(warnings, {
+        code: 'distribution_entity_ytd_mismatch',
+        section: 'distributions',
+        message: `${e.name}'s own YTD cell in the workbook (${money(e.reportedYtd)}) does not equal the sum of its quarters (${money(e.calculatedYtd)}). The entity-quarter total is used.`,
+        sourceValue: e.reportedYtd,
+        calculatedValue: e.calculatedYtd,
+        requiresAdminReview: true, // keep flagging the workbook formula error for BVA Review
+        blocksFinalize: false, // arithmetically correct; no override needed to use it
+      });
+    }
+    if (!grandTotalMatches) {
       const gapExplanation = explainDistributionGap(distEntities, parsed?.distributions?.reportedQuarterTotals);
       const message = gapExplanation
         ? `Workbook total omitted ${gapExplanation.entity} ${QUARTER_LABEL[gapExplanation.quarter]} of ${money(gapExplanation.amount)}. Dashboard uses the recalculated entity-quarter total of ${money(distEntitySum)}.`

@@ -239,6 +239,7 @@ export function planBvaImport(args) {
       amount: r2(t.amount),
       source: t.source || null,
       purpose: t.purpose || null,
+      destination: t.destination || null,
       visible_to_client: true,
     })),
     (t) => `${t.amount == null ? 'missing' : round2(t.amount)}:${normKey(t.purpose || t.source)}`
