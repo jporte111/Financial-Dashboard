@@ -126,6 +126,15 @@ async function seedPublished({ publish = true } = {}) {
   await E.SavingsSpend.bulkCreate(Array.from({ length: 4 }, (_, i) => ({ period_id: pid, category: `Test savings ${i + 1}`, ytd_amount: 100 + i })));
   const txns = Array.from({ length: 374 }, (_, i) => ({ period_id: pid, date: `${year}-07-${String((i % 28) + 1).padStart(2, '0')}`, amount: Math.round((10 + (i * 37) % 900) * 100) / 100, category: cats[i % cats.length], vendor: `Test vendor ${i % 40}`, description: `Fictional transaction ${i + 1}`, transaction_type: 'expense', treatment: 'personal', source: 'manual' }));
   for (let i = 0; i < txns.length; i += 100) await E.Transaction.bulkCreate(txns.slice(i, i + 100));
+  // Base44 reads can lag rows just written: wait until every seeded row is
+  // visible, so the copy under test starts from the complete original.
+  const expected = ['budgetLines', 'cashAccounts', 'distributions', 'transfers'].reduce((t, k) => t + plan[k].toCreate.length, 0) + 4 + txns.length;
+  for (let i = 0; i < 40; i++) {
+    let seen = 0;
+    for (const e of ENTS) seen += (await rows(e, pid)).length;
+    if (seen >= expected) break;
+    await sleep(1500);
+  }
   const fp = await finalizeAndPublish(pid, { publish });
   if (fp.fin.status !== 200 || (publish && fp.pub.status !== 200)) throw new Error(`setup finalize ${fp.fin.status} ${JSON.stringify(fp.fin.body?.blockers || '')} publish ${fp.pub?.status} ${JSON.stringify((fp.pub?.body?.blockers || []).map((b) => b.code))}`);
   let count = 0;
@@ -264,7 +273,15 @@ if (only.has('interrupt')) {
   const disc = await transition('discard_revision', rid);
   let gone = disc.body?.done;
   for (let i = 0; i < 5 && !gone; i++) gone = (await transition('discard_revision', rid)).body?.done;
-  check('interrupt', 'the bad revision is discarded, rows and all', gone && !(await attempt(() => E.ReportingPeriod.get(rid))).ok && (await rows('Transaction', rid)).length === 0);
+  // Reads can lag the deletes briefly: look again for a few seconds.
+  let periodGone = false, left = -1;
+  for (let i = 0; i < 10; i++) {
+    periodGone = !(await attempt(() => E.ReportingPeriod.get(rid))).ok;
+    left = (await rows('Transaction', rid)).length;
+    if (periodGone && left === 0) break;
+    await sleep(1500);
+  }
+  check('interrupt', 'the bad revision is discarded, rows and all', !!gone && periodGone && left === 0, `done ${!!gone}, period gone ${periodGone}, rows left ${left}`);
   const again = await transition('create_revision', s.pid, { reason: 'Staging test: recreate after discard.' });
   const again2 = again.body?.copy?.done ? again : await waitCopied(again.body?.period_id);
   check('interrupt', 'a fresh revision can be created and verified', again2.body?.copy?.verified === true);
