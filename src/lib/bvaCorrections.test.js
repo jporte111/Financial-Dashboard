@@ -149,11 +149,10 @@ describe('validation re-runs against corrected values', () => {
     expect(v.reconciled.detail.categories[0].groupConfirmed).toBe(true);
   });
 
-  it('accepts an override reason for an overridable blocker', () => {
+  it('an income total that does not add up is a warning, not a blocker', () => {
     const parsed = setPath(workbook(), 'income.reportedActualTotal', 999);
     expect(codes(validate(parsed))).toContain('income_actual_mismatch');
-    expect(validate(parsed).warnings.find((w) => w.code === 'income_actual_mismatch').blocksFinalize).toBe(true);
-    expect(validate(parsed, { overrides: { income_actual_mismatch: { reason: 'verified' } } }).blocksFinalize).toBe(false);
+    expect(validate(parsed).warnings.find((w) => w.code === 'income_actual_mismatch').blocksFinalize).toBe(false);
   });
 });
 

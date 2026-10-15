@@ -115,7 +115,11 @@ export function planBvaImport(args) {
   // (never guessed from the reporting month).
   const elapsedMonths = cutoffDate ? elapsedMonthsFromCutoff(cutoffDate) : null;
 
-  const incomeBudgetCalc = r2(R.income.budgetTotal);
+  // What the dashboard shows: the workbook's printed totals when it has them
+  // (the calculated totals stay in the validation warnings for checking).
+  // Older validation results (no display block) keep the calculated totals.
+  const D = R.display || {};
+  const shown = (field, calculated) => (field in D ? D[field] : r2(calculated));
   const incomeBudgetWorkbook = r2(parsed?.income?.reportedBudgetTotal);
 
   const periodData = {
@@ -130,23 +134,24 @@ export function planBvaImport(args) {
     imported_at: new Date().toISOString(),
     imported_by: confirm.importedBy || null,
     // scalars (null = missing in the workbook; never 0)
-    total_cash: r2(R.cash.total),
-    ytd_income: r2(R.income.actualTotal),
-    ytd_expenses: r2(R.expenses.actualTotal),
+    total_cash: shown('total_cash', R.cash.total),
+    ytd_income: shown('ytd_income', R.income.actualTotal),
+    ytd_expenses: shown('ytd_expenses', R.expenses.actualTotal),
     // Current-month totals are written as null when the workbook's month
     // column was blank — the dashboard then shows "Source value missing"
     // rather than a fabricated $0.00. A present-but-zero column stores 0.
     month_income: r2(R.income.monthActualTotal),
     month_expenses: r2(R.expenses.monthActualTotal),
-    annual_budgeted_income: incomeBudgetCalc,
+    annual_budgeted_income: shown('annual_budgeted_income', R.income.budgetTotal),
     annual_budgeted_income_workbook: incomeBudgetWorkbook,
-    annual_budgeted_expenses: r2(R.expenses.budgetTotal),
-    // Distributions YTD is the sum of each entity's own quarters — always
-    // authoritative. The workbook's displayed grand total is a manually-typed
-    // cell range that has been wrong before; it is retained only inside
-    // bva_parsed_source (below) for BVA Review's audit trail, never stored
-    // here as the dashboard figure.
-    distributions_ytd: r2(R.distributions.entitySum),
+    annual_budgeted_expenses: shown('annual_budgeted_expenses', R.expenses.budgetTotal),
+    distributions_ytd: shown('distributions_ytd', R.distributions.entitySum),
+    // The workbook's printed quarter column totals (only those it prints);
+    // always written, so a re-import replaces the previous set.
+    distribution_quarter_totals: D.distribution_quarter_totals || {},
+    // This import follows the printed-total rule: the dashboard shows the
+    // workbook's printed totals for it (earlier periods are shown as stored).
+    printed_totals: 'display' in R,
     bva_validation_warnings: validation.warnings,
     bva_parsed_source: parsed,
     // No state fields (status / published / bva_import_status / finalized_*):
@@ -219,7 +224,8 @@ export function planBvaImport(args) {
     (a) => normKey(a.name)
   );
 
-  // --- Distributions (entities with quarters; YTD recomputed at read) --
+  // --- Distributions (entities with quarters, and the YTD the workbook
+  // prints for each; without one the dashboard sums the quarters) --------
   const distributions = reconcileChildren(
     existing.distributions,
     R.distributions.entities.map((e) => ({
@@ -228,6 +234,7 @@ export function planBvaImport(args) {
       q2: r2(e.q2),
       q3: r2(e.q3),
       q4: r2(e.q4),
+      workbook_ytd: r2(e.reportedYtd),
     })),
     (e) => normKey(e.entity_name)
   );
@@ -289,6 +296,26 @@ export function importPreflight(match) {
 
 // Derive a prior category-number -> group map from existing BudgetLine rows so
 // re-imports and new months keep human-confirmed detail groupings.
+// Confirmed watch-list groups carried forward from the previous month's report:
+// only for rows whose account code AND category name are unchanged, and only
+// confirmed groups (Fixed / Variable / Discretionary / Savings). A new or
+// renamed row is not carried -- it stays unassigned until an admin sets it.
+const CARRY_GROUPS = ['fixed', 'variable', 'discretionary', 'savings'];
+const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+export function carriedGroupMap(previousLines, detailRows) {
+  const prev = new Map();
+  for (const l of previousLines || []) {
+    if (l.bva_detail && l.group_confirmed && l.qb_code && CARRY_GROUPS.includes(l.budget_group)) prev.set(normKey(l.qb_code), l);
+  }
+  const out = {};
+  for (const d of detailRows || []) {
+    const key = normKey(d.code || '');
+    const p = key ? prev.get(key) : null;
+    if (p && normName(p.category) === normName(d.name)) out[key] = p.budget_group;
+  }
+  return out;
+}
+
 export function groupMapFromLines(lines) {
   const map = {};
   for (const l of lines || []) {

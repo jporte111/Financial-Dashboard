@@ -68,7 +68,9 @@ export function SavingsCard({ corrections = [], onSave, onRemove, by }) {
 const normCode = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const GROUP_LABEL = { fixed: 'Fixed', variable: 'Variable', discretionary: 'Discretionary', savings: 'Savings', unassigned: 'Unassigned' };
 
-export function GroupMappingCard({ validation, corrections = [], onSave, onRemove, by }) {
+export function GroupMappingCard({ validation, corrections = [], onSave, onRemove, by, carried = null }) {
+  const carriedMap = (carried && carried.map) || {};
+  const from = (carried && carried.from) || 'last month';
   const cats = validation?.reconciled?.detail?.categories || [];
   const correctionFor = (key) => corrections.find((c) => c.kind === 'group' && c.target === key);
   const unmapped = cats.filter((c) => (c.group || 'unassigned') === 'unassigned').length;
@@ -99,8 +101,12 @@ export function GroupMappingCard({ validation, corrections = [], onSave, onRemov
                 <option key={g} value={g}>{GROUP_LABEL[g]}</option>
               ))}
             </select>
-            <span className="text-xs text-stone-400">
-              {correction ? 'adjusted here' : cat.groupConfirmed ? 'confirmed on the draft' : 'unassigned'}
+            <span className="text-xs text-stone-400" data-testid={`group-status-${key}`}>
+              {carriedMap[key] && value !== carriedMap[key]
+                ? `differs from ${from} (${GROUP_LABEL[carriedMap[key]] || carriedMap[key]}) — shown as a warning`
+                : carriedMap[key] && !correction
+                  ? `carried from ${from}`
+                  : correction ? 'adjusted here' : cat.groupConfirmed ? 'confirmed on the draft' : cat.code && !carriedMap[key] ? 'unassigned (new or renamed row)' : 'unassigned'}
             </span>
           </div>
         );

@@ -24,14 +24,41 @@ just copy from the sheet:
 - Variance to Expected Pace = Actual YTD − Expected YTD Budget
 - Variance % = Expected Pace % − Percent Used
 
-When an imported value conflicts with the independently calculated value, record and
-display a validation warning showing both, and use the calculated value unless an
-authorized override with a reason is saved.
+**Printed totals (owner decision, October 2026).** When the workbook's printed total
+disagrees with the sum of its rows, the dashboard shows the PRINTED total
+(`validation.reconciled.display`, stored in the period scalars, `Distribution.workbook_ytd`
+and `ReportingPeriod.distribution_quarter_totals`). The calculated total is kept for
+validation (`reconciled.*` and the warning's `calculatedValue`), and a warning — and a
+client note — says the workbook does not add up. With no printed total, the calculated
+total is shown. Derived figures (Remaining, Percent Used, pace variance) use what is
+shown. Periods stored before this rule keep their stored figures.
+
+**Two known-defect exceptions (owner, October 2026)** — the calculated total is shown,
+with the warning (`knownDefect: true`):
+- Distributions YTD, when the whole grand-total gap is exactly one entity's quarter the
+  column-subtotal formula skipped (`explainDistributionGap`); that quarter's column total
+  is shown calculated too. Each entity's own printed YTD is not part of the exception.
+- The annual income budget, when the gap is exactly the budget of ONE omitted line that
+  is named "interest" or has a budget under $1 (the bank interest lines carry sub-dollar
+  budgets and are not otherwise marked in the workbook).
+Any other disagreement shows the printed total.
+
+## What blocks (October 2026 owner decision)
+
+The dashboard faithfully shows what the workbook contains: upload → review warnings →
+publish. Missing and unusual values (blanks, decreases, budget changes, group changes,
+month-vs-YTD mismatches, totals that do not add up) are **warnings** in the grouped
+review. They never block finalize or publish and need no written reason. Only
+structural / integrity failures block — the list lives in
+`base44/shared/hardRules.ts` (plus no/invalid cutoff, elapsed months inconsistent with
+the cutoff, an incomplete import, a conflicting or duplicate period/version, and checks
+that could not run). Do not add a new blocker outside that list without the owner's
+approval.
 
 The income budget total is a known case: the workbook's displayed annual income budget
-omits one of the bank interest-income lines. Always use the independently calculated sum of every income
-category's annual budget as the reconciled total, and record the workbook's displayed
-total as a validation discrepancy — never treat the workbook figure as reconciled.
+omits one of the bank interest-income lines. When the gap is exactly that line's budget,
+the calculated total is shown and the warning names the omitted line; any other
+difference shows the printed budget (see above).
 
 ## Missing vs. zero — never coerce blank to $0.00
 
@@ -56,8 +83,9 @@ pipeline:
 - `PeriodTotalsForm` saves a blank input as missing, not `0` (see below).
 - The parser keeps every blank cell `null` (YTD, budget, balances, quarters, amounts).
   A total with a missing part is `null`, not a partial sum. A missing Actual YTD /
-  Annual Budget / balance / transfer amount blocks finalization and cannot be
-  overridden. A watch-list row with no figures at all is not imported (notice only).
+  Annual Budget / balance / transfer amount is shown as missing and highlighted as a
+  warning (it does not block). A watch-list row with no figures at all is not imported
+  (notice only).
 
 **Never write `null`.** Base44 rejects `null` in number / string fields (HTTP 422) and
 has no nullable schema type. So a missing value is written by *omission*: import
@@ -81,22 +109,21 @@ The parser scans **every sheet** and finds each block by its label (the watch li
 transfers have been moved to a second sheet before). Header-less fallbacks run only in
 the simplified layout (no EXPENSE header). Every numeric cell must be read by a section
 or recognized as informational (over/under, off-balance accounts, notes); anything else
-is reported as `unrecognized_content` and blocks until reviewed. Duplicate sections that
-disagree are never combined or chosen between. A section that is absent is a notice only
-when the previous validated period did not have it either. The workbook title names the
-report month; the period must be the cutoff month or the month after it.
+is reported as `unrecognized_content` (a warning). Duplicate sections that disagree are
+never combined or chosen between (this blocks). A required section that is absent or
+unreadable blocks; an optional one (watch list, transfers) is a warning. The title is
+only text (a mismatch is a warning); the period must be the cutoff month or the month
+after it (this blocks).
 
-## Distributions YTD — entity-quarter sum is authoritative
+## Distributions YTD — the printed total is shown; the entity-quarter sum checks it
 
-`Distributions YTD` is always the sum of each entity's own quarters (q1+q2+q3+q4), not the
-workbook's displayed grand total. The workbook's grand-total row is known to have a
-manually-typed column-subtotal formula that can silently skip one entity's row for one
-quarter — this is a spreadsheet defect, not an open business question. Still flag the
-discrepancy (`requiresAdminReview: true`) and generate a specific notice naming the
-entity/quarter/amount when the gap traces to exactly one cell
-(`explainDistributionGap` in `src/lib/bvaValidation.js`), falling back to a generic message
-otherwise. The workbook's displayed total is retained only as an audit-trail source value
-(visible in BVA Review) and never blocks finalization.
+`Distributions YTD` shown is the workbook's printed grand total (and each entity's printed
+YTD, and the printed quarter column totals) when present; otherwise the sum of each
+entity's own quarters. The sum is always computed and compared: the workbook's grand-total
+row is known to have a manually-typed column-subtotal formula that can skip one entity's
+row for one quarter. Flag it (`requiresAdminReview: true`) with a specific notice naming the
+entity/quarter/amount when the gap traces to exactly one cell (`explainDistributionGap` in
+`src/lib/bvaValidation.js`), else a generic message. It never blocks.
 
 `Distributions YTD` and `"Savings / Distributions In"` are different metrics — do not
 conflate them.

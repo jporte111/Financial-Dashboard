@@ -15,6 +15,7 @@
 //     review, warnings, completed.
 
 import { effectiveRecord } from './sourceMissing.ts';
+import { isHardValidation, CLIENT_ONLY_HARD } from './hardRules.ts';
 
 // ---- the items and what each covers ----------------------------------------
 export const PARTS: Record<string, string> = {
@@ -69,7 +70,7 @@ export const CHECKLIST_ITEMS = [
   },
   {
     key: 'distributions_confirmed', label: 'Distribution totals confirmed', parts: ['distributions', 'distribution_totals'],
-    linked: (c: string) => fam('distribution_quarter_blank', 'distribution_workbook_total_corrected', 'distributions_ytd_decreased', 'closed_quarter_changed',
+    linked: (c: string) => fam('distribution_quarter_blank', 'distribution_workbook_total_corrected', 'distribution_entity_ytd_mismatch', 'distribution_quarter_total_mismatch', 'distributions_ytd_decreased', 'closed_quarter_changed',
       'closed_quarter_missing', 'distribution_entity_removed', 'savings_in_ytd_missing', 'savings_in_ytd_decreased')(c)
       || (family(c) === 'section_missing' && param(c) === 'distributions')
       || (family(c) === 'required_value_missing' && param(c) === 'distributions_ytd'),
@@ -92,6 +93,11 @@ export function partValues(rec: { period: any; lines?: any[]; cash?: any[]; dist
   const byId = new Map(lines.map((l) => [l.id, lineKey(l)]));
   const income = lines.filter((l) => !l.bva_detail && String(l.budget_group).toLowerCase() === 'income');
   const expense = lines.filter((l) => !l.bva_detail && ['fixed', 'variable', 'discretionary'].includes(String(l.budget_group).toLowerCase()));
+  const quarterTotals = (q: any) => {
+    const t = q.distribution_quarter_totals && typeof q.distribution_quarter_totals === 'object' ? q.distribution_quarter_totals : {};
+    const present = ['q1', 'q2', 'q3', 'q4'].filter((k) => cents(t[k]) !== null);
+    return present.length ? [present.map((k) => [k, cents(t[k])])] : [];
+  };
   const lineFigures = (l: any) => [lineKey(l), cents(l.ytd_actual), cents(l.annual_budget), cents(l.month_actual)];
   const overrides = p.bva_overrides && typeof p.bva_overrides === 'object' ? p.bva_overrides : {};
   return {
@@ -102,8 +108,10 @@ export function partValues(rec: { period: any; lines?: any[]; cash?: any[]; dist
     income_lines: sortRows(income.map(lineFigures)),
     cash_accounts: sortRows((rec.cash || []).map((c) => [text(c.name), cents(c.balance), text(c.account_type)])),
     total_cash: [cents(p.total_cash)],
-    distributions: sortRows((rec.distributions || []).map((d) => [text(d.entity_name), cents(d.q1), cents(d.q2), cents(d.q3), cents(d.q4)])),
-    distribution_totals: [cents(p.distributions_ytd), cents(p.savings_in_ytd)],
+    // The workbook's printed entity YTD and quarter totals count only when
+    // present, so records stored before they existed keep their fingerprints.
+    distributions: sortRows((rec.distributions || []).map((d) => [text(d.entity_name), cents(d.q1), cents(d.q2), cents(d.q3), cents(d.q4), ...(cents(d.workbook_ytd) === null ? [] : [cents(d.workbook_ytd)])])),
+    distribution_totals: [cents(p.distributions_ytd), cents(p.savings_in_ytd), ...quarterTotals(p)],
     expense_totals: [cents(p.ytd_expenses), cents(p.month_expenses), cents(p.annual_budgeted_expenses)],
     expense_lines: sortRows(expense.map(lineFigures)),
     transfers: sortRows((rec.transfers || []).map((t) => [text(t.source), text(t.purpose), cents(t.amount)])),
@@ -142,13 +150,13 @@ const UNIVERSAL = new Set(['checks_unavailable', 'checklist_unavailable']);
 
 // The warnings an item can go stale on: codes only (the wording may change).
 export function warningCodes(period: any, crossFindings: any[] | null) {
-  const v = (Array.isArray(period?.bva_validation_warnings) ? period.bva_validation_warnings : []).filter((w: any) => w && !w.blocksFinalize && !w.overridden).map((w: any) => String(w.code));
+  const v = (Array.isArray(period?.bva_validation_warnings) ? period.bva_validation_warnings : []).filter((w: any) => w && !isHardValidation(String(w.code)) && !CLIENT_ONLY_HARD.has(String(w.code))).map((w: any) => String(w.code));
   const x = (crossFindings || []).filter((f: any) => f.severity === 'warn').map((f: any) => String(f.code));
   return [...new Set([...v, ...x])].sort();
 }
 
 // Each item's state:
-//   blocked      a linked blocker is open: fix it (or accept it with a reason) first
+//   blocked      a linked structural blocker is open: fix it first
 //   unconfirmed  nobody has confirmed it yet
 //   stale        confirmed, but its data changed or a new linked warning appeared since
 //   confirmed    confirmed, and nothing it covers has changed
@@ -193,7 +201,7 @@ export function itemMessage(s: any) {
 // ---- plain language --------------------------------------------------------------
 // One entry per code family: a short title, what to do, and where.
 const IMPORT = 'BVA Import', DATA = 'Monthly Data', REVIEW = 'Review & Publish', WORKBOOK = 'the workbook, then BVA Import';
-const ACCEPT = 'If the change is genuine (a refund, a reclassification, a correction), accept it with a written reason when finalizing; otherwise correct the workbook and import it again.';
+const ACCEPT = 'Shown as the workbook has it. Check it is genuine (a refund, a reclassification, a correction); nothing is required to publish.';
 export const CATALOGUE: Record<string, { title: string; action: string; where: string }> = {
   // state
   period_not_found: { title: 'Period not found', action: 'Reload the page; the period may have been removed.', where: REVIEW },
@@ -208,65 +216,68 @@ export const CATALOGUE: Record<string, { title: string; action: string; where: s
   checklist_unavailable: { title: 'Checklist could not be evaluated', action: 'Nothing was changed. Try again in a moment.', where: REVIEW },
   checklist_not_saved: { title: 'Checklist change not saved', action: 'Reload the page and check the item; try again if it is not shown as you set it.', where: REVIEW },
   // publish gate data rules
-  required_value_missing: { title: 'A required figure is missing', action: 'A blank is not $0.00. Correct the workbook (or Monthly Totals) and import again.', where: WORKBOOK },
+  required_value_missing: { title: 'A total is blank in the workbook', action: 'Shown as missing (never $0.00). Ask the bookkeeper to fill it in if it should have a value; nothing is required to publish.', where: WORKBOOK },
   cutoff_invalid: { title: 'The reporting cutoff date is not a valid date', action: 'Set the correct cutoff date and import again.', where: IMPORT },
   pace_inconsistent: { title: 'Elapsed months do not match the cutoff date', action: 'Re-import with the correct cutoff date.', where: IMPORT },
   cutoff_period_mismatch: { title: 'Cutoff date does not fit this reporting month', action: 'The cutoff must be in this month or the month before. Check the month and cutoff, then import again.', where: IMPORT },
   import_incomplete: { title: 'Budget lines are incomplete', action: 'Income and all three expense groups are required. Import the full workbook again.', where: IMPORT },
-  required_line_value_missing: { title: 'A budget line is missing a figure', action: 'A blank is not $0.00. Correct the workbook and import again.', where: WORKBOOK },
-  detail_unassigned: { title: 'A watch-list row has no confirmed group', action: 'Classify it (Fixed / Variable / Discretionary), or exclude it with a written reason.', where: IMPORT },
+  required_line_value_missing: { title: 'A budget line is missing a figure', action: 'Shown as missing (never $0.00). Ask the bookkeeper to fill it in if it should have a value; nothing is required to publish.', where: WORKBOOK },
+  detail_unassigned: { title: 'A watch-list row has no confirmed group', action: 'Shown as Unassigned and not counted in any group. Classify it (Fixed / Variable / Discretionary) if it belongs to one.', where: IMPORT },
   // import validation
-  cash_total_mismatch: { title: 'Cash accounts do not add up to Total Cash', action: 'Check the cash block in the workbook; correct it and import again, or accept it with a reason.', where: IMPORT },
+  cash_total_mismatch: { title: 'Cash accounts do not add up to Total Cash', action: 'The workbook does not add up. Its printed Total Cash is shown; the sum of the accounts is kept for checking. Ask the bookkeeper to check the cash block.', where: IMPORT },
   cutoff_already_reported: { title: 'The previous period already covers this cutoff', action: 'Check the cutoff date; each period must cover a later month.', where: IMPORT },
   cutoff_date_required: { title: 'No reporting cutoff date', action: 'Confirm the cutoff date on the import screen.', where: IMPORT },
-  cutoff_not_month_end: { title: 'Cutoff is not a month end', action: 'Use the last day of the month, or accept with a reason.', where: IMPORT },
-  detail_rows_missing_vs_prior: { title: 'Watch-list rows from last month are missing', action: 'Correct the workbook, or accept with a reason if they were dropped on purpose.', where: IMPORT },
+  cutoff_not_month_end: { title: 'Cutoff is not a month end', action: 'Check the cutoff date; pace assumes a month end.', where: IMPORT },
+  detail_rows_missing_vs_prior: { title: 'Watch-list rows from last month are missing', action: 'Check they were dropped on purpose.', where: IMPORT },
   detail_section_absent: { title: 'No watch-list section in the workbook', action: 'Nothing required if none is expected; otherwise correct the workbook.', where: IMPORT },
-  detail_section_empty: { title: 'The watch-list section is empty', action: 'Correct the workbook and import again.', where: WORKBOOK },
-  detail_section_expected: { title: 'The watch-list section is missing', action: 'Last month had one. Correct the workbook, or accept with a reason.', where: IMPORT },
-  distribution_quarter_blank: { title: 'A distribution quarter is blank', action: 'A blank is not $0.00. Enter the amount, or confirm none was received.', where: IMPORT },
-  distribution_workbook_total_corrected: { title: 'The workbook\'s distribution total was corrected', action: 'Distributions YTD uses the sum of each entity\'s quarters. Review the noted difference.', where: IMPORT },
-  expense_actual_mismatch: { title: 'Expense groups do not add up to total expenses', action: 'Check the expense summary; correct the workbook or accept with a reason.', where: IMPORT },
-  expense_budget_mismatch: { title: 'Expense budgets do not add up', action: 'Check the expense budget totals; correct the workbook or accept with a reason.', where: IMPORT },
+  detail_section_empty: { title: 'The watch-list section is empty', action: 'Check the workbook; no watch-list rows were found.', where: WORKBOOK },
+  detail_section_expected: { title: 'The watch-list section is missing', action: 'Last month had one. Check it was left out on purpose.', where: IMPORT },
+  distribution_quarter_blank: { title: 'A distribution quarter is blank', action: 'Shown as missing (never $0.00). Confirm none was received.', where: IMPORT },
+  distribution_entity_ytd_mismatch: { title: 'An entity\'s own YTD cell does not match its quarters', action: 'The workbook does not add up. The entity\'s printed YTD is shown; the sum of its quarters is kept for checking.', where: IMPORT },
+  distribution_quarter_total_mismatch: { title: 'A distribution quarter total does not add up', action: 'The workbook does not add up. Its printed quarter totals are shown; the sum of the entities is kept for checking.', where: IMPORT },
+  distribution_workbook_total_corrected: { title: 'The workbook\'s distribution total was corrected', action: 'The workbook does not add up. When the gap is the known formula defect (one entity\'s quarter left out), the calculated entity-quarter total is shown; otherwise the printed total. Ask the bookkeeper to fix the formula.', where: IMPORT },
+  expense_actual_mismatch: { title: 'Expense groups do not add up to total expenses', action: 'The workbook does not add up. Its printed Total Expenses is shown; the sum of the groups is kept for checking.', where: IMPORT },
+  expense_budget_mismatch: { title: 'Expense budgets do not add up', action: 'The workbook does not add up. Its printed expense budget total is shown; the sum of the group budgets is kept for checking.', where: IMPORT },
   expense_group_missing: { title: 'An expense group is missing', action: 'Fixed, Variable and Discretionary are all required. Correct the workbook.', where: WORKBOOK },
-  income_actual_mismatch: { title: 'Income lines do not add up to total income', action: 'Check the income block; correct the workbook or accept with a reason.', where: IMPORT },
-  income_budget_workbook_mismatch: { title: 'The workbook\'s income budget total differs', action: 'The calculated total is used. Review the noted difference.', where: IMPORT },
+  income_actual_mismatch: { title: 'Income lines do not add up to total income', action: 'The workbook does not add up. Its printed Total Income is shown; the sum of the income lines is kept for checking.', where: IMPORT },
+  income_budget_workbook_mismatch: { title: 'The workbook\'s income budget total differs', action: 'The workbook does not add up. When the gap is the known defect (an interest-income line left out), the calculated total is shown; otherwise the printed total.', where: IMPORT },
   pace_proxy_divergence: { title: 'The workbook\'s pace differs from elapsed months', action: 'The calculated pace is used. No action unless the cutoff is wrong.', where: IMPORT },
   period_follows_cutoff_month: { title: 'Report month follows the cutoff month', action: 'Expected for the monthly report. No action.', where: IMPORT },
   period_is_cutoff_month: { title: 'Report month is the cutoff month', action: 'Check this is intended.', where: IMPORT },
-  reporting_convention_changed: { title: 'The reporting convention changed', action: 'Last month used a different cutoff convention. Check the cutoff, or accept with a reason.', where: IMPORT },
+  reporting_convention_changed: { title: 'The reporting convention changed', action: 'Last month used a different cutoff convention. Check the cutoff date.', where: IMPORT },
   reporting_month_mismatch: { title: 'Reporting month does not match the cutoff', action: 'It must be the cutoff month or the month after. Correct the month or cutoff.', where: IMPORT },
   section_missing: { title: 'A required workbook section is missing', action: 'Correct the workbook and import again.', where: WORKBOOK },
-  source_value_missing: { title: 'A workbook value is blank', action: 'A blank is not $0.00. Correct the workbook and import again.', where: WORKBOOK },
+  source_value_missing: { title: 'A workbook value is blank', action: 'Shown as missing (never $0.00). Ask the bookkeeper to fill it in if it should have a value; nothing is required to publish.', where: WORKBOOK },
+  title_names_data_month: { title: 'The workbook is titled by its data month', action: 'No action: the confirmed cutoff supports it.', where: IMPORT },
   title_month_mismatch: { title: 'The workbook title names a different month', action: 'Check you imported the right workbook into the right month.', where: IMPORT },
   transfers_section_absent: { title: 'No recurring transfers section', action: 'Nothing required if none is expected.', where: IMPORT },
-  transfers_section_empty: { title: 'The transfers section is empty', action: 'Correct the workbook and import again.', where: WORKBOOK },
-  transfers_section_expected: { title: 'The recurring transfers section is missing', action: 'Last month had transfers. Correct the workbook, or accept with a reason.', where: IMPORT },
-  transfers_total_mismatch: { title: 'Transfers do not add up to their total', action: 'Check the transfers block; correct the workbook or accept with a reason.', where: IMPORT },
+  transfers_section_empty: { title: 'The transfers section is empty', action: 'Check the workbook; no transfers with an amount were found.', where: WORKBOOK },
+  transfers_section_expected: { title: 'The recurring transfers section is missing', action: 'Last month had transfers. Check there are none this month.', where: IMPORT },
+  transfers_total_mismatch: { title: 'Transfers do not add up to their total', action: 'The workbook does not add up. Both figures are kept.', where: IMPORT },
   previous_period_unavailable: { title: 'The previous period could not be loaded', action: 'Press Retry on the import screen.', where: IMPORT },
   parse_warning: { title: 'The workbook could not be read cleanly', action: 'Review the workbook structure and import again.', where: WORKBOOK },
   // parser
   additional_sheets: { title: 'The workbook has extra sheets', action: 'Confirm nothing on them is needed.', where: IMPORT },
-  cash_total_row_missing: { title: 'The Total Cash row was not found', action: 'Correct the workbook and import again.', where: WORKBOOK },
+  cash_total_row_missing: { title: 'The Total Cash row was not found', action: 'Check the workbook layout; nothing is required to publish.', where: WORKBOOK },
   cutoff_date_conflict: { title: 'The workbook shows conflicting cutoff dates', action: 'Confirm the correct cutoff date.', where: IMPORT },
   cutoff_date_missing: { title: 'The workbook has no cutoff date', action: 'Confirm the cutoff date on the import screen.', where: IMPORT },
   detail_row_blank: { title: 'A watch-list row has no figures', action: 'It was not imported. Check the workbook if it should have figures.', where: IMPORT },
   detail_code_missing: { title: 'A watch-list row has no account code', action: 'Its confirmed group cannot be carried over; classify it again, or add the code in the workbook.', where: IMPORT },
   detail_orphan_row: { title: 'A watch-list row could not be matched', action: 'Check the watch-list block in the workbook.', where: WORKBOOK },
-  expense_total_row_missing: { title: 'The total expenses row was not found', action: 'Correct the workbook and import again.', where: WORKBOOK },
-  income_total_row_missing: { title: 'The total income row was not found', action: 'Correct the workbook and import again.', where: WORKBOOK },
+  expense_total_row_missing: { title: 'The total expenses row was not found', action: 'Check the workbook layout; nothing is required to publish.', where: WORKBOOK },
+  income_total_row_missing: { title: 'The total income row was not found', action: 'Check the workbook layout; nothing is required to publish.', where: WORKBOOK },
   duplicate_section_conflict: { title: 'A section appears twice with different figures', action: 'Remove the wrong copy from the workbook and import again.', where: WORKBOOK },
   duplicate_section_identical: { title: 'A section appears twice (same figures)', action: 'No action needed; consider tidying the workbook.', where: IMPORT },
   section_unparsed: { title: 'A section could not be read', action: 'Check its layout in the workbook.', where: WORKBOOK },
   transfer_labels_misaligned: { title: 'Transfer labels and amounts are misaligned', action: 'Check the transfers block in the workbook.', where: WORKBOOK },
-  unrecognized_content: { title: 'Figures outside every recognized section', action: 'Confirm they are not financial data the dashboard needs.', where: IMPORT },
+  unrecognized_content: { title: 'Figures outside every recognized section', action: 'They were not imported. Check they are not figures the dashboard should show.', where: IMPORT },
   // cross-period
   checks_unavailable: { title: 'Cross-period checks could not run', action: 'Nothing was changed. Try again in a moment.', where: REVIEW },
   previous_month_conflict: { title: 'The previous month has two published versions', action: 'Resolve that first in Review & Publish → Versions.', where: REVIEW },
   no_previous_period: { title: 'No earlier published period to compare with', action: 'No action.', where: REVIEW },
   previous_has_open_revision: { title: 'The previous month has an open revision', action: 'This month is compared with the version clients see now. Re-check after that revision is published.', where: REVIEW },
   cutoff_not_comparable: { title: 'Cutoff unknown; months not compared', action: 'No action unless the cutoff is wrong.', where: REVIEW },
-  cutoff_not_after_previous: { title: 'This period does not cover a later month than the previous one', action: 'Check the cutoff date. After a legacy month this may be expected; accept it with a reason.', where: IMPORT },
+  cutoff_not_after_previous: { title: 'This period does not cover a later month than the previous one', action: 'Each period must cover a later month than the one before. Check the cutoff date and the month.', where: IMPORT },
   month_gap: { title: 'A month is not covered by any published period', action: 'Check whether a month was skipped.', where: REVIEW },
   new_year: { title: 'New year: year-to-date figures restart', action: 'No action.', where: REVIEW },
   legacy_previous: { title: 'The previous period was not validated; figures not compared', action: 'No action.', where: REVIEW },
@@ -276,20 +287,20 @@ export const CATALOGUE: Record<string, { title: string; action: string; where: s
   ytd_expenses_decreased: { title: 'Total expenses year-to-date went down', action: ACCEPT, where: IMPORT },
   distributions_ytd_decreased: { title: 'Distributions YTD went down', action: ACCEPT, where: IMPORT },
   savings_in_ytd_decreased: { title: 'Savings / Distributions In went down', action: ACCEPT, where: IMPORT },
-  annual_budget_changed: { title: 'An annual budget changed mid-year', action: 'If the budget was revised, accept it with a written reason; otherwise correct the workbook.', where: IMPORT },
-  month_vs_ytd: { title: 'This month does not equal the change in year-to-date', action: 'Check the month column and year-to-date in the workbook; correct it or accept with a reason.', where: IMPORT },
+  annual_budget_changed: { title: 'An annual budget changed mid-year', action: 'Shown as the workbook has it. Check the budget was revised on purpose.', where: IMPORT },
+  month_vs_ytd: { title: 'This month does not equal the change in year-to-date', action: 'Shown as the workbook has it. Often the previous month was reported before all its entries were posted.', where: IMPORT },
   group_ytd_decreased: { title: 'An expense group\'s year-to-date went down', action: ACCEPT, where: IMPORT },
-  group_budget_changed: { title: 'An expense group\'s annual budget changed', action: 'If the budget was revised, accept it with a written reason; otherwise correct the workbook.', where: IMPORT },
+  group_budget_changed: { title: 'An expense group\'s annual budget changed', action: 'Shown as the workbook has it. Check the budget was revised on purpose.', where: IMPORT },
   income_line_decreased: { title: 'An income line went down', action: 'Review it (e.g. a reversal). No action required if expected.', where: REVIEW },
   lines_removed: { title: 'Budget lines from last month are gone', action: 'Check they were removed on purpose.', where: REVIEW },
   lines_added: { title: 'New budget lines this month', action: 'Check they are intended.', where: REVIEW },
-  detail_row_missing: { title: 'A watch-list row from last month is missing', action: 'Correct the workbook, or accept with a reason if it was dropped on purpose.', where: IMPORT },
-  detail_code_reused: { title: 'A watch-list code now names a different category', action: 'Check the code in the workbook; correct it or accept with a reason.', where: IMPORT },
-  detail_group_changed: { title: 'A watch-list row changed group', action: 'If the reclassification is intended, accept it with a written reason.', where: IMPORT },
+  detail_row_missing: { title: 'A watch-list row from last month is missing', action: 'Check it was dropped on purpose.', where: IMPORT },
+  detail_code_reused: { title: 'A watch-list code now names a different category', action: 'Check the row was renamed on purpose; its group is not carried forward.', where: IMPORT },
+  detail_group_changed: { title: 'A watch-list row changed group', action: 'Check the reclassification is intended.', where: IMPORT },
   detail_ytd_decreased: { title: 'A watch-list row\'s year-to-date went down', action: 'Review it (refund or reclassification). No action required if expected.', where: REVIEW },
   distribution_entity_removed: { title: 'A distribution entity from last month is gone', action: 'Check it was removed on purpose.', where: REVIEW },
-  closed_quarter_missing: { title: 'A closed distribution quarter is blank', action: 'A blank is not $0.00. Enter the amount (last month had one).', where: IMPORT },
-  closed_quarter_changed: { title: 'A closed distribution quarter changed', action: 'Closed quarters should not change. If it is a correction, accept it with a written reason.', where: IMPORT },
+  closed_quarter_missing: { title: 'A closed distribution quarter is blank', action: 'Shown as missing (never $0.00); last month had a value. Ask the bookkeeper to fill it in.', where: IMPORT },
+  closed_quarter_changed: { title: 'A closed distribution quarter changed', action: 'Closed quarters normally do not change. Check it is a correction.', where: IMPORT },
   transfers_ended: { title: 'Recurring transfers ended', action: 'Check they ended on purpose.', where: REVIEW },
   transfers_started: { title: 'New recurring transfers', action: 'Check they are intended.', where: REVIEW },
   cash_accounts_changed: { title: 'Cash accounts were added or removed', action: 'Check the change is intended.', where: REVIEW },
@@ -304,10 +315,10 @@ export function explain(code: string) {
 
 // ---- the four groups --------------------------------------------------------------
 // Everything a reviewer needs, in plain language:
-//   blockers      must be fixed; cannot be overridden
-//   needsReview   needs a written reason, or a checklist item to (re)confirm
-//   warnings      worth a look; never block
-//   completed     confirmed items, accepted reasons, automated checks that passed
+//   blockers      structural: the workbook cannot be represented faithfully; must be fixed
+//   needsReview   optional review checklist items not yet confirmed (never block)
+//   warnings      missing and unusual values, highlighted; never block
+//   completed     confirmed items, reasons recorded under earlier rules, checks that passed
 // plus notes (context such as "new year"), kept out of the way.
 // A check is listed as passed only if it actually RAN: `notRunIf` names the
 // notes (info findings) that mean it was skipped, e.g. a missing month column.
@@ -334,13 +345,107 @@ const entry = (code: string, message: string | null, extra: any = {}) => {
   return { code, title: e.title, problem: message || e.title, action: e.action, where: e.where, ...extra };
 };
 
-export function buildReview({ period, blockers, crossFindings, crossRan, items }: { period: any; blockers: any[]; crossFindings: any[] | null; crossRan: boolean; items: any[] }) {
+// ---- grouping by root cause ------------------------------------------------------
+// One problem often shows up as several findings (seven watch-list rows, five
+// month-vs-year-to-date checks...). The review groups findings by cause so each
+// cause is read once. Grouping changes NOTHING about the rules: each member
+// keeps its own code and severity; only structural members block.
+const CAUSE_DEFS = [
+  { key: 'structure', title: 'Parts of the workbook could not be read', where: WORKBOOK,
+    action: 'Where a required section is missing, unreadable or duplicated, the workbook cannot be shown faithfully: correct it and import again. Figures outside every recognized section are not imported until they can be mapped safely; check they are not figures the dashboard should show.',
+    match: fam('section_missing', 'section_unparsed', 'duplicate_section_conflict', 'duplicate_section_identical', 'expense_group_missing', 'import_incomplete',
+      'cash_total_row_missing', 'income_total_row_missing', 'expense_total_row_missing', 'unrecognized_content', 'additional_sheets', 'parse_warning') },
+  { key: 'checks', title: 'Checks could not run', action: 'Nothing was changed. Try again in a moment.', where: REVIEW,
+    match: fam('checks_unavailable', 'checklist_unavailable', 'previous_month_conflict', 'previous_period_unavailable') },
+  { key: 'workbook_gaps', title: 'Blank cells in the workbook — one request for the bookkeeper', where: WORKBOOK,
+    action: 'These are shown as missing on the dashboard (never $0.00). Send the bookkeeper this list if any should have a value; a corrected workbook can be imported later. Nothing is required to publish.',
+    match: fam('source_value_missing', 'required_value_missing', 'required_line_value_missing', 'closed_quarter_missing', 'distribution_quarter_blank', 'detail_row_blank',
+      'detail_code_missing', 'savings_in_ytd_missing') },
+  { key: 'watch_list', title: 'Watch-list rows differ from last month', where: IMPORT,
+    action: 'Check the classification of these rows; set any that are wrong. Nothing is required to publish.',
+    match: fam('detail_group_changed', 'detail_code_reused', 'detail_row_missing', 'detail_rows_missing_vs_prior', 'detail_unassigned', 'lines_added', 'lines_removed', 'detail_section_absent', 'detail_section_empty', 'detail_section_expected', 'detail_orphan_row') },
+  { key: 'budget_revision', title: 'Annual budgets changed mid-year', where: IMPORT,
+    action: 'Shown as the workbook has it. Check the budget was revised on purpose.',
+    match: fam('annual_budget_changed', 'group_budget_changed') },
+  { key: 'decreases', title: 'Year-to-date figures went down', where: IMPORT, action: ACCEPT,
+    match: fam('ytd_income_decreased', 'ytd_expenses_decreased', 'group_ytd_decreased', 'distributions_ytd_decreased', 'savings_in_ytd_decreased', 'income_line_decreased', 'detail_ytd_decreased') },
+  { key: 'distributions', title: 'Distribution figures need attention', where: IMPORT,
+    action: 'Shown as the workbook has it. Check the listed distribution figures.',
+    match: fam('closed_quarter_changed', 'distribution_entity_removed', 'distribution_workbook_total_corrected', 'distribution_entity_ytd_mismatch', 'distribution_quarter_total_mismatch') },
+  { key: 'totals', title: 'The workbook does not add up', where: IMPORT,
+    action: 'The workbook\'s printed totals are shown; the totals calculated from its rows are kept for checking. Ask the bookkeeper to check them.',
+    match: fam('cash_total_mismatch', 'income_actual_mismatch', 'income_budget_workbook_mismatch', 'expense_actual_mismatch', 'expense_budget_mismatch', 'transfers_total_mismatch') },
+  { key: 'transfers_cash', title: 'Transfers and cash accounts changed', where: REVIEW, action: 'Check the changes are intended.',
+    match: fam('transfers_ended', 'transfers_started', 'cash_accounts_changed', 'transfers_section_absent', 'transfers_section_empty', 'transfers_section_expected', 'transfer_labels_misaligned') },
+  { key: 'naming_cutoff', title: 'Reporting month, title and cutoff', where: IMPORT, action: 'Check the reporting month and cutoff date are right.',
+    match: fam('title_month_mismatch', 'title_names_data_month', 'period_follows_cutoff_month', 'period_is_cutoff_month', 'cutoff_already_reported', 'cutoff_date_required',
+      'cutoff_not_month_end', 'cutoff_not_after_previous', 'cutoff_not_comparable', 'cutoff_invalid', 'cutoff_period_mismatch', 'cutoff_date_conflict', 'cutoff_date_missing',
+      'pace_inconsistent', 'pace_proxy_divergence', 'reporting_convention_changed', 'reporting_month_mismatch', 'month_gap', 'new_year', 'legacy_previous', 'no_previous_period',
+      'previous_has_open_revision', 'later_month_cutoff', 'later_month_behind') },
+];
+const MONTH_LABELS: Record<string, string> = { income: 'income', expenses: 'expenses', fixed: 'Fixed', variable: 'Variable', discretionary: 'Discretionary' };
+
+// The cause key of one code ('other:<family>' when no cause claims it).
+export function causeOf(code: string) {
+  const d = CAUSE_DEFS.find((c) => c.match(code));
+  if (d) return d.key;
+  if (family(code) === 'month_vs_ytd') return 'month_vs_ytd';
+  return `other:${family(code)}`;
+}
+
+// entries: [{ code, title, problem, action, where, kind }] with kind one of
+// 'blocker' (structural; blocks), 'warning', 'note' ('reason' is accepted from
+// older callers and treated as needing review). Returns causes, most severe first.
+export function groupByCause(entries: any[], { previousLabel = null } = {}) {
+  const prev = previousLabel || 'the previous month';
+  const byKey = new Map<string, any[]>();
+  for (const e of entries) byKey.set(causeOf(e.code), [...(byKey.get(causeOf(e.code)) || []), e]);
+  // Several month-vs-year-to-date mismatches together point upstream: shown once.
+  const mvy = byKey.get('month_vs_ytd') || [];
+  if (mvy.length >= 2) { byKey.delete('month_vs_ytd'); byKey.set('previous_month_incomplete', mvy); }
+  const causes = [];
+  for (const [key, members] of byKey) {
+    const def = CAUSE_DEFS.find((c) => c.key === key);
+    let title, action, where, explanation = null;
+    if (key === 'previous_month_incomplete') {
+      const which = members.map((m) => MONTH_LABELS[param(m.code)] || param(m.code)).join(', ');
+      title = `${prev}'s published figures look incomplete`;
+      explanation = `This month's figures for ${which} do not equal the change in year-to-date since ${prev}. When several disagree together, the usual cause is that ${prev}'s report was prepared before all of its entries were posted -- one upstream issue, not ${members.length} separate problems here.`;
+      action = `This month is shown as the workbook has it; nothing is required to publish. Whether ${prev} needs a revision is a separate decision.`;
+      where = IMPORT;
+    } else if (key === 'month_vs_ytd') {
+      ({ title, action, where } = explain(members[0].code));
+    } else if (def) {
+      ({ title, action, where } = def);
+    } else {
+      ({ title, action, where } = explain(members[0].code));
+    }
+    const hard = members.filter((m) => m.kind === 'blocker');
+    const needReason = members.filter((m) => m.kind === 'reason');
+    const bucket = hard.length ? 'blockers' : needReason.length ? 'needsReview' : members.some((m) => m.kind === 'warning') ? 'warnings' : 'notes';
+    causes.push({
+      key, title, explanation, action, where, bucket, members,
+      counts: { blockers: hard.length, reasons: needReason.length, warnings: members.filter((m) => m.kind === 'warning').length, notes: members.filter((m) => m.kind === 'note').length },
+      // Members needing review (from older callers only; nothing needs a reason now).
+      acceptable: needReason.map((m) => m.code),
+    });
+  }
+  const order = { blockers: 0, needsReview: 1, warnings: 2, notes: 3 };
+  return causes.sort((a, b) => order[a.bucket] - order[b.bucket] || b.members.length - a.members.length);
+}
+
+// dataWarnings: publishGate.dataWarnings() -- blank totals and line figures and
+// unassigned watch-list rows, highlighted (they never block).
+export function buildReview({ period, blockers, crossFindings, crossRan, items, previousLabel = null, dataWarnings = [] }: { period: any; blockers: any[]; crossFindings: any[] | null; crossRan: boolean; items: any[]; previousLabel?: string | null; dataWarnings?: any[] }) {
   const data = (blockers || []).filter(isDataBlocker);
   const out = { blockers: [] as any[], needsReview: [] as any[], warnings: [] as any[], completed: [] as any[], notes: [] as any[] };
   for (const b of data) (b.overridable ? out.needsReview : out.blockers).push(entry(b.code, b.message, { kind: b.overridable ? 'reason' : 'blocker' }));
   for (const s of items || []) if (s.state !== 'confirmed') out.needsReview.push({ ...entry(s.state === 'blocked' ? 'checklist_item_blocked' : 'checklist_incomplete', itemMessage(s)), kind: 'checklist', item: s.key, state: s.state });
-  const validation = (Array.isArray(period?.bva_validation_warnings) ? period.bva_validation_warnings : []).filter((w: any) => w && !w.blocksFinalize && !w.overridden);
+  // Every workbook finding that is not structural (structural ones arrive as
+  // blockers), whatever an older import stored about blocking.
+  const validation = (Array.isArray(period?.bva_validation_warnings) ? period.bva_validation_warnings : []).filter((w: any) => w && !isHardValidation(String(w.code)) && !CLIENT_ONLY_HARD.has(String(w.code)));
   for (const w of validation) out.warnings.push(entry(String(w.code), w.message || null));
+  for (const w of dataWarnings || []) out.warnings.push(entry(String(w.code), w.message || null));
   for (const f of crossFindings || []) {
     if (f.severity === 'warn') out.warnings.push(entry(f.code, f.message));
     if (f.severity === 'info') out.notes.push(entry(f.code, f.message));
@@ -358,5 +463,13 @@ export function buildReview({ period, blockers, crossFindings, crossRan, items }
     const ran = c.kind === 'import' ? imported : crossFigures && !(c.notRunIf || []).some((n) => skipped.has(n));
     if (ran && !c.codes.some((k) => present.has(k))) out.completed.push({ code: `passed:${c.codes[0]}`, title: c.label, problem: 'No issues found.', action: '', where: REVIEW, kind: 'passed' });
   }
+  // The same findings, grouped by root cause (checklist items stay separate).
+  const entries = [
+    ...out.blockers.map((e: any) => ({ ...e, kind: 'blocker' })),
+    ...out.needsReview.filter((e: any) => e.kind === 'reason').map((e: any) => ({ ...e, kind: 'reason' })),
+    ...out.warnings.map((e: any) => ({ ...e, kind: 'warning' })),
+    ...out.notes.map((e: any) => ({ ...e, kind: 'note' })),
+  ];
+  (out as any).causes = groupByCause(entries, { previousLabel });
   return out;
 }

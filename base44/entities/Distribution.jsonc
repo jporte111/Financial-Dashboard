@@ -36,6 +36,10 @@
     },
     "q4": {
       "type": "number"
+    },
+    "workbook_ytd": {
+      "type": "number",
+      "description": "The YTD the BVA workbook prints for this entity. Shown on the dashboard when present (it may differ from the sum of the quarters; the import warns when it does). No default: blank stays missing."
     }
   },
   "required": [

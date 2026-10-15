@@ -4,9 +4,11 @@
 // check / finalize / publish (see periodTransitionCore.ts). Nothing here writes.
 //
 // Each finding has a severity:
-//   block     must be fixed; cannot be overridden
-//   override  blocks finalize / publish until accepted with a written reason
-//   warn      shown for review; never blocks
+//   block     the period's place in the sequence is not safe: the previous
+//             month has conflicting published versions, this period repeats
+//             a month already reported, or the checks could not run
+//   warn      a change or anomaly to review (decreases, budget changes,
+//             group changes, blanks); never blocks, needs no reason
 //   info      context (why a comparison was not made)
 //
 // Rules that keep these checks honest:
@@ -20,8 +22,8 @@
 //   - A missing value is never read as $0.00 (sourceMissing.effectiveRecord):
 //     a comparison with a missing side is not made, and says so. An explicit
 //     0 is a real value.
-//   - Codes carry no amounts, so an accepted reason stays attached to the same
-//     finding between finalize and publish.
+//   - Codes carry no amounts, so a finding keeps its identity between
+//     finalize and publish.
 
 import { effectiveRecord } from './sourceMissing.ts';
 import { monthState, isPublishedFinal } from './periodVersions.ts';
@@ -78,7 +80,7 @@ function neighbour(periods: any[], period: any, dir: -1 | 1) {
 }
 
 type Side = { period: any; lines?: any[]; distributions?: any[]; transfers?: any[]; cash?: any[] };
-type Finding = { code: string; severity: 'block' | 'override' | 'warn' | 'info'; message: string };
+type Finding = { code: string; severity: 'block' | 'warn' | 'info'; message: string };
 
 // Compare `cur` with `prev` (the aligned previous version, or null).
 // ctx: { conflict?, openRevision? } from alignedPrevious.
@@ -106,7 +108,7 @@ export function crossPeriodChecks(cur: Side, prev: Side | null, ctx: any = {}): 
     return out;
   }
   if (ci <= pi) {
-    add(isValidated(p) ? 'block' : 'override', 'cutoff_not_after_previous',
+    add(isValidated(p) ? 'block' : 'warn', 'cutoff_not_after_previous',
       `This period's data runs through ${ymLabel(ci)}, but ${prevLabel} already reports through ${ymLabel(pi)}.`);
     return out;
   }
@@ -131,19 +133,19 @@ export function crossPeriodChecks(cur: Side, prev: Side | null, ctx: any = {}): 
     }
     if (a - b > TOLERANCE_CENTS) add(onDecrease, `${field}_decreased`, `${label} is lower than in ${prevLabel} (by ${pct(b, a)}).`);
   };
-  compare('ytd_income', 'Total income year-to-date', 'override');
-  compare('ytd_expenses', 'Total expenses year-to-date', 'override');
-  compare('distributions_ytd', 'Distributions YTD', 'override');
-  compare('savings_in_ytd', 'Savings / Distributions In', 'override');
+  compare('ytd_income', 'Total income year-to-date', 'warn');
+  compare('ytd_expenses', 'Total expenses year-to-date', 'warn');
+  compare('distributions_ytd', 'Distributions YTD', 'warn');
+  compare('savings_in_ytd', 'Savings / Distributions In', 'warn');
   for (const [field, label] of [['annual_budgeted_income', 'Annual income budget'], ['annual_budgeted_expenses', 'Annual expense budget']]) {
     const a = cents(p[field]), b = cents(c[field]);
-    if (a !== null && b !== null && Math.abs(a - b) > TOLERANCE_CENTS) add('override', `annual_budget_changed:${field}`, `${label} differs from ${prevLabel} (by ${pct(b, a)}).`);
+    if (a !== null && b !== null && Math.abs(a - b) > TOLERANCE_CENTS) add('warn', `annual_budget_changed:${field}`, `${label} differs from ${prevLabel} (by ${pct(b, a)}).`);
   }
   if (adjacent) {
     for (const [mf, yf, label] of [['month_income', 'ytd_income', 'income'], ['month_expenses', 'ytd_expenses', 'expenses']]) {
       const m = cents(c[mf]), y1 = cents(c[yf]), y0 = cents(p[yf]);
       if (m === null || y1 === null || y0 === null) { add('info', `not_comparable:${mf}`, `This month's ${label} or a year-to-date figure is missing; month vs year-to-date not checked.`); continue; }
-      if (Math.abs(m - (y1 - y0)) > TOLERANCE_CENTS) add('override', `month_vs_ytd:${label}`, `This month's ${label} does not equal the change in year-to-date ${label} since ${prevLabel}.`);
+      if (Math.abs(m - (y1 - y0)) > TOLERANCE_CENTS) add('warn', `month_vs_ytd:${label}`, `This month's ${label} does not equal the change in year-to-date ${label} since ${prevLabel}.`);
     }
   }
 
@@ -154,12 +156,12 @@ export function crossPeriodChecks(cur: Side, prev: Side | null, ctx: any = {}): 
     const a = pS.find((l) => lineGroup(l) === g), b = cS.find((l) => lineGroup(l) === g);
     if (!a || !b) continue; // a missing group is blocked by the publish gate itself
     const ay = cents(a.ytd_actual), by = cents(b.ytd_actual);
-    if (ay !== null && by !== null && ay - by > TOLERANCE_CENTS) add('override', `group_ytd_decreased:${g}`, `${g[0].toUpperCase()}${g.slice(1)} year-to-date is lower than in ${prevLabel} (by ${pct(by, ay)}).`);
+    if (ay !== null && by !== null && ay - by > TOLERANCE_CENTS) add('warn', `group_ytd_decreased:${g}`, `${g[0].toUpperCase()}${g.slice(1)} year-to-date is lower than in ${prevLabel} (by ${pct(by, ay)}).`);
     const ab = cents(a.annual_budget), bb = cents(b.annual_budget);
-    if (ab !== null && bb !== null && Math.abs(ab - bb) > TOLERANCE_CENTS) add('override', `group_budget_changed:${g}`, `The ${g} annual budget differs from ${prevLabel} (by ${pct(bb, ab)}).`);
+    if (ab !== null && bb !== null && Math.abs(ab - bb) > TOLERANCE_CENTS) add('warn', `group_budget_changed:${g}`, `The ${g} annual budget differs from ${prevLabel} (by ${pct(bb, ab)}).`);
     if (adjacent) {
       const m = cents(b.month_actual);
-      if (m !== null && ay !== null && by !== null && Math.abs(m - (by - ay)) > TOLERANCE_CENTS) add('override', `month_vs_ytd:${g}`, `This month's ${g} figure does not equal the change in ${g} year-to-date since ${prevLabel}.`);
+      if (m !== null && ay !== null && by !== null && Math.abs(m - (by - ay)) > TOLERANCE_CENTS) add('warn', `month_vs_ytd:${g}`, `This month's ${g} figure does not equal the change in ${g} year-to-date since ${prevLabel}.`);
     }
   }
   const key = (l: any) => `${lineGroup(l)}:${norm(l.category)}`;
@@ -178,10 +180,10 @@ export function crossPeriodChecks(cur: Side, prev: Side | null, ctx: any = {}): 
   const pD = detail(prev), cD = detail(cur);
   for (const [code, a] of pD) {
     const b = cD.get(code);
-    if (!b) { add('override', `detail_row_missing:${code}`, `Watch-list row ${code} "${a.category}" from ${prevLabel} is missing.`); continue; }
-    if (norm(a.category) !== norm(b.category)) add('override', `detail_code_reused:${code}`, `Watch-list code ${code} was "${a.category}" in ${prevLabel} and is "${b.category}" now.`);
+    if (!b) { add('warn', `detail_row_missing:${code}`, `Watch-list row ${code} "${a.category}" from ${prevLabel} is missing.`); continue; }
+    if (norm(a.category) !== norm(b.category)) add('warn', `detail_code_reused:${code}`, `Watch-list code ${code} was "${a.category}" in ${prevLabel} and is "${b.category}" now.`);
     if (a.group_confirmed && b.group_confirmed && lineGroup(a) && lineGroup(b) && lineGroup(a) !== lineGroup(b)) {
-      add('override', `detail_group_changed:${code}`, `Watch-list row ${code} "${b.category}" moved from ${lineGroup(a)} to ${lineGroup(b)}.`);
+      add('warn', `detail_group_changed:${code}`, `Watch-list row ${code} "${b.category}" moved from ${lineGroup(a)} to ${lineGroup(b)}.`);
     }
     const ay = cents(a.ytd_actual), by = cents(b.ytd_actual);
     if (ay !== null && by !== null && ay - by > TOLERANCE_CENTS) add('warn', `detail_ytd_decreased:${code}`, `Watch-list row ${code} "${b.category}" year-to-date is lower than in ${prevLabel} (by ${pct(by, ay)}).`);
@@ -197,8 +199,8 @@ export function crossPeriodChecks(cur: Side, prev: Side | null, ctx: any = {}): 
     for (let q = 1; q <= closedThrough; q++) {
       const av = cents(a[`q${q}`]), bv = cents(b[`q${q}`]);
       if (av === null) continue;
-      if (bv === null) add('block', `closed_quarter_missing:${name}:q${q}`, `"${a.entity_name}" Q${q} (a closed quarter) is blank; ${prevLabel} had a value. A blank is not $0.00.`);
-      else if (Math.abs(av - bv) > TOLERANCE_CENTS) add('override', `closed_quarter_changed:${name}:q${q}`, `"${a.entity_name}" Q${q} (a closed quarter) differs from ${prevLabel}.`);
+      if (bv === null) add('warn', `closed_quarter_missing:${name}:q${q}`, `"${a.entity_name}" Q${q} (a closed quarter) is blank; ${prevLabel} had a value. A blank is not $0.00.`);
+      else if (Math.abs(av - bv) > TOLERANCE_CENTS) add('warn', `closed_quarter_changed:${name}:q${q}`, `"${a.entity_name}" Q${q} (a closed quarter) differs from ${prevLabel}.`);
     }
   }
 

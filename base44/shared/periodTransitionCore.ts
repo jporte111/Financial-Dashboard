@@ -41,7 +41,7 @@
 //   finish_supersede complete the second write of an earlier publish
 // Superseded and discarded versions are read-only: every state change is refused.
 
-import { evaluateFinalize, evaluatePublish, recordedOverrides, hasInitializedState } from './publishGate.ts';
+import { evaluateFinalize, evaluatePublish, recordedOverrides, hasInitializedState, dataWarnings } from './publishGate.ts';
 import { monthState, isRevision, isSuperseded, isDiscarded, isFinal, revisionNumber } from './periodVersions.ts';
 import { REVISION_FIELDS, REQUIRED_REVISION_FIELDS, SchemaOutOfDate, revisionRecord, copyStep, discardStep } from './periodRevisionCore.ts';
 import { alignedPrevious, alignedNext, crossPeriodChecks, laterMonthChecks, UNAVAILABLE } from './crossPeriod.ts';
@@ -269,7 +269,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
     const publish = evaluatePublish(period, lines, cross.findings, cl.items);
     // A draft's open issues are what finalize will ask about; a final period's, what publish will.
     const final = period.status === 'final' && period.bva_import_status === 'final';
-    const review = buildReview({ period, blockers: final ? publish.blockers : finalize.blockers, crossFindings: cross.findings, crossRan: !!cross.previous && !cross.unavailable, items: cl.items });
+    const review = buildReview({ period, blockers: final ? publish.blockers : finalize.blockers, crossFindings: cross.findings, crossRan: !!cross.previous && !cross.unavailable, items: cl.items, previousLabel: cross.previous?.label || null, dataWarnings: dataWarnings(period, lines) });
     return reply(200, { ok: true, finalize, publish, cross_period: cross, checklist: { items: cl.items, unavailable: !!cl.unavailable }, review });
   }
 

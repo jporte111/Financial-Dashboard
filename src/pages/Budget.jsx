@@ -3,6 +3,7 @@ import { usePeriodContext } from '@/lib/usePeriod';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
 import { useBvaDashboard } from '@/lib/useBvaDashboard';
 import { bvaSavingsStatus, fmtCurrency, fmtPct, pct100 } from '@/lib/finance';
+import { incomeNotes } from '@/lib/printedTotalNotes';
 import StatusPill from '@/components/StatusPill';
 import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import SectionHeading from '@/components/SectionHeading';
@@ -82,12 +83,9 @@ export default function Budget() {
             Current-month income is not provided by the BVA workbook for this period — shown as “—”, not $0.00.
           </p>
         )}
-        {vm.snapshot.incomeWorkbookBudget != null && (
-          <p className="mt-2 text-xs text-stone-400">
-            Workbook displayed an annual income budget of {fmtCurrency(vm.snapshot.incomeWorkbookBudget)}; the independently calculated
-            total {fmtCurrency(vm.snapshot.annualBudgetedIncome)} is used.
-          </p>
-        )}
+        {incomeNotes(vm.snapshot).map((t) => (
+          <p key={t} className="mt-2 text-xs text-amber-700" data-testid="income-does-not-add-up">{t}</p>
+        ))}
       </section>
 
       {savingsLines.length > 0 && (

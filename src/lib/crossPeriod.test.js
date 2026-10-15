@@ -28,10 +28,9 @@ const run = (cur, prev, ctx) => crossPeriodChecks(cur, prev, ctx);
 const codes = (f, sev) => f.filter((x) => !sev || x.severity === sev).map((x) => x.code);
 
 describe('a consistent month passes', () => {
-  it('no blocking or reasoned findings for an ordinary next month', () => {
+  it('no findings for an ordinary next month', () => {
     const f = run(side(8), side(7));
     expect(codes(f, 'block')).toEqual([]);
-    expect(codes(f, 'override')).toEqual([]);
     expect(codes(f, 'warn')).toEqual([]);
   });
   it('the first period (no earlier published one) is only a note', () => {
@@ -44,16 +43,16 @@ describe('cutoff alignment', () => {
     const f = run(side(8, { period: { reporting_cutoff_date: '2030-06-30' } }), side(7));
     expect(f).toEqual([expect.objectContaining({ code: 'cutoff_not_after_previous', severity: 'block' })]);
   });
-  it('...but needs only a written reason after a legacy month (the convention switch)', () => {
+  it('...but only warns after a legacy month (the convention switch)', () => {
     const legacy = side(7, { period: { bva_import_status: undefined, reporting_cutoff_date: undefined, months_elapsed: 7 } });
     const f = run(side(8, { period: { reporting_cutoff_date: '2030-07-31', months_elapsed: 7 } }), legacy);
-    expect(f).toEqual([expect.objectContaining({ code: 'cutoff_not_after_previous', severity: 'override' })]);
+    expect(f).toEqual([expect.objectContaining({ code: 'cutoff_not_after_previous', severity: 'warn' })]);
   });
   it('a legacy previous month is context only: its figures are not compared', () => {
     const legacy = side(6, { period: { bva_import_status: undefined, reporting_cutoff_date: undefined, months_elapsed: 6, ytd_income: 999999 } });
     const f = run(side(8), legacy);
     expect(codes(f)).toContain('legacy_previous');
-    expect(codes(f, 'override')).toEqual([]);
+    expect(codes(f, 'warn')).toEqual([]);
   });
   it('a skipped month warns, and month vs year-to-date is not checked across the gap', () => {
     const f = run(side(9, { period: { month_income: 1 } }), side(7));
@@ -68,7 +67,7 @@ describe('cutoff alignment', () => {
   it('a January report carrying December data still belongs to the old year', () => {
     const jan = side(1, { period: { year: 2031, reporting_cutoff_date: '2030-12-31', months_elapsed: 12, ytd_income: 1 } });
     const f = run(jan, side(12, { period: { reporting_cutoff_date: '2030-11-30', ytd_income: 11000 } }));
-    expect(codes(f, 'override')).toContain('ytd_income_decreased');
+    expect(codes(f, 'warn')).toContain('ytd_income_decreased');
   });
 });
 
@@ -78,35 +77,35 @@ describe('figures that should only grow', () => {
     ['ytd_expenses', 'ytd_expenses_decreased'],
     ['distributions_ytd', 'distributions_ytd_decreased'],
     ['savings_in_ytd', 'savings_in_ytd_decreased'],
-  ])('%s lower than last month needs a written reason', (field, code) => {
+  ])('%s lower than last month is a warning (no reason needed)', (field, code) => {
     const f = run(side(8, { period: { [field]: 1 } }), side(7));
-    expect(codes(f, 'override')).toContain(code);
+    expect(codes(f, 'warn')).toContain(code);
   });
-  it('a group year-to-date decrease needs a reason; an income line decrease only warns', () => {
+  it('a group or income-line year-to-date decrease is a warning', () => {
     const cur = side(8, { line: { variable: { ytd_actual: 1 } } });
     cur.lines[0].ytd_actual = 1;
     const f = run(cur, side(7));
-    expect(codes(f, 'override')).toContain('group_ytd_decreased:variable');
+    expect(codes(f, 'warn')).toContain('group_ytd_decreased:variable');
     expect(codes(f, 'warn')).toContain('income_line_decreased:test income');
   });
   it('a difference within a dollar is rounding, not a change', () => {
     const f = run(side(8, { period: { ytd_income: 7000 - 0.99 } }), side(7));
     expect(codes(f)).not.toContain('ytd_income_decreased');
   });
-  it('mid-year budget changes need a reason', () => {
+  it('mid-year budget changes are warnings', () => {
     const f = run(side(8, { period: { annual_budgeted_expenses: 9000 }, line: { fixed: { annual_budget: 1 } } }), side(7));
-    expect(codes(f, 'override')).toEqual(expect.arrayContaining(['annual_budget_changed:annual_budgeted_expenses', 'group_budget_changed:fixed']));
+    expect(codes(f, 'warn')).toEqual(expect.arrayContaining(['annual_budget_changed:annual_budgeted_expenses', 'group_budget_changed:fixed']));
   });
 });
 
 describe('month vs year-to-date', () => {
   it('this month must equal the change in year-to-date since the previous cutoff', () => {
     const f = run(side(8, { period: { month_expenses: 5 }, line: { fixed: { month_actual: 5 } } }), side(7));
-    expect(codes(f, 'override')).toEqual(expect.arrayContaining(['month_vs_ytd:expenses', 'month_vs_ytd:fixed']));
+    expect(codes(f, 'warn')).toEqual(expect.arrayContaining(['month_vs_ytd:expenses', 'month_vs_ytd:fixed']));
   });
   it('a missing month column is not a mismatch (never read as $0.00)', () => {
     const f = run(side(8, { period: { source_missing_fields: ['month_income', 'month_expenses'], month_income: 0, month_expenses: 0 } }), side(7));
-    expect(codes(f, 'override')).toEqual([]);
+    expect(codes(f, 'warn')).toEqual([]);
     expect(codes(f, 'info')).toEqual(expect.arrayContaining(['not_comparable:month_income', 'not_comparable:month_expenses']));
   });
 });
@@ -118,7 +117,7 @@ describe('missing vs explicit zero', () => {
     expect(codes(f, 'info')).toContain('not_comparable:distributions_ytd');
   });
   it('an explicit 0 is a real value: a drop to 0 is a decrease', () => {
-    expect(codes(run(side(8, { period: { distributions_ytd: 0 } }), side(7)), 'override')).toContain('distributions_ytd_decreased');
+    expect(codes(run(side(8, { period: { distributions_ytd: 0 } }), side(7)), 'warn')).toContain('distributions_ytd_decreased');
   });
   it('Savings / Distributions In missing now (present before) only warns -- not required yet', () => {
     const f = run(side(8, { period: { source_missing_fields: ['savings_in_ytd'] } }), side(7));
@@ -128,11 +127,12 @@ describe('missing vs explicit zero', () => {
 
 describe('distributions: closed quarters', () => {
   const prev = () => side(8); // data through July: Q1 and Q2 are closed
-  it('a closed quarter that changed needs a reason; a blank one blocks', () => {
+  it('a closed quarter that changed, or is now blank, is a warning (blank stays missing)', () => {
     const changed = run(side(9, { distributions: [{ entity_name: 'Test Entity', q1: 150, q2: 200, q3: 60 }] }), prev());
-    expect(codes(changed, 'override')).toContain('closed_quarter_changed:test entity:q1');
+    expect(codes(changed, 'warn')).toContain('closed_quarter_changed:test entity:q1');
     const blank = run(side(9, { distributions: [{ entity_name: 'Test Entity', q1: null, q2: 200, q3: 60 }] }), prev());
-    expect(codes(blank, 'block')).toContain('closed_quarter_missing:test entity:q1');
+    expect(codes(blank, 'warn')).toContain('closed_quarter_missing:test entity:q1');
+    expect(codes(blank, 'block')).toEqual([]);
   });
   it('the open quarter may change freely', () => {
     const f = run(side(9, { distributions: [{ entity_name: 'Test Entity', q1: 100, q2: 200, q3: 999 }] }), prev());
@@ -144,10 +144,10 @@ describe('distributions: closed quarters', () => {
 });
 
 describe('watch-list rows, transfers and cash', () => {
-  it('a watch-list row that disappeared, was reused or changed confirmed group needs a reason', () => {
-    expect(codes(run({ ...side(8), lines: lines(8).filter((l) => !l.bva_detail) }, side(7)), 'override')).toContain('detail_row_missing:9001');
-    expect(codes(run(side(8, { line: { detail: { category: 'Other Row' } } }), side(7)), 'override')).toContain('detail_code_reused:9001');
-    expect(codes(run(side(8, { line: { detail: { budget_group: 'fixed' } } }), side(7)), 'override')).toContain('detail_group_changed:9001');
+  it('a watch-list row that disappeared, was reused or changed confirmed group is a warning', () => {
+    expect(codes(run({ ...side(8), lines: lines(8).filter((l) => !l.bva_detail) }, side(7)), 'warn')).toContain('detail_row_missing:9001');
+    expect(codes(run(side(8, { line: { detail: { category: 'Other Row' } } }), side(7)), 'warn')).toContain('detail_code_reused:9001');
+    expect(codes(run(side(8, { line: { detail: { budget_group: 'fixed' } } }), side(7)), 'warn')).toContain('detail_group_changed:9001');
   });
   it('an unconfirmed group is not a "change"', () => {
     expect(codes(run(side(8, { line: { detail: { budget_group: 'fixed', group_confirmed: false } } }), side(7)))).not.toContain('detail_group_changed:9001');
@@ -155,7 +155,7 @@ describe('watch-list rows, transfers and cash', () => {
   it('transfers and cash accounts that start or end only warn', () => {
     const f = run(side(8, { transfers: [{ source: 'Other', purpose: 'X' }], cash: [] }), side(7));
     expect(codes(f, 'warn')).toEqual(expect.arrayContaining(['transfers_ended', 'transfers_started', 'cash_accounts_changed']));
-    expect(codes(f, 'override')).toEqual([]);
+    expect(codes(f, 'block')).toEqual([]);
   });
 });
 
@@ -205,33 +205,24 @@ describe('later months (a revision of an earlier month)', () => {
 
 describe('enforcement in the publish gate', () => {
   const findings = [
-    { code: 'ytd_income_decreased', severity: 'override', message: 'm1' },
-    { code: 'closed_quarter_missing:x:q1', severity: 'block', message: 'm2' },
+    { code: 'ytd_income_decreased', severity: 'warn', message: 'm1' },
+    { code: 'previous_month_conflict', severity: 'block', message: 'm2' },
     { code: 'month_gap', severity: 'warn', message: 'm3' },
     { code: 'new_year', severity: 'info', message: 'm4' },
   ];
-  it('block cannot be overridden; override clears with a written reason; warn/info never block', () => {
-    const b = crossPeriodBlockers(findings, {});
-    expect(b.map((x) => [x.code, x.overridable])).toEqual([[`${CROSS_PERIOD_PREFIX}ytd_income_decreased`, true], [`${CROSS_PERIOD_PREFIX}closed_quarter_missing:x:q1`, false]]);
-    const withReason = crossPeriodBlockers(findings, { [`${CROSS_PERIOD_PREFIX}ytd_income_decreased`]: { reason: 'Refund booked in July.' }, [`${CROSS_PERIOD_PREFIX}closed_quarter_missing:x:q1`]: { reason: 'try' } });
-    expect(withReason.map((x) => x.code)).toEqual([`${CROSS_PERIOD_PREFIX}closed_quarter_missing:x:q1`]);
-    expect(crossPeriodBlockers(findings, { [`${CROSS_PERIOD_PREFIX}ytd_income_decreased`]: { reason: '   ' } })).toHaveLength(2);
+  it('only block (a conflicting or duplicate period) blocks; no reason clears it; warn/info never block', () => {
+    expect(crossPeriodBlockers(findings, {}).map((x) => [x.code, x.overridable])).toEqual([[`${CROSS_PERIOD_PREFIX}previous_month_conflict`, false]]);
+    expect(crossPeriodBlockers(findings, { [`${CROSS_PERIOD_PREFIX}previous_month_conflict`]: { reason: 'try' } })).toHaveLength(1);
   });
   it('without findings (null) nothing changes -- existing callers unaffected', () => {
     expect(crossPeriodBlockers(null)).toEqual([]);
   });
-  it('a reason given at finalize is recorded, and then satisfies publish', () => {
+  it('a decrease needs no reason at finalize or at publish', () => {
     const period = P(8, { status: 'draft', bva_import_status: 'draft', published: false, bva_parsed_source: {} });
-    const rec = recordedOverrides(period, lines(8), { [`${CROSS_PERIOD_PREFIX}ytd_income_decreased`]: { reason: 'Refund booked in July.' } }, 'admin@example.invalid', '2030-08-05T00:00:00Z', findings);
-    expect(rec[`${CROSS_PERIOD_PREFIX}ytd_income_decreased`]).toMatchObject({ reason: 'Refund booked in July.', by: 'admin@example.invalid' });
-    const finalP = { ...period, status: 'final', bva_import_status: 'final', finalized_at: 'x', bva_overrides: rec, checklist: Object.fromEntries(['categories_reviewed', 'classes_reviewed', 'refunds_reviewed', 'income_reviewed', 'cash_confirmed', 'distributions_confirmed', 'budget_report_reviewed'].map((k) => [k, true])) };
-    const pub = evaluatePublish(finalP, lines(8), findings.filter((f) => f.severity !== 'block'));
-    expect(pub.blockers.map((b) => b.code)).toEqual([]);
-  });
-  it('a new reasoned finding at publish (not accepted at finalize) says how to proceed', () => {
-    const finalP = { ...P(8), published: false, finalized_at: 'x', checklist: {} };
-    const b = evaluatePublish(finalP, lines(8), [findings[0]]).blockers.find((x) => x.code.startsWith(CROSS_PERIOD_PREFIX));
-    expect(b.message).toMatch(/reopen to draft and finalize again/);
+    const warnOnly = findings.filter((f) => f.severity !== 'block');
+    expect(recordedOverrides(period, lines(8), {}, 'admin@example.invalid', 't', warnOnly)).toEqual({});
+    const finalP = { ...period, status: 'final', bva_import_status: 'final', finalized_at: 'x', checklist: Object.fromEntries(['categories_reviewed', 'classes_reviewed', 'refunds_reviewed', 'income_reviewed', 'cash_confirmed', 'distributions_confirmed', 'budget_report_reviewed'].map((k) => [k, true])) };
+    expect(evaluatePublish(finalP, lines(8), warnOnly).blockers.map((b) => b.code)).toEqual([]);
   });
 });
 

@@ -12,6 +12,7 @@ import {
   isMaterialUnassignedDetail,
   PUBLISH_CHECKLIST,
   REQUIRED_PERIOD_FIELDS,
+  dataWarnings,
 } from '../../base44/shared/publishGate.ts';
 
 // A draft period as it exists right after a BVA import (state fields come from
@@ -45,47 +46,40 @@ describe('finalize: a clean, fully classified import passes', () => {
   });
 });
 
-describe('finalize: open reconciliations need a documented override', () => {
+describe('finalize: workbook discrepancies are warnings, not blockers', () => {
   const { period, lines } = staged(workbookLikeParsed);
-
-  it('blocks while a blocking reconciliation has no reason', () => {
-    const r = evaluateFinalize(period, lines);
-    expect(codes(r)).toContain('open_reconciliation:cash_total_mismatch');
-    expect(r.blockers.find((b) => b.code === 'open_reconciliation:cash_total_mismatch').overridable).toBe(true);
+  it('a cash total that does not add up does not block and needs no reason', () => {
+    expect(codes(evaluateFinalize(period, lines))).not.toContain('open_reconciliation:cash_total_mismatch');
+    expect(dataWarnings(period, lines).map((w) => w.code)).not.toContain('open_reconciliation:cash_total_mismatch');
   });
-
-  it('an empty or whitespace reason does not count', () => {
-    for (const reason of ['', '   ']) {
-      const r = evaluateFinalize(period, lines, { 'open_reconciliation:cash_total_mismatch': { reason } });
-      expect(codes(r)).toContain('open_reconciliation:cash_total_mismatch');
-    }
+  it('an import stored under the earlier rules (blocksFinalize true) is judged by these rules', () => {
+    const old = { ...period, bva_validation_warnings: [{ code: 'cash_total_mismatch', blocksFinalize: true, overridable: true, message: 'm' }] };
+    expect(evaluateFinalize(old, lines).ok).toBe(true);
   });
-
-  it('a written reason clears it (keyed by gate code or by warning code)', () => {
-    const others = (r) => codes(r).filter((c) => c.startsWith('open_reconciliation:') && c !== 'open_reconciliation:cash_total_mismatch');
-    for (const key of ['open_reconciliation:cash_total_mismatch', 'cash_total_mismatch']) {
-      const r = evaluateFinalize(period, lines, { [key]: { reason: 'confirmed with bookkeeper' } });
-      expect(codes(r)).not.toContain('open_reconciliation:cash_total_mismatch');
-      expect(others(r)).toEqual(others(evaluateFinalize(period, lines)));
-    }
+  it('a structural finding stored with the import still blocks, and no reason clears it', () => {
+    const bad = { ...period, bva_validation_warnings: [{ code: 'duplicate_section_conflict:cash', blocksFinalize: true, overridable: false, message: 'two cash blocks differ' }] };
+    const r = evaluateFinalize(bad, lines, { 'open_reconciliation:duplicate_section_conflict:cash': { reason: 'try' } });
+    expect(r.blockers.find((x) => x.code === 'open_reconciliation:duplicate_section_conflict:cash')).toMatchObject({ overridable: false });
   });
 });
 
-describe('finalize: missing required source values block until corrected or deferred', () => {
-  it.each(REQUIRED_PERIOD_FIELDS.filter((f) => f !== 'reporting_cutoff_date'))('missing %s blocks, and defers with a written reason', (f) => {
+describe('finalize: missing values are shown as missing and highlighted, never blocking', () => {
+  it.each(REQUIRED_PERIOD_FIELDS.filter((f) => f !== 'reporting_cutoff_date'))('missing %s does not block; it is a warning', (f) => {
     const { period, lines } = staged();
     for (const blank of [null, undefined, '']) {
       const p = { ...period, [f]: blank };
-      const code = `required_value_missing:${f}`;
-      const noReason = evaluateFinalize(p, lines, {});
-      expect(codes(noReason)).toContain(code);
-      expect(noReason.blockers.find((b) => b.code === code).overridable).toBe(true);
-      const deferred = evaluateFinalize(p, lines, { [code]: { reason: 'please' } });
-      expect(codes(deferred)).not.toContain(code);
+      expect(evaluateFinalize(p, lines).ok).toBe(true);
+      expect(dataWarnings(p, lines).map((w) => w.code)).toContain(`required_value_missing:${f}`);
     }
   });
 
-  it('a missing cutoff date cannot be deferred', () => {
+  it('a value listed as missing is missing even if a 0 is stored (never $0.00)', () => {
+    const { period, lines } = staged();
+    const p = { ...period, total_cash: 0, source_missing_fields: ['total_cash'] };
+    expect(dataWarnings(p, lines).map((w) => w.code)).toContain('required_value_missing:total_cash');
+  });
+
+  it('a missing cutoff date blocks: the report cannot be placed in a month', () => {
     const { period, lines } = staged();
     const code = 'required_value_missing:reporting_cutoff_date';
     const r = evaluateFinalize({ ...period, reporting_cutoff_date: '' }, lines, { [code]: { reason: 'please' } });
@@ -93,19 +87,11 @@ describe('finalize: missing required source values block until corrected or defe
     expect(r.blockers.find((b) => b.code === code).overridable).toBe(false);
   });
 
-  it('accepting the source warning defers the missing total it traces to', () => {
-    const { period, lines } = staged();
-    const p = { ...period, total_cash: null };
-    for (const key of ['source_value_missing:cash', 'open_reconciliation:source_value_missing:cash']) {
-      const r = evaluateFinalize(p, lines, { [key]: { reason: 'left blank; correct later' } });
-      expect(codes(r)).not.toContain('required_value_missing:total_cash');
-      expect(codes(r)).not.toContain('open_reconciliation:source_value_missing:cash');
-    }
-  });
-
   it('a real zero is a value, not missing', () => {
     const { period, lines } = staged();
-    expect(evaluateFinalize({ ...period, distributions_ytd: 0, total_cash: 0 }, lines).ok).toBe(true);
+    const p = { ...period, distributions_ytd: 0, total_cash: 0 };
+    expect(evaluateFinalize(p, lines).ok).toBe(true);
+    expect(dataWarnings(p, lines)).toEqual([]);
   });
 
   it('optional month totals may stay blank without blocking', () => {
@@ -113,10 +99,11 @@ describe('finalize: missing required source values block until corrected or defe
     expect(evaluateFinalize({ ...period, month_income: null, month_expenses: null }, lines).ok).toBe(true);
   });
 
-  it('a summary line with a missing YTD or budget blocks', () => {
+  it('a summary line with a missing YTD or budget is a warning', () => {
     const { period, lines } = staged();
     const bad = lines.map((l) => (l.budget_group === 'fixed' && !l.bva_detail ? { ...l, ytd_actual: null } : l));
-    expect(codes(evaluateFinalize(period, bad)).some((c) => c.startsWith('required_line_value_missing:') && c.endsWith(':ytd_actual'))).toBe(true);
+    expect(evaluateFinalize(period, bad).ok).toBe(true);
+    expect(dataWarnings(period, bad).some((w) => w.code.startsWith('required_line_value_missing:') && w.code.endsWith(':ytd_actual'))).toBe(true);
   });
 
   it('an incomplete import (missing expense group or income) blocks', () => {
@@ -138,14 +125,13 @@ describe('finalize: pace must come from the confirmed cutoff', () => {
 });
 
 describe('finalize: unassigned DETAIL rows that affect reporting', () => {
-  it('material unassigned rows block until classified or excluded with a reason', () => {
+  it('material unassigned rows are shown as Unassigned and highlighted, not blocking', () => {
     const { period, lines } = staged(cleanParsed, { unassigned: true });
     const material = lines.filter(isMaterialUnassignedDetail);
     expect(material.length).toBeGreaterThan(0);
-    const r = evaluateFinalize(period, lines);
-    for (const l of material) expect(codes(r)).toContain(`detail_unassigned:${l.id}`);
-    const exclusions = Object.fromEntries(material.map((l) => [`detail_unassigned:${l.id}`, { reason: 'not part of the personal budget' }]));
-    expect(evaluateFinalize(period, lines, exclusions).ok).toBe(true);
+    expect(evaluateFinalize(period, lines).ok).toBe(true);
+    const w = dataWarnings(period, lines).map((x) => x.code);
+    for (const l of material) expect(w).toContain(`detail_unassigned:${l.id}`);
   });
 
   it('an unassigned row with no figures (blank or zero) does not block', () => {
@@ -191,9 +177,8 @@ describe('publish: only a finalized, still-valid, reviewed period', () => {
     expect(codes(evaluatePublish({ ...period, status: 'final', checklist: fullChecklist }, lines))).toContain('not_final');
   });
 
-  it('every checklist item must be confirmed', () => {
-    const r = evaluatePublish(finalized(period, { bva_overrides: { ...allRecon, ...exclusions } }), lines);
-    expect(codes(r).filter((c) => c.startsWith('checklist_incomplete:'))).toHaveLength(PUBLISH_CHECKLIST.length);
+  it('the checklist is optional: nothing confirmed still publishes', () => {
+    expect(evaluatePublish(finalized(period), lines)).toEqual({ ok: true, blockers: [] });
   });
 
   it('passes with finalization, recorded overrides and a complete checklist', () => {
@@ -201,9 +186,13 @@ describe('publish: only a finalized, still-valid, reviewed period', () => {
     expect(evaluatePublish(p, lines)).toEqual({ ok: true, blockers: [] });
   });
 
-  it('re-checks the data at publish time (a value removed after finalize blocks)', () => {
-    const p = finalized(period, { bva_overrides: { ...allRecon, ...exclusions }, checklist: fullChecklist, total_cash: null });
-    expect(codes(evaluatePublish(p, lines))).toContain('required_value_missing:total_cash');
+  it('re-checks the data at publish time: a missing total publishes (shown as missing); a lost cutoff blocks', () => {
+    const p = finalized(period, { checklist: fullChecklist, total_cash: null });
+    expect(evaluatePublish(p, lines).ok).toBe(true);
+    expect(codes(evaluatePublish({ ...p, reporting_cutoff_date: '' }, lines))).toContain('required_value_missing:reporting_cutoff_date');
+  });
+  it('publishes with no written reasons at all', () => {
+    expect(evaluatePublish(finalized(period, { checklist: fullChecklist }), lines)).toEqual({ ok: true, blockers: [] });
   });
 
   it('an already-published period is not re-published', () => {
@@ -224,15 +213,10 @@ describe('existing published records are never re-judged', () => {
 
 describe('recordedOverrides', () => {
   const { period, lines } = staged(workbookLikeParsed);
-  it('records only reasons for blockers that were actually present, trimmed, with who/when', () => {
-    const out = recordedOverrides(period, lines, {
-      'open_reconciliation:cash_total_mismatch': { reason: '  confirmed  ' },
-      'open_reconciliation:not_a_real_code': { reason: 'ignored' },
-      'required_value_missing:total_cash': { reason: 'not overridable' },
-    }, 'admin@example.invalid', '2026-08-05T10:00:00Z');
-    expect(out['open_reconciliation:cash_total_mismatch']).toEqual({ reason: 'confirmed', by: 'admin@example.invalid', at: '2026-08-05T10:00:00Z' });
-    expect(out).not.toHaveProperty('open_reconciliation:not_a_real_code');
-    expect(out).not.toHaveProperty('required_value_missing:total_cash');
+  it('records nothing new (no finding needs a reason); reasons recorded earlier are kept', () => {
+    expect(recordedOverrides(period, lines, { 'open_reconciliation:cash_total_mismatch': { reason: 'x' } }, 'a', 't')).toEqual({});
+    const earlier = { 'open_reconciliation:cash_total_mismatch': { reason: 'kept', by: 'a', at: 't' } };
+    expect(recordedOverrides({ ...period, bva_overrides: earlier }, lines, {}, 'b', 'u')).toEqual(earlier);
   });
 });
 

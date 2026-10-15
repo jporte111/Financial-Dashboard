@@ -4,31 +4,26 @@
 // derived figure and every parts-vs-total reconciliation is recomputed here
 // from the raw primitives and compared against what the workbook displayed.
 //
-// Policy (from the requirements + explicit corrections):
-//   - When a computed value conflicts with the workbook value, keep BOTH and
-//     raise a warning. Use the CALCULATED value unless an authorized override
-//     with a reason is saved.
-//   - Annual income budget: use the independently calculated total; record the
-//     workbook's displayed total as a discrepancy (it omits sub-cent lines).
-//   - Distributions YTD: the sum of each entity's own quarters (q1+q2+q3+q4)
-//     is authoritative. The workbook's displayed grand total is kept only as
-//     an audit-trail source value — it is a manually-typed cell range and has
-//     been wrong before (e.g. a column subtotal formula that silently skips
-//     one entity's row). When the two disagree, this does NOT block
-//     finalization and needs no override: the arithmetic is simply corrected,
-//     and a non-blocking notice records what happened for Admin review so the
-//     source spreadsheet's formula can be fixed.
-//   - A period cannot be marked Final while a required reconciliation fails
-//     unless an explicit override is recorded for it.
+// Policy:
+//   - The dashboard shows what the workbook contains. Missing and unusual
+//     values are WARNINGS: highlighted for review, never a reason to block
+//     finalize or publish, and no written reason is needed to publish them.
+//     Only structural / integrity failures block (base44/shared/hardRules.ts):
+//     the app cannot tell what the workbook says or which period it is.
+//   - Printed totals (owner decision, October 2026): when the workbook's
+//     printed total disagrees with the sum of its rows, the PRINTED total is
+//     what the dashboard shows (reconciled.display), and a warning says the
+//     workbook does not add up. The total calculated from the rows is kept
+//     (reconciled.*) for validation. With no printed total, the calculated
+//     one is shown. This covers Total Cash, Total Income and the annual income
+//     budget, Total Expenses and the annual expense budget, Distributions YTD,
+//     each entity's distributions YTD, and the quarter column totals.
 //   - Missing vs zero: a blank source value stays null all the way through.
 //     A total with a missing part is itself missing (null), never a partial
-//     sum. A missing Actual YTD / Annual Budget / balance / amount blocks
-//     finalization, but it can be DEFERRED: accept the warning with a
-//     written reason to leave it blank for now and correct it later. The
-//     value is never read as $0.00.
-//   - Warnings carry `overridable`: false means no reason can clear it.
+//     sum. It is shown as missing, never as $0.00.
 
 import { n, round2, expectedPacePct, computeYtd, elapsedMonthsFromCutoff } from './bva.js';
+import { isHardValidation, CLIENT_ONLY_HARD } from '../../base44/shared/hardRules.ts';
 
 export const SEVERITY = { ERROR: 'error', WARNING: 'warning' };
 
@@ -40,6 +35,8 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 const r2 = (v) => (v == null ? null : round2(v));
+// The workbook's printed figure when present, else the calculated one.
+const printedOr = (printed, calculated) => (printed != null ? round2(n(printed)) : r2(calculated));
 
 // Sum of values; null when any part is missing (a partial sum is not a total).
 const sumOrNull = (values) => (values.some((v) => v == null) ? null : round2(values.reduce((s, v) => s + n(v), 0)));
@@ -121,8 +118,7 @@ const ymLabel = (ym) => `${MONTH_NAMES[ym.month - 1]} ${ym.year}`;
 /**
  * @param {object} parsed  output of parseBvaWorkbook()
  * @param {object} opts     { elapsedMonths?, cutoffDate?, overrides?, period?, previous? }
- *   overrides: { [warningCode]: { reason, by, at } } — clears blocksFinalize
- *              for overridable warnings only.
+ *   overrides: accepted for compatibility; no warning needs one any more.
  *   period:    { month, year } — the reporting period being imported into.
  *   previousUnavailable: true when the previous period could not be loaded —
  *              its checks did not run, which blocks (never skipped silently).
@@ -132,12 +128,12 @@ const ymLabel = (ym) => `${MONTH_NAMES[ym.month - 1]} ${ym.year}`;
  */
 export function validateBva(parsed, opts = {}) {
   const warnings = [];
-  const overrides = opts.overrides || {};
   // Confirmed group mappings (saved BudgetLine rows or import corrections),
   // keyed by normalized category code. The parsed workbook itself carries no
   // group for watch-list rows.
   const groupMap = opts.groupMap || {};
-  const cleared = (code) => !!overrides[code];
+  // Only structural / integrity findings block (hardRules.ts); no reason clears them.
+  const isHard = (code) => isHardValidation(code) || CLIENT_ONLY_HARD.has(code);
   const cutoffDate = opts.cutoffDate || parsed?.meta?.cutoffDate || null;
   const elapsedMonths = opts.elapsedMonths != null ? opts.elapsedMonths : cutoffDate ? elapsedMonthsFromCutoff(cutoffDate) : null;
   const pacePct = expectedPacePct(elapsedMonths);
@@ -145,27 +141,28 @@ export function validateBva(parsed, opts = {}) {
 
   // Carry through any structural problems the parser reported.
   for (const pw of parsed?.parseWarnings || []) {
-    const overridable = pw.overridable !== false;
+    const hard = isHard(pw.code || 'parse_warning');
     warn(warnings, {
       code: pw.code || 'parse_warning',
       section: pw.section || 'workbook',
       message: pw.message,
       requiresAdminReview: true,
-      overridable,
-      blocksFinalize: !!pw.blocksFinalize && !(overridable && cleared(pw.code || 'parse_warning')),
+      overridable: !hard,
+      blocksFinalize: hard,
     });
   }
   const has = (code) => warnings.some((w) => w.code === code);
-  const block = (w) => warn(warnings, { requiresAdminReview: true, ...w, blocksFinalize: w.overridable === false ? true : !cleared(w.code) });
+  // A finding for review; it blocks only when it is structural (isHard).
+  const block = (w) => warn(warnings, { requiresAdminReview: true, ...w, blocksFinalize: isHard(w.code), overridable: !isHard(w.code) });
 
   if (opts.previousUnavailable) {
-    block({ code: 'previous_period_unavailable', section: 'meta', message: 'The previous period could not be loaded, so the checks against it did not run. Retry before finalizing.', overridable: false });
+    block({ code: 'previous_period_unavailable', section: 'meta', message: 'The previous period could not be loaded, so the comparison with it did not run. Retry.', overridable: false });
   }
 
   // ---- Cutoff date and reporting month -----------------------------------
   if (!cutoffDate) {
     if (!has('cutoff_date_conflict')) {
-      block({ code: 'cutoff_date_required', section: 'meta', message: 'No reporting cutoff date is set. Confirm it before finalizing; pace is not calculated without it.', overridable: false });
+      block({ code: 'cutoff_date_required', section: 'meta', message: 'No reporting cutoff date is set, so the report cannot be placed in a month. Confirm the cutoff date.', overridable: false });
     }
   } else if (!isMonthEnd(cutoffDate)) {
     block({ code: 'cutoff_not_month_end', section: 'meta', message: `The cutoff date ${cutoffDate} is not the last day of a month; elapsed-month pace assumes it is.` });
@@ -182,8 +179,16 @@ export function validateBva(parsed, opts = {}) {
       block({ code: 'reporting_month_mismatch', section: 'meta', message: `The reporting period ${ymLabel(period)} does not match the cutoff date ${cutoffDate}: it must be the cutoff month or the month after it.`, overridable: false });
     }
     const t = parsed?.meta?.titleMonth ? { month: parsed.meta.titleMonth, year: parsed.meta.titleYear } : null;
-    if (t && (t.month !== period.month || t.year !== period.year)) {
-      block({ code: 'title_month_mismatch', section: 'meta', message: `The workbook title names ${ymLabel(t)}, but it is being imported as ${ymLabel(period)}.` });
+    // A title may name the report month, or -- the bookkeeper's convention
+    // since September 2026 -- the month the data runs through, when the
+    // confirmed cutoff supports it (the cutoff month is that month and this
+    // period is the cutoff month or the month after it). Anything else blocks.
+    const namesReportMonth = t && t.month === period.month && t.year === period.year;
+    const namesDataMonth = t && t.month === cutYm.month && t.year === cutYm.year && (offset === 0 || offset === 1);
+    if (t && !namesReportMonth && namesDataMonth) {
+      warn(warnings, { code: 'title_names_data_month', section: 'meta', message: `The workbook title names ${ymLabel(t)}, the month its data runs through (cutoff ${cutoffDate}); it is imported as the ${ymLabel(period)} report. Accepted.` });
+    } else if (t && !namesReportMonth) {
+      block({ code: 'title_month_mismatch', section: 'meta', message: `The workbook title names ${ymLabel(t)}, but it is being imported as ${ymLabel(period)}, and its cutoff (${cutoffDate}) does not support that.` });
     }
     const prev = opts.previous;
     const prevCut = prev && cutoffYm(prev.cutoffDate);
@@ -216,7 +221,7 @@ export function validateBva(parsed, opts = {}) {
     const expectDetail = !!(prev && Array.isArray(prev.detailCodes) && prev.detailCodes.length);
     if (status('detail') === 'absent') {
       if (expectDetail) {
-        block({ code: 'detail_section_expected', section: 'detail', message: `No DETAIL (watch-list) section was found, but ${prev.label || 'the previous period'} had ${prev.detailCodes.length} watch-list categories. Correct the workbook, or record why the watch list is intentionally absent.` });
+        block({ code: 'detail_section_expected', section: 'detail', message: `No DETAIL (watch-list) section was found, but ${prev.label || 'the previous period'} had ${prev.detailCodes.length} watch-list categories. Check whether it was left out on purpose.` });
       } else {
         warn(warnings, { code: 'detail_section_absent', section: 'detail', message: 'This workbook has no DETAIL (watch-list) section, and none is expected from the previous period.', requiresAdminReview: true });
       }
@@ -226,7 +231,7 @@ export function validateBva(parsed, opts = {}) {
     const expectTransfers = !!(prev && prev.transferCount > 0);
     if (status('transfers') === 'absent') {
       if (expectTransfers) {
-        block({ code: 'transfers_section_expected', section: 'transfers', message: `No recurring transfers were found, but ${prev.label || 'the previous period'} had ${prev.transferCount}. Correct the workbook, or record why there are none this month.` });
+        block({ code: 'transfers_section_expected', section: 'transfers', message: `No recurring transfers were found, but ${prev.label || 'the previous period'} had ${prev.transferCount}. Check whether there are none this month.` });
       } else {
         warn(warnings, { code: 'transfers_section_absent', section: 'transfers', message: 'This workbook has no recurring transfers section, and none is expected from the previous period.', requiresAdminReview: true });
       }
@@ -250,7 +255,7 @@ export function validateBva(parsed, opts = {}) {
       block({
         code: `source_value_missing:${key}`,
         section: key,
-        message: `${label}: ${bad.map((x) => x.name || x.code || 'unnamed row').join(', ')} ${bad.length > 1 ? 'have' : 'has'} a blank ${fields.join(' / ')} in the workbook. A blank is not $0.00 and stays blank; correct the workbook, or accept with a reason to leave it blank for now and correct it later.`,
+        message: `${label}: ${bad.map((x) => x.name || x.code || 'unnamed row').join(', ')} ${bad.length > 1 ? 'have' : 'has'} a blank ${fields.join(' / ')} in the workbook. It is shown as missing (never $0.00); ask the bookkeeper to fill it in if it should have a value.`,
       });
     }
   };
@@ -278,11 +283,11 @@ export function validateBva(parsed, opts = {}) {
     warn(warnings, {
       code: 'cash_total_mismatch',
       section: 'cash',
-      message: 'Cash account balances do not sum to the workbook Total Cash. Calculated total is used.',
+      message: 'The workbook does not add up: cash account balances do not sum to its Total Cash. The workbook\'s Total Cash is shown; the calculated total is kept for checking.',
       sourceValue: cashReported,
       calculatedValue: cashSum,
       requiresAdminReview: true,
-      blocksFinalize: !overrides.cash_total_mismatch,
+      blocksFinalize: false,
     });
   }
 
@@ -304,29 +309,39 @@ export function validateBva(parsed, opts = {}) {
     warn(warnings, {
       code: 'income_actual_mismatch',
       section: 'income',
-      message: 'Income categories do not sum to the workbook Total Income. Calculated total is used.',
+      message: 'The workbook does not add up: income categories do not sum to its Total Income. The workbook\'s total is shown; the calculated total is kept for checking.',
       sourceValue: incomeActualReported,
       calculatedValue: incomeActualSum,
       requiresAdminReview: true,
-      blocksFinalize: !overrides.income_actual_mismatch,
+      blocksFinalize: false,
     });
   }
+  // Known workbook defect (owner exception, October 2026): the printed annual
+  // income budget leaves out a bank interest-income line. It is recognised when
+  // the gap is exactly the budget of ONE omitted line that is named "interest"
+  // or has a budget under $1 (the interest lines carry sub-dollar budgets; the
+  // workbook does not otherwise mark them). Then the CALCULATED total is shown;
+  // any other difference shows the printed one.
+  let incomeBudgetKnownDefect = false;
   if (incomeBudgetReported != null && incomeBudgetSum != null && !eq(incomeBudgetSum, incomeBudgetReported)) {
     // Name the exact cause when the gap is explained by specific lines whose
     // budgets the workbook's Total row leaves out (both values are kept).
     const gap = round2(n(incomeBudgetSum) - n(incomeBudgetReported));
     const omitted = gap > 0 ? incomeCats.filter((c) => c.annualBudget != null && eq(n(c.annualBudget), gap)) : [];
+    incomeBudgetKnownDefect = omitted.length === 1 && (/interest/i.test(String(omitted[0].name || '')) || Math.abs(n(omitted[0].annualBudget)) < 1);
     const cause = omitted.length
       ? ` Its Total row omits the budget of: ${omitted.map((c) => `${c.name} (${money(n(c.annualBudget))})`).join(', ')}.`
       : '';
     warn(warnings, {
       code: 'income_budget_workbook_mismatch',
       section: 'income',
-      message: `The workbook's displayed annual income budget total is less than the sum of the income lines' budgets.${cause} The independently calculated total is used.`,
+      message: incomeBudgetKnownDefect
+        ? `The workbook does not add up: its annual income budget total leaves out an interest-income line (a known workbook defect).${cause} The calculated total is shown.`
+        : `The workbook does not add up: its annual income budget total differs from the sum of the income lines' budgets.${cause} The workbook's total is shown; the calculated total is kept for checking.`,
+      knownDefect: incomeBudgetKnownDefect,
       sourceValue: incomeBudgetReported,
       calculatedValue: incomeBudgetSum,
       requiresAdminReview: true,
-      // Recorded as a discrepancy, not a finalize blocker — calculated wins.
       blocksFinalize: false,
     });
   }
@@ -359,11 +374,11 @@ export function validateBva(parsed, opts = {}) {
     warn(warnings, {
       code: 'expense_actual_mismatch',
       section: 'expenses',
-      message: 'Fixed + Variable + Discretionary actual does not equal the workbook Total Expenses. Calculated total is used.',
+      message: 'The workbook does not add up: Fixed + Variable + Discretionary actual does not equal its Total Expenses. The workbook\'s total is shown; the calculated total is kept for checking.',
       sourceValue: expActualReported,
       calculatedValue: expActualSum,
       requiresAdminReview: true,
-      blocksFinalize: !overrides.expense_actual_mismatch,
+      blocksFinalize: false,
     });
   }
   if (expBudgetReported != null && expBudgetSum != null && !eq(expBudgetSum, expBudgetReported)) {
@@ -371,11 +386,11 @@ export function validateBva(parsed, opts = {}) {
       code: 'expense_budget_mismatch',
       section: 'expenses',
       message:
-        'Fixed + Variable + Discretionary annual budget does not equal the workbook Total Annual Expense Budget. Calculated total is used.',
+        'The workbook does not add up: Fixed + Variable + Discretionary annual budget does not equal its Total Annual Expense Budget. The workbook\'s total is shown; the calculated total is kept for checking.',
       sourceValue: expBudgetReported,
       calculatedValue: expBudgetSum,
       requiresAdminReview: true,
-      blocksFinalize: !overrides.expense_budget_mismatch,
+      blocksFinalize: false,
     });
   }
 
@@ -419,6 +434,7 @@ export function validateBva(parsed, opts = {}) {
   const distEntitySum = distEntities.length ? round2(distEntities.reduce((s, e) => s + e.calculatedYtd, 0)) : null;
   const distWorkbookTotal = parsed?.distributions?.reportedTotal ?? null;
   let distributionsReconciled = false;
+  let distributionKnownDefect = null; // the one omitted entity/quarter, when it explains the whole gap
   if (distWorkbookTotal != null && distEntitySum != null) {
     // Cent-based comparison (eq rounds to cents): the grand total can agree to
     // the cent while an entity's own YTD cell is stale, so the two mismatches
@@ -434,26 +450,48 @@ export function validateBva(parsed, opts = {}) {
       warn(warnings, {
         code: 'distribution_entity_ytd_mismatch',
         section: 'distributions',
-        message: `${e.name}'s own YTD cell in the workbook (${money(e.reportedYtd)}) does not equal the sum of its quarters (${money(e.calculatedYtd)}). The entity-quarter total is used.`,
+        message: `${e.name}'s own YTD cell in the workbook (${money(e.reportedYtd)}) does not equal the sum of its quarters (${money(e.calculatedYtd)}). The workbook does not add up; its YTD cell is shown and the sum of the quarters is kept for checking.`,
         sourceValue: e.reportedYtd,
         calculatedValue: e.calculatedYtd,
         requiresAdminReview: true, // keep flagging the workbook formula error for BVA Review
-        blocksFinalize: false, // arithmetically correct; no override needed to use it
+        blocksFinalize: false,
       });
     }
     if (!grandTotalMatches) {
       const gapExplanation = explainDistributionGap(distEntities, parsed?.distributions?.reportedQuarterTotals);
-      const message = gapExplanation
-        ? `Workbook total omitted ${gapExplanation.entity} ${QUARTER_LABEL[gapExplanation.quarter]} of ${money(gapExplanation.amount)}. Dashboard uses the recalculated entity-quarter total of ${money(distEntitySum)}.`
-        : 'Distribution entity quarterly totals do not match the workbook displayed total. The recalculated entity-quarter total is used.';
+      // Known workbook defect (owner exception, October 2026): the column
+      // subtotal skips one entity's row for one quarter. Only when the whole
+      // grand-total gap is exactly that one cell is the CALCULATED total shown
+      // (with that quarter's calculated column total); otherwise the printed one.
+      if (gapExplanation && eq(round2(distEntitySum - n(distWorkbookTotal)), gapExplanation.amount)) distributionKnownDefect = gapExplanation;
+      const message = distributionKnownDefect
+        ? `The workbook does not add up: its Distributions YTD total omits ${gapExplanation.entity} ${QUARTER_LABEL[gapExplanation.quarter]} of ${money(gapExplanation.amount)} (a known workbook formula defect). The calculated entity-quarter total of ${money(distEntitySum)} is shown.`
+        : gapExplanation
+        ? `The workbook does not add up: its Distributions YTD total omits ${gapExplanation.entity} ${QUARTER_LABEL[gapExplanation.quarter]} of ${money(gapExplanation.amount)}. The workbook's total is shown; the entity-quarter total of ${money(distEntitySum)} is kept for checking.`
+        : 'The workbook does not add up: the entities\' quarters do not sum to its Distributions YTD total. The workbook\'s total is shown; the entity-quarter total is kept for checking.';
       warn(warnings, {
         code: 'distribution_workbook_total_corrected',
         section: 'distributions',
         message,
+        knownDefect: !!distributionKnownDefect,
         sourceValue: distWorkbookTotal,
         calculatedValue: distEntitySum,
         requiresAdminReview: true, // keep flagging the workbook formula error for BVA Review
-        blocksFinalize: false, // arithmetically correct; no override needed to use it
+        blocksFinalize: false,
+      });
+    }
+  }
+  // Printed quarter column totals that differ from the sum of the entities.
+  const printedQ = parsed?.distributions?.reportedQuarterTotals || null;
+  if (printedQ && distEntities.length) {
+    // (the known-defect quarter is reported by distribution_workbook_total_corrected, and its sum is shown)
+    const off = ['q1', 'q2', 'q3', 'q4'].filter((q) => q !== distributionKnownDefect?.quarter && printedQ[q] != null && !eq(distEntities.reduce((t, e) => t + n(e[q]), 0), printedQ[q]));
+    if (off.length) {
+      warn(warnings, {
+        code: 'distribution_quarter_total_mismatch',
+        section: 'distributions',
+        message: `The workbook does not add up: its ${off.map((q) => QUARTER_LABEL[q]).join(', ')} distribution total${off.length > 1 ? 's do' : ' does'} not equal the sum of the entities. The workbook's totals are shown.`,
+        requiresAdminReview: true,
       });
     }
   }
@@ -467,7 +505,7 @@ export function validateBva(parsed, opts = {}) {
     warn(warnings, {
       code: 'transfers_total_mismatch',
       section: 'transfers',
-      message: 'Recurring transfer amounts do not sum to the workbook transfer total. Calculated total is used.',
+      message: 'The workbook does not add up: recurring transfer amounts do not sum to its transfer total. Both are kept.',
       sourceValue: transfersReported,
       calculatedValue: transfersTotal,
       requiresAdminReview: true,
@@ -513,7 +551,7 @@ export function validateBva(parsed, opts = {}) {
           percentUsed: c.actualYtd == null || c.annualBudget == null ? null : n(c.annualBudget) !== 0 ? n(c.actualYtd) / n(c.annualBudget) : 0,
         })),
         actualTotal: incomeActualSum,
-        budgetTotal: incomeBudgetSum, // calculated wins
+        budgetTotal: incomeBudgetSum, // calculated, for checking (the dashboard shows display.annual_budgeted_income)
         workbookBudgetTotal: incomeBudgetReported == null ? null : round2(incomeBudgetReported),
         remaining: incomeRemaining,
         percentUsed: incomePercentUsed,
@@ -545,6 +583,19 @@ export function validateBva(parsed, opts = {}) {
       },
       transfers: { items: transferItems.map((t) => ({ ...t, amount: r2(t.amount) })), total: transfersTotal },
       detail: { categories: detailCategories },
+      // What the dashboard shows: the workbook's printed total when it has
+      // one, else the calculated total (a blank stays missing, never $0.00).
+      display: {
+        total_cash: printedOr(cashReported, cashSum),
+        ytd_income: printedOr(incomeActualReported, incomeActualSum),
+        annual_budgeted_income: incomeBudgetKnownDefect ? r2(incomeBudgetSum) : printedOr(incomeBudgetReported, incomeBudgetSum),
+        ytd_expenses: printedOr(expActualReported, expActualSum),
+        annual_budgeted_expenses: printedOr(expBudgetReported, expBudgetSum),
+        distributions_ytd: distributionKnownDefect ? r2(distEntitySum) : printedOr(distWorkbookTotal, distEntitySum),
+        // The defective quarter's column total is left out, so its calculated sum is shown.
+        distribution_quarter_totals: Object.fromEntries(['q1', 'q2', 'q3', 'q4'].filter((q) => q !== distributionKnownDefect?.quarter).map((q) => [q, r2(parsed?.distributions?.reportedQuarterTotals?.[q])]).filter(([, v]) => v != null)),
+        entity_ytd: distEntities.map((e) => printedOr(e.reportedYtd, e.calculatedYtd)),
+      },
     },
   };
 }

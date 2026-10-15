@@ -74,6 +74,7 @@ export default function BvaCorrectionsPanel({
   onSave,
   onRemove,
   savedGroupMap = {},
+  carried = null,
   cutoffDate,
   saveState,
   by,
@@ -97,7 +98,7 @@ export default function BvaCorrectionsPanel({
       </div>
       <div className="mt-5 space-y-4">
         <SavingsCard corrections={corrections} onSave={onSave} onRemove={onRemove} by={by} />
-        <GroupMappingCard validation={validation} corrections={corrections} onSave={onSave} onRemove={onRemove} by={by} />
+        <GroupMappingCard validation={validation} corrections={corrections} onSave={onSave} onRemove={onRemove} by={by} carried={carried} />
         <TransferLabelsCard validation={validation} corrections={corrections} onSave={onSave} onRemove={onRemove} by={by} />
         <DistributionZeroCard validation={validation} corrections={corrections} onSave={onSave} onRemove={onRemove} cutoffDate={cutoffDate} by={by} />
         <AuditTrail parsed={parsed} corrections={corrections} onRemove={onRemove} />

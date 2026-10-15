@@ -144,6 +144,17 @@ describe('partial totals are labelled, never complete', () => {
     expect(vm.cash.partial).toBe(true);
     expect(vm.cash.reconciles).toBe(null);
   });
+  it('cash (printed-total period): a missing balance is missing; the printed Total Cash is shown', () => {
+    const vm = build({ period: { printed_totals: true }, cash: [{ id: 'c1', name: 'Acct A', balance: 100, sort_order: 1 }, { id: 'c2', name: 'Acct B', sort_order: 2 }] });
+    expect(vm.cash.total).toBe(300);
+    expect(vm.cash.calculatedTotal).toBe(100);
+    expect(vm.cash.reconciles).toBe(null);
+  });
+  it('cash (printed-total period) with no printed Total Cash: the known balances, marked partial', () => {
+    const vm = build({ period: { printed_totals: true, total_cash: undefined }, cash: [{ id: 'c1', name: 'Acct A', balance: 100, sort_order: 1 }, { id: 'c2', name: 'Acct B', sort_order: 2 }] });
+    expect(vm.cash.total).toBe(100);
+    expect(vm.cash.partial).toBe(true);
+  });
 
   it('transfers: a missing amount is missing and the total is partial', () => {
     const vm = build({ transfers: [{ id: 't1', amount: 500, source: 'Acct A', purpose: 'Reserve' }, { id: 't2', source: 'Acct B', purpose: 'Lease' }] });

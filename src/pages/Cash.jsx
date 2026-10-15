@@ -24,7 +24,7 @@ export default function Cash() {
   return (
     <div className="space-y-10">
       <SectionHeading title="Cash" subtitle={`Balances as of ${period.label}`} />
-      <CashCard total={totalCash} accounts={list} defaultOpen />
+      <CashCard total={totalCash} reportedTotal={period?.printed_totals === true ? totalCash : null} accounts={list} defaultOpen />
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="rounded-2xl border border-stone-200 bg-white p-6">
           <p className="text-xs uppercase tracking-[0.14em] text-stone-500">Bank Accounts</p>

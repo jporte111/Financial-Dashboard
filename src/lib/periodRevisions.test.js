@@ -183,14 +183,19 @@ describe('copy verification checks values and relationships, not just counts', (
 });
 
 describe('a verified copy is proof of the copy only: edits must pass the normal finalize checks', () => {
-  it('a revision whose edited figures break the gate is not finalized', async () => {
+  it('a revision whose edits break the structure (no cutoff) is not finalized', async () => {
     const db = fakeService(seed());
     const rid = await revise(db);
-    db.tables.ReportingPeriod.get(rid).ytd_income = undefined; // an edit leaves a required value missing
-    delete db.tables.ReportingPeriod.get(rid).ytd_income;
+    db.tables.ReportingPeriod.get(rid).reporting_cutoff_date = ''; // an edit leaves the period without a cutoff
     const f = await t(db, 'finalize', rid);
     expect(f.status).toBe(409);
-    expect(f.body.blockers.map((b) => b.code)).toContain('required_value_missing:ytd_income');
+    expect(f.body.blockers.map((b) => b.code)).toContain('required_value_missing:reporting_cutoff_date');
+  });
+  it('a revision with a figure left blank finalizes (shown as missing)', async () => {
+    const db = fakeService(seed());
+    const rid = await revise(db);
+    delete db.tables.ReportingPeriod.get(rid).ytd_income;
+    expect((await t(db, 'finalize', rid)).status).toBe(200);
   });
 });
 

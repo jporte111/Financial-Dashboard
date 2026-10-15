@@ -102,7 +102,11 @@ async function publishRetry(pid) {
 async function finalizeAndPublish(pid, { publish = true } = {}) {
   const chk = await transition('check', pid);
   const overrides = Object.fromEntries((chk.body?.finalize?.blockers || []).filter((b) => b.overridable !== false).map((b) => [b.code, { reason: 'Fictional staging test period.' }]));
-  const fin = await transition('finalize', pid, { overrides });
+  let fin = await transition('finalize', pid, { overrides });
+  // The function's reads can lag rows just created (import_incomplete), and a
+  // finalize whose reply was lost is answered "already final": retry / accept.
+  for (let i = 0; i < 10 && fin.status === 409 && (fin.body?.blockers || []).some((b) => b.code === 'import_incomplete'); i++) { await sleep(1500); fin = await transition('finalize', pid, { overrides }); }
+  if (fin.status === 409 && (fin.body?.blockers || []).map((b) => b.code).join() === 'already_final' && (await E.ReportingPeriod.get(pid)).status === 'final') fin = { status: 200, body: { ok: true } };
   if (fin.status !== 200) return { fin, overrides };
     await confirmChecklist(pid); // checked, transient-only retry
   const pub = publish ? await publishRetry(pid) : null; // setup publish: transient-only retry
@@ -122,8 +126,17 @@ async function seedPublished({ publish = true } = {}) {
   await E.SavingsSpend.bulkCreate(Array.from({ length: 4 }, (_, i) => ({ period_id: pid, category: `Test savings ${i + 1}`, ytd_amount: 100 + i })));
   const txns = Array.from({ length: 374 }, (_, i) => ({ period_id: pid, date: `${year}-07-${String((i % 28) + 1).padStart(2, '0')}`, amount: Math.round((10 + (i * 37) % 900) * 100) / 100, category: cats[i % cats.length], vendor: `Test vendor ${i % 40}`, description: `Fictional transaction ${i + 1}`, transaction_type: 'expense', treatment: 'personal', source: 'manual' }));
   for (let i = 0; i < txns.length; i += 100) await E.Transaction.bulkCreate(txns.slice(i, i + 100));
+  // Base44 reads can lag rows just written: wait until every seeded row is
+  // visible, so the copy under test starts from the complete original.
+  const expected = ['budgetLines', 'cashAccounts', 'distributions', 'transfers'].reduce((t, k) => t + plan[k].toCreate.length, 0) + 4 + txns.length;
+  for (let i = 0; i < 40; i++) {
+    let seen = 0;
+    for (const e of ENTS) seen += (await rows(e, pid)).length;
+    if (seen >= expected) break;
+    await sleep(1500);
+  }
   const fp = await finalizeAndPublish(pid, { publish });
-  if (fp.fin.status !== 200 || (publish && fp.pub.status !== 200)) throw new Error(`setup finalize ${fp.fin.status} ${JSON.stringify(fp.fin.body?.blockers || '')} publish ${fp.pub?.status}`);
+  if (fp.fin.status !== 200 || (publish && fp.pub.status !== 200)) throw new Error(`setup finalize ${fp.fin.status} ${JSON.stringify(fp.fin.body?.blockers || '')} publish ${fp.pub?.status} ${JSON.stringify((fp.pub?.body?.blockers || []).map((b) => b.code))}`);
   let count = 0;
   for (const e of ENTS) count += (await rows(e, pid)).length;
   return { pid, year, rowCount: count, overrides: fp.overrides };
@@ -139,6 +152,14 @@ async function snapshot(pid) {
   return { record: JSON.stringify(Object.keys(record).sort().map((k) => [k, record[k]])), children: JSON.stringify(children), state: { published: !!p.published, superseded: !!p.superseded } };
 }
 const sameContent = (a, b) => a.record === b.record && a.children === b.children;
+// What differs between two snapshots (field / entity names only), for the report.
+const contentDiff = (a, b) => {
+  const ra = Object.fromEntries(JSON.parse(a.record)), rb = Object.fromEntries(JSON.parse(b.record));
+  const fields = [...new Set([...Object.keys(ra), ...Object.keys(rb)])].filter((k) => JSON.stringify(ra[k]) !== JSON.stringify(rb[k]));
+  const ca = JSON.parse(a.children), cb = JSON.parse(b.children);
+  const ents = Object.keys(ca).filter((e) => JSON.stringify(ca[e]) !== JSON.stringify(cb[e])).map((e) => `${e}(${ca[e].length}->${cb[e].length})`);
+  return [...fields, ...ents].join(',');
+};
 async function waitCopied(rid) {
   let r;
   for (let i = 0; i < 30; i++) {
@@ -252,7 +273,15 @@ if (only.has('interrupt')) {
   const disc = await transition('discard_revision', rid);
   let gone = disc.body?.done;
   for (let i = 0; i < 5 && !gone; i++) gone = (await transition('discard_revision', rid)).body?.done;
-  check('interrupt', 'the bad revision is discarded, rows and all', gone && !(await attempt(() => E.ReportingPeriod.get(rid))).ok && (await rows('Transaction', rid)).length === 0);
+  // Reads can lag the deletes briefly: look again for a few seconds.
+  let periodGone = false, left = -1;
+  for (let i = 0; i < 10; i++) {
+    periodGone = !(await attempt(() => E.ReportingPeriod.get(rid))).ok;
+    left = (await rows('Transaction', rid)).length;
+    if (periodGone && left === 0) break;
+    await sleep(1500);
+  }
+  check('interrupt', 'the bad revision is discarded, rows and all', !!gone && periodGone && left === 0, `done ${!!gone}, period gone ${periodGone}, rows left ${left}`);
   const again = await transition('create_revision', s.pid, { reason: 'Staging test: recreate after discard.' });
   const again2 = again.body?.copy?.done ? again : await waitCopied(again.body?.period_id);
   check('interrupt', 'a fresh revision can be created and verified', again2.body?.copy?.verified === true);
@@ -330,7 +359,8 @@ if (only.has('concurrency')) {
     const disc = await transition('discard_revision', loser.id);
     check('concurrency', 'the reopened competing revision can be discarded', disc.status === 200);
   }
-  check('6-original', 'original figures unchanged through the concurrency tests', sameContent(before, await snapshot(s.pid)));
+  const afterC = await snapshot(s.pid);
+  check('6-original', 'original figures unchanged through the concurrency tests', sameContent(before, afterC), sameContent(before, afterC) ? '' : contentDiff(before, afterC));
 }
 
 // ==== 1b. rate limits under a burst: three ~400-row copies at once ==============

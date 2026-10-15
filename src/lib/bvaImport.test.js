@@ -76,17 +76,68 @@ describe('child-entity reconciliation on re-import', () => {
 });
 
 describe('income budget + distributions handling', () => {
-  it('stores the independently calculated income budget and keeps the workbook value only as a discrepancy reference', () => {
+  it('income budget, known defect (the printed total leaves out an interest line): the calculated total is stored, with the warning', () => {
     const p = plan(workbookLikeParsed);
     expect(p.periodData.annual_budgeted_income).toBe(1320012); // calculated
-    expect(p.periodData.annual_budgeted_income_workbook).toBe(1320000); // workbook displayed
+    expect(p.periodData.annual_budgeted_income_workbook).toBe(1320000); // printed, kept
+    expect(p.warnings.find((w) => w.code === 'income_budget_workbook_mismatch')).toMatchObject({ sourceValue: 1320000, calculatedValue: 1320012, knownDefect: true });
   });
 
-  it('stores the calculated entity-quarter sum as Distributions YTD (never the raw workbook total)', () => {
+  it('income budget, known defect: an omitted line with a budget under $1 (not named "interest") is recognised too', () => {
+    const parsed = workbookLikeParsed();
+    parsed.income.categories.push({ code: null, name: 'Test Bank Sweep', monthActual: 0, actualYtd: 0.05, annualBudget: 0.12 });
+    parsed.income.reportedBudgetTotal = 1320012; // leaves out only the 0.12 line
+    const validation = validateBva(parsed, { cutoffDate: SAMPLE_CUTOFF });
+    const p = planBvaImport({ parsed, validation, confirm });
+    expect(p.periodData.annual_budgeted_income).toBe(1320012.12);
+    expect(validation.warnings.find((w) => w.code === 'income_budget_workbook_mismatch').knownDefect).toBe(true);
+  });
+
+  it('income budget: an omitted line of $1 or more, not named "interest", shows the printed total', () => {
+    const parsed = workbookLikeParsed();
+    parsed.income.categories.push({ code: null, name: 'Test Consulting', monthActual: 0, actualYtd: 1, annualBudget: 500 });
+    parsed.income.reportedBudgetTotal = 1320012; // leaves out only the 500 line
+    const validation = validateBva(parsed, { cutoffDate: SAMPLE_CUTOFF });
+    expect(planBvaImport({ parsed, validation, confirm }).periodData.annual_budgeted_income).toBe(1320012);
+    expect(validation.warnings.find((w) => w.code === 'income_budget_workbook_mismatch').knownDefect).toBe(false);
+  });
+
+  it('income budget, any other difference: the printed total is stored, with the warning', () => {
+    const parsed = workbookLikeParsed();
+    parsed.income.reportedBudgetTotal = 1300000; // not explained by one line
+    const validation = validateBva(parsed, { cutoffDate: SAMPLE_CUTOFF });
+    const p = planBvaImport({ parsed, validation, confirm });
+    expect(p.periodData.annual_budgeted_income).toBe(1300000);
+    expect(validation.warnings.find((w) => w.code === 'income_budget_workbook_mismatch').knownDefect).toBe(false);
+  });
+
+  it('Distributions YTD, known defect (the grand total skips one entity\'s quarter): the calculated total is stored, with the warning', () => {
     const p = plan(workbookLikeParsed);
-    // Entity One 3000 + Entity Two (2000+1500+1500) 5000 = 8000; the
-    // workbook's own (wrong) displayed total of 6500 is not stored here.
+    // The workbook prints 6500, leaving out Entity Two Q2 (1500); the quarters add up to 8000.
     expect(p.periodData.distributions_ytd).toBe(8000);
+    expect(p.warnings.find((w) => w.code === 'distribution_workbook_total_corrected')).toMatchObject({ sourceValue: 6500, calculatedValue: 8000, knownDefect: true });
+    expect(p.periodData.distribution_quarter_totals).not.toHaveProperty('q2'); // the defective column: its sum is shown
+    // Each entity's own printed YTD is still the printed figure (not part of the exception).
+    expect(p.distributions.toCreate.find((d) => d.entity_name === 'Entity Two').workbook_ytd).toBe(4500);
+  });
+
+  it('Distributions YTD, any other difference: the printed total is stored, with the warning', () => {
+    const parsed = workbookLikeParsed();
+    parsed.distributions.reportedTotal = 7000; // not one omitted cell
+    const validation = validateBva(parsed, { cutoffDate: SAMPLE_CUTOFF });
+    const p = planBvaImport({ parsed, validation, confirm });
+    expect(p.periodData.distributions_ytd).toBe(7000);
+    expect(validation.warnings.find((w) => w.code === 'distribution_workbook_total_corrected').knownDefect).toBe(false);
+  });
+
+  it('with no printed total, the calculated one is stored', () => {
+    const parsed = workbookLikeParsed();
+    parsed.distributions.reportedTotal = null;
+    parsed.income.reportedBudgetTotal = null;
+    const validation = validateBva(parsed, { cutoffDate: SAMPLE_CUTOFF });
+    const p = planBvaImport({ parsed, validation, confirm: { month: 7, year: 2026, cutoffDate: SAMPLE_CUTOFF } });
+    expect(p.periodData.distributions_ytd).toBe(8000);
+    expect(p.periodData.annual_budgeted_income).toBe(1320012);
   });
 });
 

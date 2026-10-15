@@ -59,7 +59,7 @@ describe('workbook defect handling', () => {
     expect(v.reconciled.income.remaining).toBe(round2(1320012 - 770007));
   });
 
-  it('distributions: the calculated entity-quarter sum is authoritative; the workbook total is kept only for audit; no override is required', () => {
+  it('distributions, known formula defect: the calculated entity-quarter total is shown; the printed one is kept; a warning, no override', () => {
     const v = run(workbookLikeParsed());
     const w = v.warnings.find((x) => x.code === 'distribution_workbook_total_corrected');
     expect(w).toBeDefined();
@@ -69,10 +69,12 @@ describe('workbook defect handling', () => {
     expect(w.blocksFinalize).toBe(false); // arithmetically correct; no override needed
     // the specific, attributed correction notice
     expect(w.message).toBe(
-      'Workbook total omitted Entity Two Q2 of $1,500.00. Dashboard uses the recalculated entity-quarter total of $8,000.00.'
+      'The workbook does not add up: its Distributions YTD total omits Entity Two Q2 of $1,500.00 (a known workbook formula defect). The calculated entity-quarter total of $8,000.00 is shown.'
     );
+    expect(w.knownDefect).toBe(true);
     expect(v.reconciled.distributions.entitySum).toBe(8000);
-    expect(v.reconciled.distributions.ytd).toBe(8000);
+    expect(v.reconciled.distributions.ytd).toBe(8000); // calculated, for checking
+    expect(v.reconciled.display.distributions_ytd).toBe(8000); // what the dashboard shows (the known-defect exception)
     expect(v.reconciled.distributions.workbookReportedTotal).toBe(6500);
     expect(v.reconciled.distributions.reconciled).toBe(false); // factually: workbook != calculated
     // (this fixture also has an unrelated, still-blocking cash discrepancy —
@@ -95,7 +97,8 @@ describe('workbook defect handling', () => {
     const w = v.warnings.find((x) => x.code === 'distribution_workbook_total_corrected');
     expect(w).toBeDefined();
     expect(w.blocksFinalize).toBe(false);
-    expect(w.message).toBe('Distribution entity quarterly totals do not match the workbook displayed total. The recalculated entity-quarter total is used.');
+    expect(w.message).toBe("The workbook does not add up: the entities' quarters do not sum to its Distributions YTD total. The workbook's total is shown; the entity-quarter total is kept for checking.");
+    expect(v.reconciled.display.distributions_ytd).toBe(4000);
   });
 
   it('carries forward parser structural warnings (misaligned transfer labels)', () => {
@@ -111,18 +114,17 @@ describe('finalize gating (requirement: no Final while required reconciliations 
   it('a clean workbook does not block finalize', () => {
     expect(run(cleanParsed()).blocksFinalize).toBe(false);
   });
-  it('a real-shaped workbook blocks finalize on its cash discrepancy, but NOT on the distributions correction', () => {
+  it('a real-shaped workbook\'s cash discrepancy and distributions correction are warnings, not blockers', () => {
     const v = run(workbookLikeParsed());
-    expect(v.blocksFinalize).toBe(true);
-    expect(v.openReconciliations).toContain('cash_total_mismatch');
-    expect(v.openReconciliations).not.toContain('distribution_workbook_total_corrected');
+    expect(v.blocksFinalize).toBe(false);
+    expect(v.warnings.map((w) => w.code)).toEqual(expect.arrayContaining(['cash_total_mismatch', 'distribution_workbook_total_corrected']));
   });
-  it('flags a hard cash mismatch as a finalize blocker', () => {
+  it('a cash mismatch keeps both figures, uses the calculated total, and does not block', () => {
     const p = cleanParsed();
     p.cash.reportedTotal = 41000; // accounts still sum to 40000
     const v = run(p);
     const w = v.warnings.find((x) => x.code === 'cash_total_mismatch');
-    expect(w.blocksFinalize).toBe(true);
+    expect(w).toMatchObject({ blocksFinalize: false, sourceValue: 41000, calculatedValue: 40000 });
     expect(v.reconciled.cash.total).toBe(40000); // calculated value used
   });
 });

@@ -6,6 +6,14 @@ import InfoHint from '@/components/InfoHint';
 import Variance, { VariancePct } from '@/components/Variance';
 import { PACE_VARIANCE_TOOLTIP } from '@/lib/finance';
 
+// The workbook's printed total is shown; when its rows add up to something
+// else, the card says so (the sum is kept for checking).
+const differs = (shown, calc) => shown != null && calc != null && Math.round(shown * 100) !== Math.round(calc * 100);
+function DoesNotAddUp({ shown, calc, rows }) {
+  if (!differs(shown, calc)) return null;
+  return <p className="mt-2 text-xs text-rose-700" data-testid="does-not-add-up">The workbook does not add up — its {rows} total {fmtCurrency(calc)}; the workbook&apos;s figure is shown.</p>;
+}
+
 function Card({ label, value, subtitle = null, children = null, muted = false }) {
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-6 transition hover:shadow-[0_2px_24px_rgba(0,0,0,0.05)]">
@@ -74,24 +82,32 @@ export default function SnapshotCards({ vm }) {
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <Card label="Total Cash" value={fmtCurrency(s.totalCash)} subtitle={vm.labels.cashAsOf}>
         {s.cashReconciles === false && (
-          <p className="mt-2 text-xs text-rose-700">{SECTION_STATE_TEXT[SECTION_STATE.DISCREPANCY]} — accounts do not match the reported total.</p>
+          <p className="mt-2 text-xs text-rose-700">{SECTION_STATE_TEXT[SECTION_STATE.DISCREPANCY]} — the accounts do not add up to the workbook&apos;s Total Cash, which is shown.</p>
         )}
       </Card>
 
-      <Card label="YTD Income" value={fmtCurrency(s.ytdIncome)} subtitle={vm.labels.incomeThrough} />
+      <Card label="YTD Income" value={fmtCurrency(s.ytdIncome)} subtitle={vm.labels.incomeThrough}>
+        <DoesNotAddUp shown={s.ytdIncome} calc={s.incomeCalculatedYtd} rows="income lines" />
+      </Card>
       <Card
         label="Total Annual Budgeted Income"
         value={fmtCurrency(s.annualBudgetedIncome)}
         subtitle={s.annualBudgetedIncome == null ? 'Not stored for this period' : `${fmtPct(pct100(s.incomeBudgetUsedPct))} received`}
-      />
+      >
+        <DoesNotAddUp shown={s.annualBudgetedIncome} calc={s.incomeCalculatedBudget} rows="income lines' budgets" />
+      </Card>
       <Card label="Remaining Income Budget" value={fmtCurrency(s.remainingIncomeBudget)} />
 
-      <Card label="YTD Expenses" value={fmtCurrency(s.ytdExpenses)} subtitle={vm.labels.expensesThrough} />
+      <Card label="YTD Expenses" value={fmtCurrency(s.ytdExpenses)} subtitle={vm.labels.expensesThrough}>
+        <DoesNotAddUp shown={s.ytdExpenses} calc={s.expensesCalculatedYtd} rows="expense groups" />
+      </Card>
       <Card
         label="Total Annual Budgeted Expenses"
         value={fmtCurrency(s.annualExpenseBudget)}
         subtitle={s.annualExpenseBudget == null ? 'Not stored for this period' : `${fmtPct(pct100(s.expenseBudgetUsedPct))} used`}
-      />
+      >
+        <DoesNotAddUp shown={s.annualExpenseBudget} calc={s.expensesCalculatedBudget} rows="expense groups' budgets" />
+      </Card>
       <Card label="Remaining Annual Expense Budget" value={fmtCurrency(s.remainingAnnualBudget)} />
       <Card label="Expected Pace" value={fmtPct(pct100(s.expectedPacePct))} subtitle={vm.labels.elapsedLabel} />
 

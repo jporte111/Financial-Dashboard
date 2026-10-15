@@ -56,15 +56,15 @@ describe('confirm / unconfirm', () => {
     expect(db.tables.ReportingPeriod.get('aug').checklist.cash_confirmed).toBe(false);
   });
 
-  it('refused, writing nothing: a published period, an unknown item, an item with an open linked blocker', async () => {
-    const db = fakeService(seed([period('jul', 7, 'published'), period('aug', 8, 'final', { distributions_ytd: 0 })]));
+  it('refused, writing nothing: a published period, an unknown item, an item with an open linked structural blocker', async () => {
+    const db = fakeService(seed([period('jul', 7, 'published'), period('aug', 8, 'final', { bva_validation_warnings: [{ code: 'section_missing:distributions', blocksFinalize: true, overridable: false, message: 'No distributions block.' }] })]));
     const before = db.log.length;
     expect((await call(db, 'confirm_checklist', 'jul', { item: 'cash_confirmed' })).status).toBe(409);
     expect((await call(db, 'confirm_checklist', 'aug', { item: 'nonsense' })).status).toBe(400);
     const blocked = await call(db, 'confirm_checklist', 'aug', { item: 'distributions_confirmed' });
     expect(blocked.status).toBe(409);
     expect(blocked.body.blockers[0]).toMatchObject({ code: 'checklist_item_blocked', overridable: false });
-    expect(blocked.body.blockers[0].message).toMatch(/Distributions YTD went down/);
+    expect(blocked.body.blockers[0].message).toMatch(/A required workbook section is missing/);
     expect(db.log.length).toBe(before);
     // ...an unrelated item is not blocked by it
     expect((await call(db, 'confirm_checklist', 'aug', { item: 'cash_confirmed' })).status).toBe(200);
@@ -81,17 +81,20 @@ describe('confirm / unconfirm', () => {
   });
 });
 
-describe('publish requires every item confirmed and current', () => {
-  it('refused until confirmed; ticking the old true/false is not enough', async () => {
-    const db = fakeService(seed([period('aug', 8, 'final', { checklist: Object.fromEntries(CHECKLIST_KEYS.map((k) => [k, true])) })]));
+describe('the checklist is an optional review aid (who/when kept; never blocks)', () => {
+  it('publishes with no item confirmed', async () => {
+    const db = fakeService(seed([period('aug', 8, 'final')]));
     const r = await call(db, 'publish', 'aug');
-    expect(r.status).toBe(409);
-    expect(r.body.blockers.filter((b) => b.code.startsWith('checklist_incomplete:'))).toHaveLength(7);
+    expect(r.status).toBe(200);
+  });
+  it('confirmations are still recorded with who and when', async () => {
+    const db = fakeService(seed([period('aug', 8, 'final')]));
     for (const c of await confirmAll(handlePeriodTransition, db.base44, 'aug', ADMIN, NOW)) expect(c.status).toBe(200);
-    expect((await call(db, 'publish', 'aug')).status).toBe(200);
+    const stored = db.tables.ReportingPeriod.get('aug').checklist_confirmations;
+    for (const k of CHECKLIST_KEYS) expect(stored[k]).toMatchObject({ by: ADMIN.email, at: NOW.toISOString() });
   });
 
-  it('editing a cash balance resets ONLY cash (and the whole-report review); publish waits for those two', async () => {
+  it('editing a cash balance resets ONLY cash (and the whole-report review); publish does not wait', async () => {
     const db = fakeService(seed([period('aug', 8, 'final')]));
     await confirmAll(handlePeriodTransition, db.base44, 'aug', ADMIN, NOW);
     await db.base44.asServiceRole.entities.CashAccount.update('aug-c', { balance: 4410 });
@@ -99,12 +102,7 @@ describe('publish requires every item confirmed and current', () => {
     const chk = await call(db, 'check', 'aug');
     const cash = chk.body.checklist.items.find((s) => s.key === 'cash_confirmed');
     expect(cash.changedParts).toEqual(['cash_accounts']);
-    const pub = await call(db, 'publish', 'aug');
-    expect(pub.status).toBe(409);
-    expect(pub.body.blockers.map((b) => b.code).sort()).toEqual(['checklist_incomplete:budget_report_reviewed', 'checklist_incomplete:cash_confirmed']);
-    expect(pub.body.blockers.find((b) => b.code === 'checklist_incomplete:cash_confirmed').message).toMatch(/needs confirming again -- cash accounts changed since admin@example.invalid confirmed/);
-    await call(db, 'confirm_checklist', 'aug', { item: 'cash_confirmed' });
-    await call(db, 'confirm_checklist', 'aug', { item: 'budget_report_reviewed' });
+    expect(cash.state).toBe('stale');
     expect((await call(db, 'publish', 'aug')).status).toBe(200);
   });
 
@@ -129,7 +127,7 @@ describe('publish requires every item confirmed and current', () => {
     expect(notConfirmed(await itemStates(db, 'aug'))).toEqual(['budget_report_reviewed', 'income_reviewed']);
   });
 
-  it('records that cannot be read: the checks are unavailable, every item blocked, publish refused (fail closed)', async () => {
+  it('records that cannot be read: the checks are unavailable and publish is refused (fail closed)', async () => {
     readRetryOptions.delaysMs = [1, 1, 1];
     const db = fakeService(seed([period('aug', 8, 'final')]));
     await confirmAll(handlePeriodTransition, db.base44, 'aug', ADMIN, NOW);
@@ -138,8 +136,7 @@ describe('publish requires every item confirmed and current', () => {
     expect(pub.status).toBe(409);
     const codes = pub.body.blockers.map((b) => b.code);
     expect(codes).toContain('cross_period:checks_unavailable');
-    expect(codes.filter((c) => c.startsWith('checklist_incomplete:'))).toHaveLength(7);
-    expect(pub.body.blockers.find((b) => b.code === 'checklist_incomplete:cash_confirmed').message).toMatch(/Cross-period checks could not run|Checklist could not be evaluated/);
+    expect(codes.filter((c) => c.startsWith('checklist_incomplete:'))).toEqual([]);
   });
 });
 

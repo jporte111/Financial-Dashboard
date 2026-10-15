@@ -91,7 +91,7 @@ describe.skipIf(!ready)('acceptance values reconcile against the reference workb
     expect(round2(g('fixed').annual + g('variable').annual + g('discretionary').annual)).toBe(EXPECTED.expenses.budgetTotal);
   });
 
-  it('Distributions: the entity-quarter sum is authoritative; the workbook total is audit-only; no override is required', () => {
+  it('Distributions: the known formula defect -- the calculated entity-quarter total is shown; the printed one is kept; a warning, no override', () => {
     expect(R.distributions.entitySum).toBe(EXPECTED.distributions.entitySum);
     expect(R.distributions.ytd).toBe(EXPECTED.distributions.entitySum);
     expect(R.distributions.workbookReportedTotal).toBe(EXPECTED.distributions.workbookReportedTotal);
@@ -103,7 +103,10 @@ describe.skipIf(!ready)('acceptance values reconcile against the reference workb
     expect(w.sourceValue).toBe(EXPECTED.distributions.workbookReportedTotal);
     expect(w.calculatedValue).toBe(EXPECTED.distributions.entitySum);
     expect(w.difference).toBe(EXPECTED.distributions.gap.amount);
-    expect(w.message).toBe(EXPECTED.distributions.gap.message);
+    // The wording changed with the printed-total rule; the attributed gap is still named.
+    expect(w.message).toMatch(/^The workbook does not add up: its Distributions YTD total omits .*known workbook formula defect/);
+    expect(w.knownDefect).toBe(true);
+    expect(R.display.distributions_ytd).toBe(EXPECTED.distributions.entitySum);
     expect(v.blocksFinalize).toBe(false);
     expect(R.distributions.entities.some((e) => e.matches === false)).toBe(true);
   });

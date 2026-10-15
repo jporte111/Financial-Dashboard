@@ -111,40 +111,41 @@ describe('authorization', () => {
 });
 
 describe('finalize', () => {
-  it('refused -> 409 with blockers and NO write', async () => {
-    const r = await run(draftFixture(workbookLikeParsed), { action: 'finalize', period_id: 'p1' });
+  it('refused -> 409 with blockers and NO write (a structural problem: months do not match the cutoff)', async () => {
+    const fx = draftFixture(workbookLikeParsed);
+    fx.period = { ...fx.period, months_elapsed: 1 };
+    const r = await run(fx, { action: 'finalize', period_id: 'p1' });
     expect(r.status).toBe(409);
-    expect(r.body.blockers.map((b) => b.code)).toContain('open_reconciliation:cash_total_mismatch');
+    expect(r.body.blockers.map((b) => b.code)).toContain('pace_inconsistent');
     expect(r.writes).toEqual([]);
   });
 
-  it('accepted -> exactly one state write: final, NOT published, reasons recorded', async () => {
+  it('accepted with warnings and no reasons -> exactly one state write: final, NOT published', async () => {
     const fx = draftFixture(workbookLikeParsed);
-    const overrides = Object.fromEntries(
-      fx.period.bva_validation_warnings.filter((w) => w.blocksFinalize).map((w) => [w.code, { reason: 'confirmed with bookkeeper' }])
-    );
-    const r = await run(fx, { action: 'finalize', period_id: 'p1', overrides });
+    const r = await run(fx, { action: 'finalize', period_id: 'p1' });
     expect(r.status).toBe(200);
     expectOnlyStateWrite(r.writes);
     const d = r.writes[0].data;
     expect(d).toMatchObject({ status: 'final', bva_import_status: 'final', finalized_by: ADMIN.email, finalized_at: NOW.toISOString() });
     expect(d).not.toHaveProperty('published');
-    expect(d.bva_overrides['open_reconciliation:cash_total_mismatch']).toEqual({ reason: 'confirmed with bookkeeper', by: ADMIN.email, at: NOW.toISOString() });
-    expect(d.bva_validation_warnings.find((w) => w.code === 'cash_total_mismatch')).toMatchObject({ overridden: true, blocksFinalize: false });
+    expect(d.bva_validation_warnings.map((w) => w.code)).toContain('cash_total_mismatch'); // kept for review
   });
 
-  it('a missing required value defers past the server only with a written reason', async () => {
+  it('a missing total finalizes with no reason and stays missing (never written as 0)', async () => {
     const fx = draftFixture();
     fx.period = { ...fx.period, ytd_income: null };
-    const refused = await run(fx, { action: 'finalize', period_id: 'p1', overrides: { 'required_value_missing:ytd_income': { reason: '  ' } } });
-    expect(refused.status).toBe(409);
-    expect(refused.writes).toEqual([]);
-    const r = await run(fx, { action: 'finalize', period_id: 'p1', overrides: { 'required_value_missing:ytd_income': { reason: 'left blank; correct in a later revision' } } });
+    const r = await run(fx, { action: 'finalize', period_id: 'p1' });
     expect(r.status).toBe(200);
     expectOnlyStateWrite(r.writes);
-    const d = r.writes[0].data;
-    expect(d).toMatchObject({ status: 'final', bva_import_status: 'final' });
-    expect(d.bva_overrides['required_value_missing:ytd_income']).toMatchObject({ reason: 'left blank; correct in a later revision' });
+    expect(r.writes[0].data).toMatchObject({ status: 'final', bva_import_status: 'final' });
+    expect(r.writes[0].data).not.toHaveProperty('ytd_income');
+  });
+  it('a missing cutoff is refused, whatever reason is given', async () => {
+    const fx = draftFixture();
+    fx.period = { ...fx.period, reporting_cutoff_date: '' };
+    const r = await run(fx, { action: 'finalize', period_id: 'p1', overrides: { 'required_value_missing:reporting_cutoff_date': { reason: 'let it through please' } } });
+    expect(r.status).toBe(409);
+    expect(r.writes).toEqual([]);
   });
 });
 
@@ -164,8 +165,14 @@ describe('publish', () => {
     expect(r.writes).toEqual([]);
   });
 
-  it('an incomplete checklist is refused with no write', async () => {
+  it('an incomplete checklist does not block publish (optional review aid)', async () => {
     const r = await run(finalFx(), { action: 'publish', period_id: 'p1' });
+    expect(r.status).toBe(200);
+  });
+  it('a structural problem refuses publish with no write', async () => {
+    const fx = finalFx();
+    fx.period = { ...fx.period, months_elapsed: 1 };
+    const r = await run(fx, { action: 'publish', period_id: 'p1' });
     expect(r.status).toBe(409);
     expect(r.writes).toEqual([]);
   });
@@ -289,7 +296,9 @@ describe('reopen / invalidate / set_stage', () => {
   });
 
   it('check writes nothing', async () => {
-    const r = await run(draftFixture(workbookLikeParsed), { action: 'check', period_id: 'p1' });
+    const fx = draftFixture(workbookLikeParsed);
+    fx.period = { ...fx.period, months_elapsed: 1 };
+    const r = await run(fx, { action: 'check', period_id: 'p1' });
     expect(r.status).toBe(200);
     expect(r.body.finalize.ok).toBe(false);
     expect(r.writes).toEqual([]);
