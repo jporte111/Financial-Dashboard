@@ -59,7 +59,7 @@ describe('workbook defect handling', () => {
     expect(v.reconciled.income.remaining).toBe(round2(1320012 - 770007));
   });
 
-  it('distributions: the workbook\'s printed total is shown; the entity-quarter sum is kept for checking; a warning, no override', () => {
+  it('distributions, known formula defect: the calculated entity-quarter total is shown; the printed one is kept; a warning, no override', () => {
     const v = run(workbookLikeParsed());
     const w = v.warnings.find((x) => x.code === 'distribution_workbook_total_corrected');
     expect(w).toBeDefined();
@@ -69,11 +69,12 @@ describe('workbook defect handling', () => {
     expect(w.blocksFinalize).toBe(false); // arithmetically correct; no override needed
     // the specific, attributed correction notice
     expect(w.message).toBe(
-      "The workbook does not add up: its Distributions YTD total omits Entity Two Q2 of $1,500.00. The workbook's total is shown; the entity-quarter total of $8,000.00 is kept for checking."
+      'The workbook does not add up: its Distributions YTD total omits Entity Two Q2 of $1,500.00 (a known workbook formula defect). The calculated entity-quarter total of $8,000.00 is shown.'
     );
+    expect(w.knownDefect).toBe(true);
     expect(v.reconciled.distributions.entitySum).toBe(8000);
     expect(v.reconciled.distributions.ytd).toBe(8000); // calculated, for checking
-    expect(v.reconciled.display.distributions_ytd).toBe(6500); // what the dashboard shows
+    expect(v.reconciled.display.distributions_ytd).toBe(8000); // what the dashboard shows (the known-defect exception)
     expect(v.reconciled.distributions.workbookReportedTotal).toBe(6500);
     expect(v.reconciled.distributions.reconciled).toBe(false); // factually: workbook != calculated
     // (this fixture also has an unrelated, still-blocking cash discrepancy —

@@ -316,18 +316,26 @@ export function validateBva(parsed, opts = {}) {
       blocksFinalize: false,
     });
   }
+  // Known workbook defect (owner exception, October 2026): the printed annual
+  // income budget leaves out an interest-income line. When the gap is exactly
+  // that line's budget, the CALCULATED total is shown; otherwise the printed one.
+  let incomeBudgetKnownDefect = false;
   if (incomeBudgetReported != null && incomeBudgetSum != null && !eq(incomeBudgetSum, incomeBudgetReported)) {
     // Name the exact cause when the gap is explained by specific lines whose
     // budgets the workbook's Total row leaves out (both values are kept).
     const gap = round2(n(incomeBudgetSum) - n(incomeBudgetReported));
     const omitted = gap > 0 ? incomeCats.filter((c) => c.annualBudget != null && eq(n(c.annualBudget), gap)) : [];
+    incomeBudgetKnownDefect = omitted.some((c) => /interest/i.test(String(c.name || '')));
     const cause = omitted.length
       ? ` Its Total row omits the budget of: ${omitted.map((c) => `${c.name} (${money(n(c.annualBudget))})`).join(', ')}.`
       : '';
     warn(warnings, {
       code: 'income_budget_workbook_mismatch',
       section: 'income',
-      message: `The workbook does not add up: its annual income budget total differs from the sum of the income lines' budgets.${cause} The workbook's total is shown; the calculated total is kept for checking.`,
+      message: incomeBudgetKnownDefect
+        ? `The workbook does not add up: its annual income budget total leaves out an interest-income line (a known workbook defect).${cause} The calculated total is shown.`
+        : `The workbook does not add up: its annual income budget total differs from the sum of the income lines' budgets.${cause} The workbook's total is shown; the calculated total is kept for checking.`,
+      knownDefect: incomeBudgetKnownDefect,
       sourceValue: incomeBudgetReported,
       calculatedValue: incomeBudgetSum,
       requiresAdminReview: true,
@@ -423,6 +431,7 @@ export function validateBva(parsed, opts = {}) {
   const distEntitySum = distEntities.length ? round2(distEntities.reduce((s, e) => s + e.calculatedYtd, 0)) : null;
   const distWorkbookTotal = parsed?.distributions?.reportedTotal ?? null;
   let distributionsReconciled = false;
+  let distributionKnownDefect = null; // the one omitted entity/quarter, when it explains the whole gap
   if (distWorkbookTotal != null && distEntitySum != null) {
     // Cent-based comparison (eq rounds to cents): the grand total can agree to
     // the cent while an entity's own YTD cell is stale, so the two mismatches
@@ -447,13 +456,21 @@ export function validateBva(parsed, opts = {}) {
     }
     if (!grandTotalMatches) {
       const gapExplanation = explainDistributionGap(distEntities, parsed?.distributions?.reportedQuarterTotals);
-      const message = gapExplanation
+      // Known workbook defect (owner exception, October 2026): the column
+      // subtotal skips one entity's row for one quarter. Only when the whole
+      // grand-total gap is exactly that one cell is the CALCULATED total shown
+      // (with that quarter's calculated column total); otherwise the printed one.
+      if (gapExplanation && eq(round2(distEntitySum - n(distWorkbookTotal)), gapExplanation.amount)) distributionKnownDefect = gapExplanation;
+      const message = distributionKnownDefect
+        ? `The workbook does not add up: its Distributions YTD total omits ${gapExplanation.entity} ${QUARTER_LABEL[gapExplanation.quarter]} of ${money(gapExplanation.amount)} (a known workbook formula defect). The calculated entity-quarter total of ${money(distEntitySum)} is shown.`
+        : gapExplanation
         ? `The workbook does not add up: its Distributions YTD total omits ${gapExplanation.entity} ${QUARTER_LABEL[gapExplanation.quarter]} of ${money(gapExplanation.amount)}. The workbook's total is shown; the entity-quarter total of ${money(distEntitySum)} is kept for checking.`
         : 'The workbook does not add up: the entities\' quarters do not sum to its Distributions YTD total. The workbook\'s total is shown; the entity-quarter total is kept for checking.';
       warn(warnings, {
         code: 'distribution_workbook_total_corrected',
         section: 'distributions',
         message,
+        knownDefect: !!distributionKnownDefect,
         sourceValue: distWorkbookTotal,
         calculatedValue: distEntitySum,
         requiresAdminReview: true, // keep flagging the workbook formula error for BVA Review
@@ -464,7 +481,8 @@ export function validateBva(parsed, opts = {}) {
   // Printed quarter column totals that differ from the sum of the entities.
   const printedQ = parsed?.distributions?.reportedQuarterTotals || null;
   if (printedQ && distEntities.length) {
-    const off = ['q1', 'q2', 'q3', 'q4'].filter((q) => printedQ[q] != null && !eq(distEntities.reduce((t, e) => t + n(e[q]), 0), printedQ[q]));
+    // (the known-defect quarter is reported by distribution_workbook_total_corrected, and its sum is shown)
+    const off = ['q1', 'q2', 'q3', 'q4'].filter((q) => q !== distributionKnownDefect?.quarter && printedQ[q] != null && !eq(distEntities.reduce((t, e) => t + n(e[q]), 0), printedQ[q]));
     if (off.length) {
       warn(warnings, {
         code: 'distribution_quarter_total_mismatch',
@@ -567,11 +585,12 @@ export function validateBva(parsed, opts = {}) {
       display: {
         total_cash: printedOr(cashReported, cashSum),
         ytd_income: printedOr(incomeActualReported, incomeActualSum),
-        annual_budgeted_income: printedOr(incomeBudgetReported, incomeBudgetSum),
+        annual_budgeted_income: incomeBudgetKnownDefect ? r2(incomeBudgetSum) : printedOr(incomeBudgetReported, incomeBudgetSum),
         ytd_expenses: printedOr(expActualReported, expActualSum),
         annual_budgeted_expenses: printedOr(expBudgetReported, expBudgetSum),
-        distributions_ytd: printedOr(distWorkbookTotal, distEntitySum),
-        distribution_quarter_totals: Object.fromEntries(['q1', 'q2', 'q3', 'q4'].map((q) => [q, r2(parsed?.distributions?.reportedQuarterTotals?.[q])]).filter(([, v]) => v != null)),
+        distributions_ytd: distributionKnownDefect ? r2(distEntitySum) : printedOr(distWorkbookTotal, distEntitySum),
+        // The defective quarter's column total is left out, so its calculated sum is shown.
+        distribution_quarter_totals: Object.fromEntries(['q1', 'q2', 'q3', 'q4'].filter((q) => q !== distributionKnownDefect?.quarter).map((q) => [q, r2(parsed?.distributions?.reportedQuarterTotals?.[q])]).filter(([, v]) => v != null)),
         entity_ytd: distEntities.map((e) => printedOr(e.reportedYtd, e.calculatedYtd)),
       },
     },

@@ -76,21 +76,39 @@ describe('child-entity reconciliation on re-import', () => {
 });
 
 describe('income budget + distributions handling', () => {
-  it('stores the workbook\'s printed income budget (the calculated one stays in the warning)', () => {
+  it('income budget, known defect (the printed total leaves out an interest line): the calculated total is stored, with the warning', () => {
     const p = plan(workbookLikeParsed);
-    expect(p.periodData.annual_budgeted_income).toBe(1320000); // printed
-    expect(p.periodData.annual_budgeted_income_workbook).toBe(1320000);
-    expect(p.warnings.find((w) => w.code === 'income_budget_workbook_mismatch')).toMatchObject({ sourceValue: 1320000, calculatedValue: 1320012 });
+    expect(p.periodData.annual_budgeted_income).toBe(1320012); // calculated
+    expect(p.periodData.annual_budgeted_income_workbook).toBe(1320000); // printed, kept
+    expect(p.warnings.find((w) => w.code === 'income_budget_workbook_mismatch')).toMatchObject({ sourceValue: 1320000, calculatedValue: 1320012, knownDefect: true });
   });
 
-  it('stores the workbook\'s printed Distributions YTD, each entity\'s printed YTD, and its quarter totals', () => {
+  it('income budget, any other difference: the printed total is stored, with the warning', () => {
+    const parsed = workbookLikeParsed();
+    parsed.income.reportedBudgetTotal = 1300000; // not explained by one line
+    const validation = validateBva(parsed, { cutoffDate: SAMPLE_CUTOFF });
+    const p = planBvaImport({ parsed, validation, confirm });
+    expect(p.periodData.annual_budgeted_income).toBe(1300000);
+    expect(validation.warnings.find((w) => w.code === 'income_budget_workbook_mismatch').knownDefect).toBe(false);
+  });
+
+  it('Distributions YTD, known defect (the grand total skips one entity\'s quarter): the calculated total is stored, with the warning', () => {
     const p = plan(workbookLikeParsed);
-    // The workbook prints 6500; the entities' quarters add up to 8000 (kept in the warning).
-    expect(p.periodData.distributions_ytd).toBe(6500);
-    expect(p.warnings.find((w) => w.code === 'distribution_workbook_total_corrected')).toMatchObject({ sourceValue: 6500, calculatedValue: 8000 });
-    const two = p.distributions.toCreate.find((d) => d.entity_name === 'Entity Two');
-    expect(two.workbook_ytd).toBe(4500);
-    expect(typeof p.periodData.distribution_quarter_totals).toBe('object');
+    // The workbook prints 6500, leaving out Entity Two Q2 (1500); the quarters add up to 8000.
+    expect(p.periodData.distributions_ytd).toBe(8000);
+    expect(p.warnings.find((w) => w.code === 'distribution_workbook_total_corrected')).toMatchObject({ sourceValue: 6500, calculatedValue: 8000, knownDefect: true });
+    expect(p.periodData.distribution_quarter_totals).not.toHaveProperty('q2'); // the defective column: its sum is shown
+    // Each entity's own printed YTD is still the printed figure (not part of the exception).
+    expect(p.distributions.toCreate.find((d) => d.entity_name === 'Entity Two').workbook_ytd).toBe(4500);
+  });
+
+  it('Distributions YTD, any other difference: the printed total is stored, with the warning', () => {
+    const parsed = workbookLikeParsed();
+    parsed.distributions.reportedTotal = 7000; // not one omitted cell
+    const validation = validateBva(parsed, { cutoffDate: SAMPLE_CUTOFF });
+    const p = planBvaImport({ parsed, validation, confirm });
+    expect(p.periodData.distributions_ytd).toBe(7000);
+    expect(validation.warnings.find((w) => w.code === 'distribution_workbook_total_corrected').knownDefect).toBe(false);
   });
 
   it('with no printed total, the calculated one is stored', () => {

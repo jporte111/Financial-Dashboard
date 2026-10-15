@@ -33,6 +33,15 @@ client note — says the workbook does not add up. With no printed total, the ca
 total is shown. Derived figures (Remaining, Percent Used, pace variance) use what is
 shown. Periods stored before this rule keep their stored figures.
 
+**Two known-defect exceptions (owner, October 2026)** — the calculated total is shown,
+with the warning (`knownDefect: true`):
+- Distributions YTD, when the whole grand-total gap is exactly one entity's quarter the
+  column-subtotal formula skipped (`explainDistributionGap`); that quarter's column total
+  is shown calculated too. Each entity's own printed YTD is not part of the exception.
+- The annual income budget, when the gap is exactly the budget of an omitted
+  interest-income line.
+Any other disagreement shows the printed total.
+
 ## What blocks (October 2026 owner decision)
 
 The dashboard faithfully shows what the workbook contains: upload → review warnings →
@@ -46,9 +55,9 @@ that could not run). Do not add a new blocker outside that list without the owne
 approval.
 
 The income budget total is a known case: the workbook's displayed annual income budget
-omits one of the bank interest-income lines. Under the printed-total rule the printed
-budget is shown, the calculated sum is kept for checking, and the warning names the
-omitted line.
+omits one of the bank interest-income lines. When the gap is exactly that line's budget,
+the calculated total is shown and the warning names the omitted line; any other
+difference shows the printed budget (see above).
 
 ## Missing vs. zero — never coerce blank to $0.00
 
