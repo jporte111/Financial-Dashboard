@@ -103,7 +103,9 @@ async function makeMonth(year, month, { period = {}, dist = { q1: 101, q2: 203 }
   const f = await finalizeAfterLag(pid);
   if (f.status !== 200) throw new Error(`finalize ${month}/${year}: ${f.status} ${JSON.stringify(codes(f))}`);
     await confirmChecklist(pid); // checked, transient-only retry
-  if (publish) { const p = await publishRetry(pid); if (p.status !== 200) throw new Error(`publish ${month}/${year}: ${p.status} ${JSON.stringify(codes(p))}`); }
+  // Setup only: every confirmation above returned 200; a publish that still
+  // reports one as incomplete is a read that has not caught up -- retry it.
+  if (publish) { let p = await publishRetry(pid); for (let i = 0; i < 6 && p.status === 409 && codes(p).every((x) => x.startsWith('checklist_incomplete') || x === 'import_incomplete'); i++) { await sleep(4000); p = await publishRetry(pid); } if (p.status !== 200) throw new Error(`publish ${month}/${year}: ${p.status} ${JSON.stringify(codes(p))}`); }
   return pid;
 }
 // Base44 reads can lag just-created rows: wait until the month's lines and

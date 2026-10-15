@@ -104,7 +104,9 @@ async function makeMonth(year, month, { period = {}, dist = { q1: 101, q2: 203 }
   const f = await finalizeAfterLag(pid);
   if (f.status !== 200) throw new Error(`finalize ${month}/${year}: ${f.status} ${JSON.stringify(codes(f))}`);
     await confirmChecklist(pid); // checked, transient-only retry
-  if (publish) { const p = await publishRetry(pid); if (p.status !== 200) throw new Error(`publish ${month}/${year}: ${p.status} ${JSON.stringify(codes(p))}`); }
+  // Setup only: every confirmation above returned 200; a publish that still
+  // reports one as incomplete is a read that has not caught up -- retry it.
+  if (publish) { let p = await publishRetry(pid); for (let i = 0; i < 6 && p.status === 409 && codes(p).every((x) => x.startsWith('checklist_incomplete') || x === 'import_incomplete'); i++) { await sleep(4000); p = await publishRetry(pid); } if (p.status !== 200) throw new Error(`publish ${month}/${year}: ${p.status} ${JSON.stringify(codes(p))}`); }
   return pid;
 }
 // Base44 reads can lag just-created rows: wait until the month's lines and
@@ -161,10 +163,17 @@ const flat = (causes || []).flatMap((x) => x.members.map((m) => m.code));
 check('every finding appears in exactly one cause', new Set(flat).size === flat.length);
 
 // One reason per cause, saved as one override per overridable member.
+// The function's reads can lag just-created lines (import_incomplete): retry
+// while that refusal is present, whatever else is refused alongside it.
+const finalizeSettled = async (extra) => {
+  let r = await finalizeAfterLag(pid, extra);
+  for (let i = 0; i < 10 && r.status === 409 && codes(r).includes('import_incomplete'); i++) { await sleep(1500); r = await transition('finalize', pid, extra); }
+  return r;
+};
 const group = reason((causes || []).flatMap((x) => x.acceptable));
-let f = await finalizeAfterLag(pid, { overrides: group });
+let f = await finalizeSettled({ overrides: group });
 check('with every group accepted, finalize is refused ONLY by the hard blocker', f.status === 409 && codes(f).length > 0 && codes(f).every((x) => x.includes('closed_quarter_missing')), codes(f).join(','));
-f = await finalizeAfterLag(pid, { overrides: { ...group, ...reason(codes(f)) } });
+f = await finalizeSettled({ overrides: { ...group, ...reason(codes(f)) } });
 check('a reason given for the hard blocker changes nothing', f.status === 409 && codes(f).every((x) => x.includes('closed_quarter_missing')));
 await E.Distribution.update(dist.id, { q1: 101 });
 for (let i = 0; i < 20; i++) { const d = await E.Distribution.filter({ period_id: pid }); if (d[0]?.q1 === 101) break; await sleep(500); }
