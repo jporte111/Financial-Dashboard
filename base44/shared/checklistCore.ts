@@ -336,7 +336,94 @@ const entry = (code: string, message: string | null, extra: any = {}) => {
   return { code, title: e.title, problem: message || e.title, action: e.action, where: e.where, ...extra };
 };
 
-export function buildReview({ period, blockers, crossFindings, crossRan, items }: { period: any; blockers: any[]; crossFindings: any[] | null; crossRan: boolean; items: any[] }) {
+// ---- grouping by root cause ------------------------------------------------------
+// One problem often shows up as several findings (seven watch-list rows, five
+// month-vs-year-to-date checks...). The review groups findings by cause so each
+// cause is read -- and, where every member allows it, accepted with a written
+// reason -- once. Grouping changes NOTHING about the rules: each member keeps its
+// own code, severity and override record; a member that cannot be overridden is
+// never accepted through its group.
+const CAUSE_DEFS = [
+  { key: 'checks', title: 'Checks could not run', action: 'Nothing was changed. Try again in a moment.', where: REVIEW,
+    match: fam('checks_unavailable', 'checklist_unavailable', 'previous_month_conflict', 'previous_period_unavailable') },
+  { key: 'workbook_gaps', title: 'Blank cells in the workbook — one request for the bookkeeper', where: WORKBOOK,
+    action: 'Send the bookkeeper this list, then import the corrected workbook. A blank is never read as $0.00. (A blank may be deferred to finalize with a written reason, but nothing missing can be published.)',
+    match: fam('source_value_missing', 'required_value_missing', 'required_line_value_missing', 'closed_quarter_missing', 'distribution_quarter_blank', 'detail_row_blank',
+      'detail_code_missing', 'cash_total_row_missing', 'income_total_row_missing', 'expense_total_row_missing', 'section_missing', 'savings_in_ytd_missing') },
+  { key: 'watch_list', title: 'Watch-list rows differ from last month', where: IMPORT,
+    action: 'Check the classification of these rows. If the differences are intended, accept them with one written reason; otherwise set them back.',
+    match: fam('detail_group_changed', 'detail_code_reused', 'detail_row_missing', 'detail_rows_missing_vs_prior', 'detail_unassigned', 'lines_added', 'lines_removed', 'detail_section_absent', 'detail_section_empty', 'detail_section_expected', 'detail_orphan_row') },
+  { key: 'budget_revision', title: 'Annual budgets changed mid-year', where: IMPORT,
+    action: 'If the budget was revised, accept with one written reason; otherwise correct the workbook.',
+    match: fam('annual_budget_changed', 'group_budget_changed', 'income_budget_workbook_mismatch', 'expense_budget_mismatch') },
+  { key: 'decreases', title: 'Year-to-date figures went down', where: IMPORT, action: ACCEPT,
+    match: fam('ytd_income_decreased', 'ytd_expenses_decreased', 'group_ytd_decreased', 'distributions_ytd_decreased', 'savings_in_ytd_decreased', 'income_line_decreased', 'detail_ytd_decreased') },
+  { key: 'distributions', title: 'Distribution figures need attention', where: IMPORT,
+    action: 'Review the listed distribution figures; correct the workbook or accept with one written reason.',
+    match: fam('closed_quarter_changed', 'distribution_entity_removed', 'distribution_workbook_total_corrected', 'distribution_entity_ytd_mismatch') },
+  { key: 'totals', title: 'Workbook totals do not add up', where: IMPORT,
+    action: 'Check the workbook totals; correct them or accept with one written reason.',
+    match: fam('cash_total_mismatch', 'income_actual_mismatch', 'expense_actual_mismatch', 'transfers_total_mismatch', 'expense_group_missing', 'import_incomplete') },
+  { key: 'transfers_cash', title: 'Transfers and cash accounts changed', where: REVIEW, action: 'Check the changes are intended.',
+    match: fam('transfers_ended', 'transfers_started', 'cash_accounts_changed', 'transfers_section_absent', 'transfers_section_empty', 'transfers_section_expected', 'transfer_labels_misaligned') },
+  { key: 'naming_cutoff', title: 'Reporting month, title and cutoff', where: IMPORT, action: 'Check the reporting month and cutoff date are right.',
+    match: fam('title_month_mismatch', 'title_names_data_month', 'period_follows_cutoff_month', 'period_is_cutoff_month', 'cutoff_already_reported', 'cutoff_date_required',
+      'cutoff_not_month_end', 'cutoff_not_after_previous', 'cutoff_not_comparable', 'cutoff_invalid', 'cutoff_period_mismatch', 'cutoff_date_conflict', 'cutoff_date_missing',
+      'pace_inconsistent', 'pace_proxy_divergence', 'reporting_convention_changed', 'reporting_month_mismatch', 'month_gap', 'new_year', 'legacy_previous', 'no_previous_period',
+      'previous_has_open_revision', 'later_month_cutoff', 'later_month_behind') },
+];
+const MONTH_LABELS: Record<string, string> = { income: 'income', expenses: 'expenses', fixed: 'Fixed', variable: 'Variable', discretionary: 'Discretionary' };
+
+// The cause key of one code ('other:<family>' when no cause claims it).
+export function causeOf(code: string) {
+  const d = CAUSE_DEFS.find((c) => c.match(code));
+  if (d) return d.key;
+  if (family(code) === 'month_vs_ytd') return 'month_vs_ytd';
+  return `other:${family(code)}`;
+}
+
+// entries: [{ code, title, problem, action, where, kind }] with kind one of
+// 'blocker' (cannot be overridden), 'reason' (blocks until a written reason),
+// 'warning', 'note'. Returns causes, most severe first.
+export function groupByCause(entries: any[], { previousLabel = null } = {}) {
+  const prev = previousLabel || 'the previous month';
+  const byKey = new Map<string, any[]>();
+  for (const e of entries) byKey.set(causeOf(e.code), [...(byKey.get(causeOf(e.code)) || []), e]);
+  // Several month-vs-year-to-date mismatches together point upstream: shown once.
+  const mvy = byKey.get('month_vs_ytd') || [];
+  if (mvy.length >= 2) { byKey.delete('month_vs_ytd'); byKey.set('previous_month_incomplete', mvy); }
+  const causes = [];
+  for (const [key, members] of byKey) {
+    const def = CAUSE_DEFS.find((c) => c.key === key);
+    let title, action, where, explanation = null;
+    if (key === 'previous_month_incomplete') {
+      const which = members.map((m) => MONTH_LABELS[param(m.code)] || param(m.code)).join(', ');
+      title = `${prev}'s published figures look incomplete`;
+      explanation = `This month's figures for ${which} do not equal the change in year-to-date since ${prev}. When several disagree together, the usual cause is that ${prev}'s report was prepared before all of its entries were posted -- one upstream issue, not ${members.length} separate problems here.`;
+      action = `If this month's workbook is right, accept with one written reason. Whether ${prev} needs a revision is a separate decision.`;
+      where = IMPORT;
+    } else if (key === 'month_vs_ytd') {
+      ({ title, action, where } = explain(members[0].code));
+    } else if (def) {
+      ({ title, action, where } = def);
+    } else {
+      ({ title, action, where } = explain(members[0].code));
+    }
+    const hard = members.filter((m) => m.kind === 'blocker');
+    const needReason = members.filter((m) => m.kind === 'reason');
+    const bucket = hard.length ? 'blockers' : needReason.length ? 'needsReview' : members.some((m) => m.kind === 'warning') ? 'warnings' : 'notes';
+    causes.push({
+      key, title, explanation, action, where, bucket, members,
+      counts: { blockers: hard.length, reasons: needReason.length, warnings: members.filter((m) => m.kind === 'warning').length, notes: members.filter((m) => m.kind === 'note').length },
+      // Codes a single written reason may clear: only the overridable members.
+      acceptable: needReason.map((m) => m.code),
+    });
+  }
+  const order = { blockers: 0, needsReview: 1, warnings: 2, notes: 3 };
+  return causes.sort((a, b) => order[a.bucket] - order[b.bucket] || b.members.length - a.members.length);
+}
+
+export function buildReview({ period, blockers, crossFindings, crossRan, items, previousLabel = null }: { period: any; blockers: any[]; crossFindings: any[] | null; crossRan: boolean; items: any[]; previousLabel?: string | null }) {
   const data = (blockers || []).filter(isDataBlocker);
   const out = { blockers: [] as any[], needsReview: [] as any[], warnings: [] as any[], completed: [] as any[], notes: [] as any[] };
   for (const b of data) (b.overridable ? out.needsReview : out.blockers).push(entry(b.code, b.message, { kind: b.overridable ? 'reason' : 'blocker' }));
@@ -360,5 +447,13 @@ export function buildReview({ period, blockers, crossFindings, crossRan, items }
     const ran = c.kind === 'import' ? imported : crossFigures && !(c.notRunIf || []).some((n) => skipped.has(n));
     if (ran && !c.codes.some((k) => present.has(k))) out.completed.push({ code: `passed:${c.codes[0]}`, title: c.label, problem: 'No issues found.', action: '', where: REVIEW, kind: 'passed' });
   }
+  // The same findings, grouped by root cause (checklist items stay separate).
+  const entries = [
+    ...out.blockers.map((e: any) => ({ ...e, kind: 'blocker' })),
+    ...out.needsReview.filter((e: any) => e.kind === 'reason').map((e: any) => ({ ...e, kind: 'reason' })),
+    ...out.warnings.map((e: any) => ({ ...e, kind: 'warning' })),
+    ...out.notes.map((e: any) => ({ ...e, kind: 'note' })),
+  ];
+  (out as any).causes = groupByCause(entries, { previousLabel });
   return out;
 }

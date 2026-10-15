@@ -14,6 +14,8 @@ import {
 } from '@/lib/bvaCorrections';
 import { periodTransition } from '@/lib/periodTransition';
 import { monthStates, isSuperseded, isDiscarded, isRevision, versionLabel } from '../../../base44/shared/periodVersions.ts';
+import { groupByCause, explain } from '../../../base44/shared/checklistCore.ts';
+import { CauseList } from '@/components/admin/PublicationReview';
 import { fmtCurrency, fmtPct } from '@/lib/finance';
 import BvaCorrectionsPanel from '@/components/admin/BvaCorrectionsPanel';
 import { SourceValueControl } from '@/components/admin/BvaCorrectionCards';
@@ -68,6 +70,8 @@ export default function BvaImportCenter() {
   // Confirmed watch-list groups of the previous month's report, for rows whose
   // code and category name are unchanged (bvaImport.carriedGroupMap).
   const [carried, setCarried] = useState({ map: {}, from: null });
+  const [serverReview, setServerReview] = useState(null); // the server's grouped review of the applied draft
+  const [reviewAttempt, setReviewAttempt] = useState(0);
   const [me, setMe] = useState(null);
   const [saveState, setSaveState] = useState('idle');
   const lastPersistedRef = useRef('');
@@ -223,6 +227,40 @@ export default function BvaImportCenter() {
     });
   }, [adjusted, confirm.cutoffDate, confirm.month, confirm.year, previous, previousError, overrideMap, mergedGroupMap]);
 
+  // The server's review of the applied draft: every finding (this workbook's and
+  // the checks against the previous month), grouped by root cause. Fetched
+  // without override reasons, so each overridable finding stays listed and the
+  // reasons saved here are shown against it.
+  const appliedId = applied && !applied.finalized ? applied.periodId : null;
+  useEffect(() => {
+    if (!appliedId) { setServerReview(null); return undefined; }
+    let cancelled = false;
+    periodTransition('check', appliedId).then((r) => !cancelled && setServerReview(r.ok && r.review ? r.review : null));
+    return () => { cancelled = true; };
+  }, [appliedId, applied, reviewAttempt]);
+  // Before Apply (or if the server's review is unavailable): this workbook's own
+  // findings, grouped the same way.
+  const causes = useMemo(() => {
+    if (serverReview?.causes) return serverReview.causes;
+    if (!validation) return [];
+    return groupByCause(validation.warnings.map((w) => {
+      const e = explain(w.code);
+      const kind = w.blocksFinalize && w.overridable === false ? 'blocker' : w.blocksFinalize || overrideMap[w.code] ? 'reason' : 'warning';
+      return { code: w.code, title: e.title, problem: w.message || e.title, action: e.action, where: e.where, kind };
+    }), { previousLabel: previous?.label || null });
+  }, [serverReview, validation, overrideMap, previous]);
+  // Reasons already saved, by the code the server or the workbook check uses.
+  const reasons = useMemo(() => {
+    const out = {};
+    for (const c of corrections) if (c.kind === 'override' && c.reason) { out[c.target] = c.reason; out[`open_reconciliation:${c.target}`] = c.reason; }
+    return out;
+  }, [corrections]);
+  // One written reason for every overridable member of a cause: saved as one
+  // override per member, exactly as if each had been given separately.
+  const acceptCause = (codes, reason) => {
+    for (const code of codes) setSaveCorrection({ kind: 'override', target: code, originalValue: null, value: null, reason, by });
+  };
+
   const onFile = async (f) => {
     setFile(f);
     setApplied(null);
@@ -372,6 +410,7 @@ export default function BvaImportCenter() {
         setApplied({ ...applied, finalized: true });
       } else {
         setBlockers(res.blockers);
+        setReviewAttempt((n) => n + 1);
         addLog(`✗ Not finalized: ${res.blockers.length ? `${res.blockers.length} item(s) must be resolved (listed below)` : res.error}. Corrections and override reasons stay saved on the draft.`);
       }
     } finally {
@@ -559,11 +598,31 @@ export default function BvaImportCenter() {
             </div>
           </div>
 
+          {causes.length > 0 && (
+            <div className="rounded-2xl border border-stone-200 bg-white p-6" data-testid="import-causes">
+              <p className="text-xs uppercase tracking-[0.14em] text-stone-500">What needs attention, by cause</p>
+              <p className="mt-1 text-xs text-stone-500">
+                {serverReview?.causes ? 'Includes the checks against the previous month, for the draft as last applied.' : 'This workbook\'s own checks; the checks against the previous month run once the draft is applied.'}
+                {' '}Every finding keeps its own rule: a reason given here is saved for each finding it covers, and findings that must be fixed cannot be accepted.
+              </p>
+              {[['blockers', 'Must be fixed', 'text-rose-700'], ['needsReview', 'Needs a written reason', 'text-amber-700'], ['warnings', 'Worth a look (never blocks)', 'text-stone-600']].map(([bucket, label, tone]) => (
+                causes.some((c) => c.bucket === bucket) ? (
+                  <div key={bucket} className="mt-4 text-sm" data-testid={`import-causes-${bucket}`}>
+                    <p className={`text-xs font-medium uppercase tracking-[0.12em] ${tone}`}>{label}</p>
+                    <CauseList causes={causes} bucket={bucket} reasons={reasons} onAccept={acceptCause} busy={busy} />
+                  </div>
+                ) : null
+              ))}
+            </div>
+          )}
+
           <div className="rounded-2xl border border-stone-200 bg-white p-6">
-            <p className="text-xs uppercase tracking-[0.14em] text-stone-500">Validation discrepancies</p>
+            <p className="text-xs uppercase tracking-[0.14em] text-stone-500">Validation discrepancies — each finding in detail</p>
             {validation.warnings.length === 0 ? (
               <p className="mt-3 flex items-center gap-2 text-sm text-emerald-700"><CheckCircle2 className="h-4 w-4" /> No discrepancies — every reconciliation passed.</p>
             ) : (
+              <details className="mt-3" open={validation.warnings.length <= 5} data-testid="finding-details">
+              <summary className="cursor-pointer text-sm text-stone-600">Each finding on its own ({validation.warnings.length}) — individual reasons and source-value corrections</summary>
               <div className="mt-3 space-y-3">
                 {validation.warnings.map((w) => {
                   const srcPath = WARNING_SOURCE_PATHS[w.code] || null;
@@ -618,6 +677,7 @@ export default function BvaImportCenter() {
                   );
                 })}
               </div>
+              </details>
             )}
           </div>
         </div>
