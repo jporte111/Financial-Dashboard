@@ -101,11 +101,14 @@ async function makeMonth(year, month, { period = {}, dist = { q1: 101, q2: 203 }
   await visible(pid);
   if (!finalize) return pid;
   const f = await finalizeAfterLag(pid);
-  if (f.status !== 200) throw new Error(`finalize ${month}/${year}: ${f.status} ${JSON.stringify(codes(f))}`);
+  // A finalize that succeeded but whose reply was lost (staging timeouts) is
+  // retried and answered "already final": accept it once the record shows it.
+  const finalNow = f.status === 409 && codes(f).join() === 'already_final' && (await E.ReportingPeriod.get(pid)).status === 'final';
+  if (f.status !== 200 && !finalNow) throw new Error(`finalize ${month}/${year}: ${f.status} ${JSON.stringify(codes(f))}`);
     await confirmChecklist(pid); // checked, transient-only retry
   // Setup only: every confirmation above returned 200; a publish that still
   // reports one as incomplete is a read that has not caught up -- retry it.
-  if (publish) { let p = await publishRetry(pid); for (let i = 0; i < 6 && p.status === 409 && codes(p).every((x) => x.startsWith('checklist_incomplete') || x === 'import_incomplete'); i++) { await sleep(4000); p = await publishRetry(pid); } if (p.status !== 200) throw new Error(`publish ${month}/${year}: ${p.status} ${JSON.stringify(codes(p))}`); }
+  if (publish) { let p = await publishRetry(pid); for (let i = 0; i < 6 && p.status === 409 && codes(p).every((x) => x.startsWith('checklist_incomplete') || x === 'import_incomplete'); i++) { await sleep(4000); p = await publishRetry(pid); } const pubNow = p.status === 409 && codes(p).join() === 'already_published' && (await E.ReportingPeriod.get(pid)).published === true; if (p.status !== 200 && !pubNow) throw new Error(`publish ${month}/${year}: ${p.status} ${JSON.stringify(codes(p))}`); }
   return pid;
 }
 // Base44 reads can lag just-created rows: wait until the month's lines and
