@@ -255,6 +255,7 @@ export function parseBvaWorkbook(data) {
       // "Last Month", and a date header is itself a cutoff-date source.
       if (!row.some(isNumericCell)) {
         const dateCols = [];
+        let currentCol = -1;
         let headerish = /^(bank|account)$/.test(c);
         for (let i = 1; i <= 4; i++) {
           const h = row[i];
@@ -264,12 +265,15 @@ export function parseBvaWorkbook(data) {
           const d = toISODate(h);
           if (d) dateCols.push([i, d]);
           if (/^(last month|current)$/.test(canon(h))) headerish = true;
+          if (canon(h) === 'current') currentCol = i;
         }
         if (headerish || dateCols.length) {
           if (dateCols.length) {
             const [dc, d] = dateCols[dateCols.length - 1]; // the latest date column is this report's "as of"
             balanceCol = dc;
             addCutoff(d, 'cash header date', s, r);
+          } else if (currentCol > 0) {
+            balanceCol = currentCol; // no date column: the "Current" column, never "Last Month"
           }
           claim(s, r, 0, 2);
           continue;

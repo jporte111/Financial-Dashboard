@@ -154,7 +154,8 @@ describe('four groups', () => {
 describe('plain language for every code the system can produce', () => {
   const src = (f) => fs.readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8');
   const found = new Set();
-  const add = (s) => { const f = s.split(/[:$]/)[0]; if (f && !f.startsWith('{')) found.add(f); };
+  // Routing prefixes (open_reconciliation:<code>, cross_period:<code>) are not codes.
+  const add = (s) => { const f = s.split(/[:$]/)[0]; if (f && !f.startsWith('{') && !['open_reconciliation', 'cross_period'].includes(f)) found.add(f); };
   for (const f of ['base44/shared/publishGate.ts', 'base44/shared/crossPeriod.ts', 'src/lib/bvaValidation.js', 'src/lib/bvaParser.js', 'base44/shared/periodTransitionCore.ts']) {
     const s = src(f);
     for (const m of s.matchAll(/code: ['`]([a-z_][a-z_:${}.]*)/g)) add(m[1]);

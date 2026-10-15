@@ -182,8 +182,16 @@ export function validateBva(parsed, opts = {}) {
       block({ code: 'reporting_month_mismatch', section: 'meta', message: `The reporting period ${ymLabel(period)} does not match the cutoff date ${cutoffDate}: it must be the cutoff month or the month after it.`, overridable: false });
     }
     const t = parsed?.meta?.titleMonth ? { month: parsed.meta.titleMonth, year: parsed.meta.titleYear } : null;
-    if (t && (t.month !== period.month || t.year !== period.year)) {
-      block({ code: 'title_month_mismatch', section: 'meta', message: `The workbook title names ${ymLabel(t)}, but it is being imported as ${ymLabel(period)}.` });
+    // A title may name the report month, or -- the bookkeeper's convention
+    // since September 2026 -- the month the data runs through, when the
+    // confirmed cutoff supports it (the cutoff month is that month and this
+    // period is the cutoff month or the month after it). Anything else blocks.
+    const namesReportMonth = t && t.month === period.month && t.year === period.year;
+    const namesDataMonth = t && t.month === cutYm.month && t.year === cutYm.year && (offset === 0 || offset === 1);
+    if (t && !namesReportMonth && namesDataMonth) {
+      warn(warnings, { code: 'title_names_data_month', section: 'meta', message: `The workbook title names ${ymLabel(t)}, the month its data runs through (cutoff ${cutoffDate}); it is imported as the ${ymLabel(period)} report. Accepted.` });
+    } else if (t && !namesReportMonth) {
+      block({ code: 'title_month_mismatch', section: 'meta', message: `The workbook title names ${ymLabel(t)}, but it is being imported as ${ymLabel(period)}, and its cutoff (${cutoffDate}) does not support that.` });
     }
     const prev = opts.previous;
     const prevCut = prev && cutoffYm(prev.cutoffDate);

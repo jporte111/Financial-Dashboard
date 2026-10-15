@@ -69,7 +69,7 @@ export const CHECKLIST_ITEMS = [
   },
   {
     key: 'distributions_confirmed', label: 'Distribution totals confirmed', parts: ['distributions', 'distribution_totals'],
-    linked: (c: string) => fam('distribution_quarter_blank', 'distribution_workbook_total_corrected', 'distributions_ytd_decreased', 'closed_quarter_changed',
+    linked: (c: string) => fam('distribution_quarter_blank', 'distribution_workbook_total_corrected', 'distribution_entity_ytd_mismatch', 'distributions_ytd_decreased', 'closed_quarter_changed',
       'closed_quarter_missing', 'distribution_entity_removed', 'savings_in_ytd_missing', 'savings_in_ytd_decreased')(c)
       || (family(c) === 'section_missing' && param(c) === 'distributions')
       || (family(c) === 'required_value_missing' && param(c) === 'distributions_ytd'),
@@ -225,6 +225,7 @@ export const CATALOGUE: Record<string, { title: string; action: string; where: s
   detail_section_empty: { title: 'The watch-list section is empty', action: 'Correct the workbook and import again.', where: WORKBOOK },
   detail_section_expected: { title: 'The watch-list section is missing', action: 'Last month had one. Correct the workbook, or accept with a reason.', where: IMPORT },
   distribution_quarter_blank: { title: 'A distribution quarter is blank', action: 'A blank is not $0.00. Enter the amount, or confirm none was received.', where: IMPORT },
+  distribution_entity_ytd_mismatch: { title: 'An entity\'s own YTD cell does not match its quarters', action: 'The sum of that entity\'s quarters is used. Ask the bookkeeper to fix the YTD formula in the workbook.', where: IMPORT },
   distribution_workbook_total_corrected: { title: 'The workbook\'s distribution total was corrected', action: 'Distributions YTD uses the sum of each entity\'s quarters. Review the noted difference.', where: IMPORT },
   expense_actual_mismatch: { title: 'Expense groups do not add up to total expenses', action: 'Check the expense summary; correct the workbook or accept with a reason.', where: IMPORT },
   expense_budget_mismatch: { title: 'Expense budgets do not add up', action: 'Check the expense budget totals; correct the workbook or accept with a reason.', where: IMPORT },
@@ -238,6 +239,7 @@ export const CATALOGUE: Record<string, { title: string; action: string; where: s
   reporting_month_mismatch: { title: 'Reporting month does not match the cutoff', action: 'It must be the cutoff month or the month after. Correct the month or cutoff.', where: IMPORT },
   section_missing: { title: 'A required workbook section is missing', action: 'Correct the workbook and import again.', where: WORKBOOK },
   source_value_missing: { title: 'A workbook value is blank', action: 'A blank is not $0.00. Correct the workbook and import again.', where: WORKBOOK },
+  title_names_data_month: { title: 'The workbook is titled by its data month', action: 'No action: the confirmed cutoff supports it.', where: IMPORT },
   title_month_mismatch: { title: 'The workbook title names a different month', action: 'Check you imported the right workbook into the right month.', where: IMPORT },
   transfers_section_absent: { title: 'No recurring transfers section', action: 'Nothing required if none is expected.', where: IMPORT },
   transfers_section_empty: { title: 'The transfers section is empty', action: 'Correct the workbook and import again.', where: WORKBOOK },

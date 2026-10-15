@@ -89,11 +89,19 @@ export function isMaterialUnassignedDetail(line) {
 }
 
 // Data rules shared by finalize and publish.
-function dataBlockers(period, lines, overrides) {
+// Missing figures: a blank is missing, never $0.00. At FINALIZE a missing
+// figure (other than the cutoff) may be deferred with a written reason ("leave
+// blank for now, correct later"). At PUBLISH nothing missing may reach the
+// client: every missing required total, every missing summary-line figure and
+// every missing-source-value warning blocks, deferred or not, and cannot be
+// overridden there -- correct the workbook and import again.
+const PUBLISH_MISSING = ' A deferral at finalize does not allow publishing: a report with a missing figure cannot be published. Correct the workbook and import again.';
+function dataBlockers(period, lines, overrides, { forPublish = false } = {}) {
   const out = [];
   for (const f of REQUIRED_PERIOD_FIELDS) {
     if (isMissing(period[f])) {
       const code = `required_value_missing:${f}`;
+      if (forPublish) { out.push({ ...blocker(code, `Required value "${f}" is missing.${PUBLISH_MISSING}`, false), alt: REQUIRED_FIELD_WARNINGS[f] || null }); continue; }
       const alt = REQUIRED_FIELD_WARNINGS[f] || null;
       // The reporting cutoff cannot be deferred; any other missing total can
       // be left blank for now with a written reason (corrected later).
@@ -134,12 +142,24 @@ function dataBlockers(period, lines, overrides) {
     const alt = l.bva_detail ? 'source_value_missing:detail' : l.budget_group === 'income' ? 'source_value_missing:income' : 'source_value_missing:expenses';
     for (const f of missing) {
       const code = `required_line_value_missing:${l.id}:${f}`;
-      if (!clearedBy(code, alt, overrides)) out.push({ ...blocker(code, `"${l.category}" is missing ${f}.`, true), alt });
+      if (forPublish) out.push({ ...blocker(code, `"${l.category}" is missing ${f}.${PUBLISH_MISSING}`, false), alt });
+      else if (!clearedBy(code, alt, overrides)) out.push({ ...blocker(code, `"${l.category}" is missing ${f}.`, true), alt });
+    }
+  }
+
+  // At publish, a missing source value blocks even after a deferral (the
+  // warning is marked overridden at finalize, so it is checked separately).
+  if (forPublish) {
+    for (const w of Array.isArray(period.bva_validation_warnings) ? period.bva_validation_warnings : []) {
+      if (w && /^source_value_missing(:|$)/.test(String(w.code))) {
+        out.push(blocker(`open_reconciliation:${w.code}`, `${w.message || `A source value is missing (${w.code}).`}${PUBLISH_MISSING}`, false));
+      }
     }
   }
 
   for (const w of Array.isArray(period.bva_validation_warnings) ? period.bva_validation_warnings : []) {
     if (!w || !w.blocksFinalize) continue;
+    if (forPublish && /^source_value_missing(:|$)/.test(String(w.code))) continue; // handled above, strictly
     const code = `open_reconciliation:${w.code}`;
     // A warning marked not overridable (a missing value, a conflicting
     // section, a wrong reporting month) must be fixed in the workbook.
@@ -212,7 +232,7 @@ export function evaluatePublish(rawPeriod, lines = [], crossFindings = null, che
   if (period.status !== 'final' || period.bva_import_status !== 'final' || !period.finalized_at) {
     out.push(blocker('not_final', 'Only a finalized period (validated BVA import) can be published.'));
   }
-  out.push(...dataBlockers(period, lines, period.bva_overrides || {}));
+  out.push(...dataBlockers(period, lines, period.bva_overrides || {}, { forPublish: true }));
   // A cross-period finding accepted at finalize stays accepted; a new one
   // (e.g. the previous month was revised since) needs a reopen and a reason.
   out.push(...crossPeriodBlockers(crossFindings, period.bva_overrides || {}).map((b) => (b.overridable

@@ -58,7 +58,7 @@ describe('defect 1: blank YTD / budget cells stay missing (never 0)', () => {
     const w = v.warnings.find((x) => x.code === 'source_value_missing:expenses');
     expect(w).toMatchObject({ blocksFinalize: false, overridable: true });
     // Without the override it still blocks; the detail one stays open.
-    expect(find(validateBva(p, { cutoffDate: '2026-08-31' }), 'source_value_missing:expenses')).toMatchObject({ blocksFinalize: true });
+    expect(validateBva(p, { cutoffDate: '2026-08-31' }).warnings.find((x) => x.code === 'source_value_missing:expenses')).toMatchObject({ blocksFinalize: true });
     expect(v.warnings.find((x) => x.code === 'source_value_missing:detail')).toMatchObject({ overridable: true, blocksFinalize: true });
   });
 
