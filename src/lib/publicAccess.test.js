@@ -124,7 +124,7 @@ describe('publicDashboard: explicit field allow-lists', () => {
       ['id', 'category', 'qb_code', 'budget_group', 'month_actual', 'ytd_actual', 'annual_budget', 'monthly_budget', 'bva_detail', 'group_confirmed', 'drilldown_enabled'].sort()
     );
     expect(Object.keys(out.cashAccounts[0]).sort()).toEqual(['id', 'name', 'balance', 'account_type', 'as_of_date', 'sort_order'].sort());
-    expect(Object.keys(out.distributions[0]).sort()).toEqual(['id', 'entity_name', 'q1', 'q2', 'q3', 'q4'].sort());
+    expect(Object.keys(out.distributions[0]).sort()).toEqual(['id', 'entity_name', 'q1', 'q2', 'q3', 'q4', 'workbook_ytd'].sort());
     expect(Object.keys(out.transfers[0]).sort()).toEqual(['id', 'amount', 'source', 'purpose'].sort());
     expect(Object.keys(out.savingsSpends[0]).sort()).toEqual(['id', 'category', 'ytd_amount'].sort());
   });

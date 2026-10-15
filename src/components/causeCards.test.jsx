@@ -34,7 +34,7 @@ describe('cause cards', () => {
   it('a structural problem is its own blocker card', () => {
     render(<CauseList causes={CAUSES} bucket="blockers" />);
     expect(screen.getAllByRole('listitem').length).toBeGreaterThan(0);
-    expect(screen.getByText(/A section appears twice with different figures/)).toBeTruthy();
+    expect(screen.getByTestId('cause-structure').textContent).toMatch(/Parts of the workbook could not be read.*cannot be shown faithfully/);
   });
 
   it('Review & Publish lists causes by bucket, counting causes and findings', () => {

@@ -165,8 +165,14 @@ describe('publish', () => {
     expect(r.writes).toEqual([]);
   });
 
-  it('an incomplete checklist is refused with no write', async () => {
+  it('an incomplete checklist does not block publish (optional review aid)', async () => {
     const r = await run(finalFx(), { action: 'publish', period_id: 'p1' });
+    expect(r.status).toBe(200);
+  });
+  it('a structural problem refuses publish with no write', async () => {
+    const fx = finalFx();
+    fx.period = { ...fx.period, months_elapsed: 1 };
+    const r = await run(fx, { action: 'publish', period_id: 'p1' });
     expect(r.status).toBe(409);
     expect(r.writes).toEqual([]);
   });

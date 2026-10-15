@@ -16,7 +16,6 @@
 
 import { effectiveRecord } from './sourceMissing.ts';
 import { CROSS_PERIOD_PREFIX } from './crossPeriod.ts';
-import { itemMessage } from './checklistCore.ts';
 import { isHardValidation } from './hardRules.ts';
 
 const MONTHS_IN_YEAR = 12;
@@ -39,7 +38,8 @@ export const OPTIONAL_PERIOD_FIELDS = ['month_income', 'month_expenses'];
 
 export const EXPENSE_GROUPS = ['fixed', 'variable', 'discretionary'];
 
-// The pre-publication review checklist (kept in sync with the admin panel).
+// The review checklist (kept in sync with the admin panel): optional review
+// aids, recorded with who/when, never required to finalize or publish.
 export const PUBLISH_CHECKLIST = [
   ['categories_reviewed', 'Categories reviewed'],
   ['classes_reviewed', 'Classes reviewed'],
@@ -169,9 +169,8 @@ export function evaluateFinalize(rawPeriod, lines = [], overrides = {}, crossFin
   return { ok: out.length === 0, blockers: out };
 }
 
-// checklistItems: checklistCore.checklistStatus() for this period. When given,
-// each item must be CONFIRMED (recorded by the server) and not stale; when
-// null (browser explanations, older tests) the stored true/false is used.
+// checklistItems: accepted for callers; the checklist is optional and never
+// blocks publish.
 export function evaluatePublish(rawPeriod, lines = [], crossFindings = null, checklistItems = null) {
   const period = effectiveRecord(rawPeriod);
   if (!period) return { ok: false, blockers: [blocker('period_not_found', 'Reporting period not found.')] };
@@ -183,14 +182,9 @@ export function evaluatePublish(rawPeriod, lines = [], crossFindings = null, che
   }
   out.push(...dataBlockers(period, lines, period.bva_overrides || {}, { forPublish: true }));
   out.push(...crossPeriodBlockers(crossFindings));
-  if (Array.isArray(checklistItems)) {
-    for (const s of checklistItems) if (s.state !== 'confirmed') out.push(blocker(`checklist_incomplete:${s.key}`, itemMessage(s)));
-  } else {
-    const checklist = period.checklist || {};
-    for (const [k, label] of PUBLISH_CHECKLIST) {
-      if (!checklist[k]) out.push(blocker(`checklist_incomplete:${k}`, `Checklist item not confirmed: ${label}.`));
-    }
-  }
+  // The review checklist is an optional aid (owner decision, October 2026):
+  // who confirmed what and when is still recorded, but it never blocks.
+  void checklistItems;
   return { ok: out.length === 0, blockers: out };
 }
 

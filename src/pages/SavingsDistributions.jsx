@@ -34,7 +34,10 @@ export default function SavingsDistributions() {
   // a stored 0 is a confirmed $0.00.
   const dv = buildBvaDashboard({ period, distributions: list }).distributions;
   const QS = ['q1', 'q2', 'q3', 'q4'];
+  // The workbook's printed totals are shown when stored (they may not equal
+  // the sum of the rows; a note below says so); else the rows are summed.
   const colTotal = (k) => {
+    if (dv.printedQuarterTotals[k] != null) return { value: dv.printedQuarterTotals[k], partial: false };
     if (!dv.quarterApplicable[k] && dv.entities.every((e) => e.quarterState[k] !== QUARTER_STATE.VALUE)) return { value: null, notYet: true };
     const counted = dv.entities.filter((e) => e.quarterState[k] !== QUARTER_STATE.NOT_YET);
     const knownVals = counted.filter((e) => e[k] != null).map((e) => e[k]);
@@ -48,7 +51,15 @@ export default function SavingsDistributions() {
         : { text: fmtCurrency(e[k]), title: undefined };
   const anyNotYet = QS.some((k) => !dv.quarterApplicable[k]);
   const anyMissing = dv.entities.some((e) => QS.some((k) => e.quarterState[k] === QUARTER_STATE.MISSING));
-  const grand = dv.entitySum;
+  // Printed-total periods show the workbook's grand total; earlier periods
+  // keep the sum of the entities they were published with.
+  const grand = dv.printedTotals ? dv.total : dv.entitySum;
+  const grandPartial = grand === dv.entitySum && dv.partial;
+  const summed = (k) => dv.entities.reduce((t, e) => t + (e[k] ?? 0), 0);
+  const doesNotAddUp =
+    dv.entities.some((e) => e.ytdReconciles === false) ||
+    (dv.total != null && dv.entitySum != null && !dv.partial && Math.round(dv.total * 100) !== Math.round(dv.entitySum * 100)) ||
+    QS.some((k) => dv.printedQuarterTotals[k] != null && Math.round(dv.printedQuarterTotals[k] * 100) !== Math.round(summed(k) * 100));
   // A missing / never-entered scalar stays null — it is not a confirmed $0.
   // (These two fields are not in the BVA workbook; they are entered in Admin.)
   const savingsIn = period.savings_in_ytd == null ? null : Number(period.savings_in_ytd);
@@ -146,12 +157,17 @@ export default function SavingsDistributions() {
                 })}
                 <td className="px-6 py-3 text-right tabular-nums">
                   {fmtCurrency(grand)}
-                  {dv.partial && grand != null && <span className="ml-1 text-xs font-normal text-amber-700">partial</span>}
+                  {grandPartial && grand != null && <span className="ml-1 text-xs font-normal text-amber-700">partial</span>}
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
+        {doesNotAddUp && (
+          <p className="mt-3 text-xs text-rose-700" data-testid="distributions-do-not-add-up">
+            The workbook does not add up: some of its printed totals differ from the sum of the figures above them. The workbook&apos;s totals are shown.
+          </p>
+        )}
         {(anyNotYet || anyMissing) && (
           <p className="mt-3 text-xs text-stone-500" data-testid="distribution-legend">
             {anyNotYet && <>— in {QS.filter((k) => !dv.quarterApplicable[k]).map((k) => k.toUpperCase()).join(', ')}: not yet applicable (the report covers data through its cutoff date). </>}

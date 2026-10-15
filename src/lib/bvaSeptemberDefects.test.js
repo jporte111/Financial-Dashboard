@@ -61,13 +61,20 @@ describe('defect 1: blank YTD / budget cells stay missing (never 0)', () => {
     expect(v.blocksFinalize).toBe(false);
   });
 
-  it('the plan writes no null and no 0 for them, and lists the period totals as missing', () => {
+  it('the plan writes no null and no 0 for the blank rows; a printed total is stored as printed, a blank one as missing', () => {
     const v = validateBva(p, { cutoffDate: '2026-08-31' });
     const plan = planBvaImport({ parsed: p, validation: v, confirm: { month: 9, year: 2026, cutoffDate: '2026-08-31' } });
     const fixed = plan.budgetLines.toCreate.find((l) => l.budget_group === 'fixed');
     expect('ytd_actual' in fixed).toBe(false);
-    expect(plan.periodWrite.ytd_expenses).toBeUndefined();
-    expect(plan.periodWrite.source_missing_fields).toEqual(expect.arrayContaining(['ytd_expenses', 'annual_budgeted_expenses']));
+    for (const [field, printed] of [['ytd_expenses', p.expenseSummary.reportedActualTotal], ['annual_budgeted_expenses', p.expenseSummary.reportedBudgetTotal]]) {
+      if (printed == null) {
+        expect(plan.periodWrite[field]).toBeUndefined();
+        expect(plan.periodWrite.source_missing_fields).toContain(field);
+      } else {
+        expect(plan.periodWrite[field]).toBe(printed);
+        expect(plan.periodWrite.source_missing_fields).not.toContain(field);
+      }
+    }
   });
 });
 

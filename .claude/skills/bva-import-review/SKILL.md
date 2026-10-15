@@ -24,8 +24,14 @@ just copy from the sheet:
 - Variance to Expected Pace = Actual YTD − Expected YTD Budget
 - Variance % = Expected Pace % − Percent Used
 
-When an imported value conflicts with the independently calculated value, record and
-display a validation warning showing both, and use the calculated value.
+**Printed totals (owner decision, October 2026).** When the workbook's printed total
+disagrees with the sum of its rows, the dashboard shows the PRINTED total
+(`validation.reconciled.display`, stored in the period scalars, `Distribution.workbook_ytd`
+and `ReportingPeriod.distribution_quarter_totals`). The calculated total is kept for
+validation (`reconciled.*` and the warning's `calculatedValue`), and a warning — and a
+client note — says the workbook does not add up. With no printed total, the calculated
+total is shown. Derived figures (Remaining, Percent Used, pace variance) use what is
+shown. Periods stored before this rule keep their stored figures.
 
 ## What blocks (October 2026 owner decision)
 
@@ -40,9 +46,9 @@ that could not run). Do not add a new blocker outside that list without the owne
 approval.
 
 The income budget total is a known case: the workbook's displayed annual income budget
-omits one of the bank interest-income lines. Always use the independently calculated sum of every income
-category's annual budget as the reconciled total, and record the workbook's displayed
-total as a validation discrepancy — never treat the workbook figure as reconciled.
+omits one of the bank interest-income lines. Under the printed-total rule the printed
+budget is shown, the calculated sum is kept for checking, and the warning names the
+omitted line.
 
 ## Missing vs. zero — never coerce blank to $0.00
 
@@ -99,17 +105,15 @@ unreadable blocks; an optional one (watch list, transfers) is a warning. The tit
 only text (a mismatch is a warning); the period must be the cutoff month or the month
 after it (this blocks).
 
-## Distributions YTD — entity-quarter sum is authoritative
+## Distributions YTD — the printed total is shown; the entity-quarter sum checks it
 
-`Distributions YTD` is always the sum of each entity's own quarters (q1+q2+q3+q4), not the
-workbook's displayed grand total. The workbook's grand-total row is known to have a
-manually-typed column-subtotal formula that can silently skip one entity's row for one
-quarter — this is a spreadsheet defect, not an open business question. Still flag the
-discrepancy (`requiresAdminReview: true`) and generate a specific notice naming the
-entity/quarter/amount when the gap traces to exactly one cell
-(`explainDistributionGap` in `src/lib/bvaValidation.js`), falling back to a generic message
-otherwise. The workbook's displayed total is retained only as an audit-trail source value
-(visible in BVA Review) and never blocks finalization.
+`Distributions YTD` shown is the workbook's printed grand total (and each entity's printed
+YTD, and the printed quarter column totals) when present; otherwise the sum of each
+entity's own quarters. The sum is always computed and compared: the workbook's grand-total
+row is known to have a manually-typed column-subtotal formula that can skip one entity's
+row for one quarter. Flag it (`requiresAdminReview: true`) with a specific notice naming the
+entity/quarter/amount when the gap traces to exactly one cell (`explainDistributionGap` in
+`src/lib/bvaValidation.js`), else a generic message. It never blocks.
 
 `Distributions YTD` and `"Savings / Distributions In"` are different metrics — do not
 conflate them.

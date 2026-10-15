@@ -301,7 +301,15 @@
     },
     "annual_budgeted_income_workbook": {
       "type": "number",
-      "description": "The annual income budget total as displayed in the workbook, kept only to show the discrepancy when it omits sub-cent lines"
+      "description": "The annual income budget total as printed in the workbook (also what annual_budgeted_income shows when present)"
+    },
+    "printed_totals": {
+      "type": "boolean",
+      "description": "Set by a BVA import made under the printed-total rule: the dashboard shows the workbook's printed totals for this period. Absent on earlier periods, which are shown as they were published."
+    },
+    "distribution_quarter_totals": {
+      "type": "object",
+      "description": "The distribution quarter column totals the BVA workbook prints ({ q1..q4 }, only those printed). Shown on the dashboard's Total row when present."
     },
     "annual_budgeted_expenses": {
       "type": "number",

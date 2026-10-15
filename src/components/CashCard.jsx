@@ -22,21 +22,28 @@ export default function CashCard({ total, accounts = null, rows = null, reconcil
   const list = normalize({ accounts, rows });
   const missingCount = list.filter((a) => a.balance == null).length;
   const knownSum = list.reduce((s, a) => s + (a.balance == null ? 0 : a.balance), 0);
+  // The total shown is the workbook's printed Total Cash when one is stored.
+  const printed = reportedTotal != null && total != null && Math.round(reportedTotal * 100) === Math.round(total * 100);
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs uppercase tracking-[0.14em] text-stone-500">Total Cash</p>
           <p className="mt-2 font-display text-3xl tracking-tight">{fmtCurrency(total)}</p>
-          {missingCount > 0 && total != null && (
+          {missingCount > 0 && total != null && !printed && (
             <p className="mt-1 text-xs text-amber-700" data-testid="cash-partial">
               Partial total — {missingCount} account{missingCount > 1 ? 's have' : ' has'} no balance in the source; only known balances are included.
             </p>
           )}
-          {reconciles === false && (
-            <p className="mt-1 text-xs text-rose-700">
-              Calculation discrepancy — accounts total {fmtCurrency(knownSum)}
-              {reportedTotal != null ? `, workbook reported ${fmtCurrency(reportedTotal)}` : ''}. The calculated total is shown.
+          {missingCount > 0 && printed && (
+            <p className="mt-1 text-xs text-amber-700" data-testid="cash-partial">
+              {missingCount} account{missingCount > 1 ? 's have' : ' has'} no balance in the workbook (shown as —); the workbook&apos;s Total Cash is shown.
+            </p>
+          )}
+          {(reconciles === false || (printed && missingCount === 0 && list.length > 0 && Math.round(knownSum * 100) !== Math.round(total * 100))) && (
+            <p className="mt-1 text-xs text-rose-700" data-testid="cash-does-not-add-up">
+              The workbook does not add up — its accounts total {fmtCurrency(knownSum)}
+              {printed ? `; the workbook's Total Cash of ${fmtCurrency(total)} is shown.` : '. The calculated total is shown.'}
             </p>
           )}
         </div>

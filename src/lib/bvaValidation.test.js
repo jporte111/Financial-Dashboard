@@ -59,7 +59,7 @@ describe('workbook defect handling', () => {
     expect(v.reconciled.income.remaining).toBe(round2(1320012 - 770007));
   });
 
-  it('distributions: the calculated entity-quarter sum is authoritative; the workbook total is kept only for audit; no override is required', () => {
+  it('distributions: the workbook\'s printed total is shown; the entity-quarter sum is kept for checking; a warning, no override', () => {
     const v = run(workbookLikeParsed());
     const w = v.warnings.find((x) => x.code === 'distribution_workbook_total_corrected');
     expect(w).toBeDefined();
@@ -69,10 +69,11 @@ describe('workbook defect handling', () => {
     expect(w.blocksFinalize).toBe(false); // arithmetically correct; no override needed
     // the specific, attributed correction notice
     expect(w.message).toBe(
-      'Workbook total omitted Entity Two Q2 of $1,500.00. Dashboard uses the recalculated entity-quarter total of $8,000.00.'
+      "The workbook does not add up: its Distributions YTD total omits Entity Two Q2 of $1,500.00. The workbook's total is shown; the entity-quarter total of $8,000.00 is kept for checking."
     );
     expect(v.reconciled.distributions.entitySum).toBe(8000);
-    expect(v.reconciled.distributions.ytd).toBe(8000);
+    expect(v.reconciled.distributions.ytd).toBe(8000); // calculated, for checking
+    expect(v.reconciled.display.distributions_ytd).toBe(6500); // what the dashboard shows
     expect(v.reconciled.distributions.workbookReportedTotal).toBe(6500);
     expect(v.reconciled.distributions.reconciled).toBe(false); // factually: workbook != calculated
     // (this fixture also has an unrelated, still-blocking cash discrepancy —
@@ -95,7 +96,8 @@ describe('workbook defect handling', () => {
     const w = v.warnings.find((x) => x.code === 'distribution_workbook_total_corrected');
     expect(w).toBeDefined();
     expect(w.blocksFinalize).toBe(false);
-    expect(w.message).toBe('Distribution entity quarterly totals do not match the workbook displayed total. The recalculated entity-quarter total is used.');
+    expect(w.message).toBe("The workbook does not add up: the entities' quarters do not sum to its Distributions YTD total. The workbook's total is shown; the entity-quarter total is kept for checking.");
+    expect(v.reconciled.display.distributions_ytd).toBe(4000);
   });
 
   it('carries forward parser structural warnings (misaligned transfer labels)', () => {

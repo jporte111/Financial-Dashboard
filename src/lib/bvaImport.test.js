@@ -76,17 +76,31 @@ describe('child-entity reconciliation on re-import', () => {
 });
 
 describe('income budget + distributions handling', () => {
-  it('stores the independently calculated income budget and keeps the workbook value only as a discrepancy reference', () => {
+  it('stores the workbook\'s printed income budget (the calculated one stays in the warning)', () => {
     const p = plan(workbookLikeParsed);
-    expect(p.periodData.annual_budgeted_income).toBe(1320012); // calculated
-    expect(p.periodData.annual_budgeted_income_workbook).toBe(1320000); // workbook displayed
+    expect(p.periodData.annual_budgeted_income).toBe(1320000); // printed
+    expect(p.periodData.annual_budgeted_income_workbook).toBe(1320000);
+    expect(p.warnings.find((w) => w.code === 'income_budget_workbook_mismatch')).toMatchObject({ sourceValue: 1320000, calculatedValue: 1320012 });
   });
 
-  it('stores the calculated entity-quarter sum as Distributions YTD (never the raw workbook total)', () => {
+  it('stores the workbook\'s printed Distributions YTD, each entity\'s printed YTD, and its quarter totals', () => {
     const p = plan(workbookLikeParsed);
-    // Entity One 3000 + Entity Two (2000+1500+1500) 5000 = 8000; the
-    // workbook's own (wrong) displayed total of 6500 is not stored here.
+    // The workbook prints 6500; the entities' quarters add up to 8000 (kept in the warning).
+    expect(p.periodData.distributions_ytd).toBe(6500);
+    expect(p.warnings.find((w) => w.code === 'distribution_workbook_total_corrected')).toMatchObject({ sourceValue: 6500, calculatedValue: 8000 });
+    const two = p.distributions.toCreate.find((d) => d.entity_name === 'Entity Two');
+    expect(two.workbook_ytd).toBe(4500);
+    expect(typeof p.periodData.distribution_quarter_totals).toBe('object');
+  });
+
+  it('with no printed total, the calculated one is stored', () => {
+    const parsed = workbookLikeParsed();
+    parsed.distributions.reportedTotal = null;
+    parsed.income.reportedBudgetTotal = null;
+    const validation = validateBva(parsed, { cutoffDate: SAMPLE_CUTOFF });
+    const p = planBvaImport({ parsed, validation, confirm: { month: 7, year: 2026, cutoffDate: SAMPLE_CUTOFF } });
     expect(p.periodData.distributions_ytd).toBe(8000);
+    expect(p.periodData.annual_budgeted_income).toBe(1320012);
   });
 });
 

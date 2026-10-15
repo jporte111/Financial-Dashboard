@@ -271,6 +271,10 @@ export function buildBvaDashboard(data, opts = {}) {
       ? Math.min(Math.max(n(period.months_elapsed), 0), MONTHS_IN_YEAR)
       : elapsedMonthsFromCutoff(period.reporting_cutoff_date || period.end_date);
   const pacePct = expectedPacePct(elapsedMonths);
+  // Periods imported under the printed-total rule (bvaImport.js marks them)
+  // show the workbook's printed totals. Every period stored before it keeps
+  // exactly the display it was published with (never reinterpreted).
+  const printedRule = period.printed_totals === true;
   const labels = reportingLabels(period, elapsedMonths);
   const warnings = warningIndex(period, { distributions, transfers });
 
@@ -356,12 +360,16 @@ export function buildBvaDashboard(data, opts = {}) {
   const eY = known(expenseLines.map((l) => l.ytd_actual));
   const eB = known(expenseLines.map((l) => l.annual_budget));
   const expenseMonthPresent = expenseLines.length > 0 && eM.value != null;
-  // The overall expense figure is computed from the group lines when present
-  // (calculated wins); it falls back to the stored period scalars only when no
-  // expense lines have been imported. It is NEVER the discretionary group alone.
-  const overallExpenses = expenseLines.length
-    ? ytdOrMissing(eY.complete ? eY.value : null, eB.complete ? eB.value : null, elapsedMonths)
-    : ytdOrMissing(num(period.ytd_expenses), num(period.annual_budgeted_expenses), elapsedMonths);
+  // The overall expense figure is the stored total -- the workbook's printed
+  // Total Expenses (see bvaImport.js) -- and falls back to the sum of the group
+  // lines when none is stored. The sum is kept to show when the workbook does
+  // not add up. It is NEVER the discretionary group alone.
+  const expensesCalculated = { ytd: expenseLines.length && eY.complete ? eY.value : null, budget: expenseLines.length && eB.complete ? eB.value : null };
+  const overallExpenses = printedRule
+    ? ytdOrMissing(num(period.ytd_expenses) ?? expensesCalculated.ytd, num(period.annual_budgeted_expenses) ?? expensesCalculated.budget, elapsedMonths)
+    : expenseLines.length
+      ? ytdOrMissing(expensesCalculated.ytd, expensesCalculated.budget, elapsedMonths)
+      : ytdOrMissing(num(period.ytd_expenses), num(period.annual_budgeted_expenses), elapsedMonths);
   // Current-month expenses — null ("Source value missing") when no source
   // carries a figure; a present zero still renders as $0.00; a total that
   // leaves out lines without a figure is marked partial.
@@ -372,10 +380,11 @@ export function buildBvaDashboard(data, opts = {}) {
   const iY = known(incomeLines.map((l) => l.ytd_actual));
   const iB = known(incomeLines.map((l) => l.annual_budget));
   const iM = known(incomeLines.map((l) => l.month_actual));
-  const ytdIncome = incomeLines.length ? (iY.complete ? iY.value : null) : r2n(num(period.ytd_income));
-  // Independently calculated budget wins over any stored workbook figure. A
-  // legacy period without lines or a stored budget shows it as missing.
-  const annualBudgetedIncome = incomeLines.length ? (iB.complete ? iB.value : null) : r2n(num(period.annual_budgeted_income));
+  // The stored totals are what the workbook prints (bvaImport.js); the sums
+  // of the income lines are kept to show when the workbook does not add up.
+  const incomeCalculated = { ytd: incomeLines.length && iY.complete ? iY.value : null, budget: incomeLines.length && iB.complete ? iB.value : null };
+  const ytdIncome = printedRule || !incomeLines.length ? r2n(num(period.ytd_income)) ?? incomeCalculated.ytd : incomeCalculated.ytd;
+  const annualBudgetedIncome = printedRule || !incomeLines.length ? r2n(num(period.annual_budgeted_income)) ?? incomeCalculated.budget : incomeCalculated.budget;
   const remainingIncomeBudget = annualBudgetedIncome == null || ytdIncome == null ? null : round2(annualBudgetedIncome - ytdIncome);
   const incomeBudgetUsedPct =
     annualBudgetedIncome == null || ytdIncome == null ? null : annualBudgetedIncome ? ytdIncome / annualBudgetedIncome : 0;
@@ -489,7 +498,9 @@ export function buildBvaDashboard(data, opts = {}) {
   const cashPartial = cashRows.length > 0 && !cK.complete;
   const cashReported = r2n(num(period.total_cash));
   const cashReconciles = cashReported == null || cashPartial || cashCalculated == null ? null : cashCalculated === cashReported;
-  const totalCash = cashRows.length ? cashCalculated : cashReported;
+  // The workbook's printed Total Cash when stored; else the sum of the
+  // (known) balances, marked partial when one is missing.
+  const totalCash = printedRule ? (cashReported != null ? cashReported : cashRows.length ? cashCalculated : null) : cashRows.length ? cashCalculated : cashReported;
 
   // ---- Distributions -----------------------------------------
   // Quarter applicability comes from the REPORT's cutoff date (never today):
@@ -512,14 +523,18 @@ export function buildBvaDashboard(data, opts = {}) {
     }
     const counted = QUARTERS.filter((q) => quarterState[q] !== QUARTER_STATE.NOT_YET);
     const k = known(counted.map((q) => values[q]));
+    const printed = printedRule ? r2n(num(d.workbook_ytd)) : null;
     return {
       id: d.id,
       name: d.entity_name,
       ...values,
       quarterState,
-      // Sum of the applicable quarters; partial when a begun quarter is blank.
-      ytd: k.value,
-      ytdPartial: !k.complete,
+      // The YTD the workbook prints for the entity when stored; else the sum
+      // of the applicable quarters (partial when a begun quarter is blank).
+      ytd: printed != null ? printed : k.value,
+      ytdPartial: printed != null ? false : !k.complete,
+      ytdCalculated: k.value,
+      ytdReconciles: printed == null || !k.complete ? null : printed === k.value,
     };
   });
   const dK = known(distEntities.map((e) => e.ytd));
@@ -532,6 +547,10 @@ export function buildBvaDashboard(data, opts = {}) {
   // legacy period stored before this calculation was corrected. A partial
   // recompute cannot confirm or contradict it.
   const storedDistributions = r2n(num(period.distributions_ytd));
+  // The workbook's printed quarter column totals (only those it prints).
+  const printedQuarterTotals = printedRule
+    ? Object.fromEntries(QUARTERS.map((q) => [q, r2n(num(period.distribution_quarter_totals?.[q]))]).filter(([, v]) => v != null))
+    : {};
   const distributionsYtd = storedDistributions != null ? storedDistributions : distEntitySum;
   const distReconciles = storedDistributions == null || distPartial || distEntitySum == null ? null : distEntitySum === storedDistributions;
 
@@ -609,6 +628,11 @@ export function buildBvaDashboard(data, opts = {}) {
       remainingIncomeBudget,
       incomeBudgetUsedPct,
       incomeWorkbookBudget,
+      // The sums of the rows, kept to show when the workbook does not add up.
+      incomeCalculatedYtd: incomeCalculated.ytd,
+      incomeCalculatedBudget: incomeCalculated.budget,
+      expensesCalculatedYtd: expensesCalculated.ytd,
+      expensesCalculatedBudget: expensesCalculated.budget,
       monthIncome,
       monthIncomeMissing,
       monthIncomePartial,
@@ -642,6 +666,8 @@ export function buildBvaDashboard(data, opts = {}) {
     distributions: {
       total: distributionsYtd,
       entitySum: distEntitySum,
+      printedQuarterTotals,
+      printedTotals: printedRule,
       reconciles: distReconciles,
       partial: distPartial,
       quarterApplicable,

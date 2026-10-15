@@ -27,12 +27,17 @@ export const PUBLIC_PERIOD_FIELDS = [
   'id', 'label', 'month', 'year', 'start_date', 'end_date', 'status', 'published', 'months_elapsed',
   'reporting_cutoff_date', 'publication_date', 'last_updated', 'total_cash', 'ytd_income', 'ytd_expenses',
   'month_income', 'month_expenses', 'distributions_ytd', 'savings_in_ytd', 'savings_spend_ytd',
-  'annual_budgeted_income', 'annual_budgeted_expenses', 'monthly_income_budget',
+  'annual_budgeted_income', 'annual_budgeted_expenses', 'monthly_income_budget', 'distribution_quarter_totals', 'printed_totals',
 ];
 
 // null / blank / non-numeric -> null (unknown); a stored 0 stays 0.
 const numOrNull = (v) =>
   v === null || v === undefined || (typeof v === 'string' && v.trim() === '') || !Number.isFinite(Number(v)) ? null : Number(v);
+
+const quarterTotalsOf = (t) => {
+  if (!t || typeof t !== 'object' || Array.isArray(t)) return {};
+  return Object.fromEntries(['q1', 'q2', 'q3', 'q4'].map((q) => [q, numOrNull(t[q])]).filter(([, v]) => v !== null));
+};
 
 // A field listed in source_missing_fields is served as missing (null), never
 // as the stale number behind it. The list itself is not served.
@@ -56,6 +61,9 @@ const publicPeriodFields = (p) => ({
   month_income: numOrNull(p.month_income),
   month_expenses: numOrNull(p.month_expenses),
   distributions_ytd: numOrNull(p.distributions_ytd),
+  // The workbook's printed quarter totals: numbers only, only those printed.
+  distribution_quarter_totals: quarterTotalsOf(p.distribution_quarter_totals),
+  printed_totals: p.printed_totals === true,
   savings_in_ytd: numOrNull(p.savings_in_ytd),
   savings_spend_ytd: numOrNull(p.savings_spend_ytd),
   annual_budgeted_income: numOrNull(p.annual_budgeted_income),
@@ -95,6 +103,7 @@ export const publicDistribution = (d) => ({
   q2: numOrNull(d.q2),
   q3: numOrNull(d.q3),
   q4: numOrNull(d.q4),
+  workbook_ytd: numOrNull(d.workbook_ytd),
 });
 
 export const publicSavingsSpend = (s) => ({ id: s.id, category: s.category, ytd_amount: numOrNull(s.ytd_amount) });

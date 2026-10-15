@@ -96,7 +96,8 @@ export default function PublishPanel({ period, reload }) {
       </div>
 
       <div className="mt-6 space-y-3">
-        <p className="text-xs uppercase tracking-[0.12em] text-stone-500">Pre-Publication Checklist</p>
+        <p className="text-xs uppercase tracking-[0.12em] text-stone-500">Review checklist (optional)</p>
+        <p className="text-xs text-stone-500">Optional review aids: who confirmed each item, and when, is recorded. They never block finalizing or publishing.</p>
         <ChecklistItems
           items={check?.checklist?.items || null}
           period={period}

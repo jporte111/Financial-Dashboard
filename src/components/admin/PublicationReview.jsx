@@ -74,7 +74,7 @@ function Entry({ e }) {
 
 const GROUPS = [
   ['blockers', 'Blockers — must be fixed', 'border-rose-200 bg-rose-50', 'The workbook cannot be shown faithfully until these are fixed.'],
-  ['needsReview', 'Needs review', 'border-amber-200 bg-amber-50', 'Checklist items to confirm.'],
+  ['needsReview', 'Optional review checklist', 'border-stone-200 bg-white', 'Optional review aids; they never block finalizing or publishing.'],
   ['warnings', 'Warnings', 'border-stone-200 bg-stone-50', 'Missing and unusual values, shown as the workbook has them. These never block and need no written reason.'],
 ];
 

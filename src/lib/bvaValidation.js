@@ -10,15 +10,14 @@
 //     finalize or publish, and no written reason is needed to publish them.
 //     Only structural / integrity failures block (base44/shared/hardRules.ts):
 //     the app cannot tell what the workbook says or which period it is.
-//   - When a computed total conflicts with the workbook's displayed total,
-//     keep BOTH and raise a warning; the total calculated from the workbook's
-//     own parts is used.
-//   - Annual income budget: use the independently calculated total; record the
-//     workbook's displayed total as a discrepancy (it omits sub-cent lines).
-//   - Distributions YTD: the sum of each entity's own quarters (q1+q2+q3+q4)
-//     is authoritative. The workbook's displayed grand total is kept only as
-//     an audit-trail source value -- it is a manually-typed cell range and has
-//     been wrong before. A disagreement is a notice for Admin review.
+//   - Printed totals (owner decision, October 2026): when the workbook's
+//     printed total disagrees with the sum of its rows, the PRINTED total is
+//     what the dashboard shows (reconciled.display), and a warning says the
+//     workbook does not add up. The total calculated from the rows is kept
+//     (reconciled.*) for validation. With no printed total, the calculated
+//     one is shown. This covers Total Cash, Total Income and the annual income
+//     budget, Total Expenses and the annual expense budget, Distributions YTD,
+//     each entity's distributions YTD, and the quarter column totals.
 //   - Missing vs zero: a blank source value stays null all the way through.
 //     A total with a missing part is itself missing (null), never a partial
 //     sum. It is shown as missing, never as $0.00.
@@ -36,6 +35,8 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 const r2 = (v) => (v == null ? null : round2(v));
+// The workbook's printed figure when present, else the calculated one.
+const printedOr = (printed, calculated) => (printed != null ? round2(n(printed)) : r2(calculated));
 
 // Sum of values; null when any part is missing (a partial sum is not a total).
 const sumOrNull = (values) => (values.some((v) => v == null) ? null : round2(values.reduce((s, v) => s + n(v), 0)));
@@ -282,7 +283,7 @@ export function validateBva(parsed, opts = {}) {
     warn(warnings, {
       code: 'cash_total_mismatch',
       section: 'cash',
-      message: 'Cash account balances do not sum to the workbook Total Cash. Calculated total is used.',
+      message: 'The workbook does not add up: cash account balances do not sum to its Total Cash. The workbook\'s Total Cash is shown; the calculated total is kept for checking.',
       sourceValue: cashReported,
       calculatedValue: cashSum,
       requiresAdminReview: true,
@@ -308,7 +309,7 @@ export function validateBva(parsed, opts = {}) {
     warn(warnings, {
       code: 'income_actual_mismatch',
       section: 'income',
-      message: 'Income categories do not sum to the workbook Total Income. Calculated total is used.',
+      message: 'The workbook does not add up: income categories do not sum to its Total Income. The workbook\'s total is shown; the calculated total is kept for checking.',
       sourceValue: incomeActualReported,
       calculatedValue: incomeActualSum,
       requiresAdminReview: true,
@@ -326,11 +327,10 @@ export function validateBva(parsed, opts = {}) {
     warn(warnings, {
       code: 'income_budget_workbook_mismatch',
       section: 'income',
-      message: `The workbook's displayed annual income budget total is less than the sum of the income lines' budgets.${cause} The independently calculated total is used.`,
+      message: `The workbook does not add up: its annual income budget total differs from the sum of the income lines' budgets.${cause} The workbook's total is shown; the calculated total is kept for checking.`,
       sourceValue: incomeBudgetReported,
       calculatedValue: incomeBudgetSum,
       requiresAdminReview: true,
-      // Recorded as a discrepancy, not a finalize blocker — calculated wins.
       blocksFinalize: false,
     });
   }
@@ -363,7 +363,7 @@ export function validateBva(parsed, opts = {}) {
     warn(warnings, {
       code: 'expense_actual_mismatch',
       section: 'expenses',
-      message: 'Fixed + Variable + Discretionary actual does not equal the workbook Total Expenses. Calculated total is used.',
+      message: 'The workbook does not add up: Fixed + Variable + Discretionary actual does not equal its Total Expenses. The workbook\'s total is shown; the calculated total is kept for checking.',
       sourceValue: expActualReported,
       calculatedValue: expActualSum,
       requiresAdminReview: true,
@@ -375,7 +375,7 @@ export function validateBva(parsed, opts = {}) {
       code: 'expense_budget_mismatch',
       section: 'expenses',
       message:
-        'Fixed + Variable + Discretionary annual budget does not equal the workbook Total Annual Expense Budget. Calculated total is used.',
+        'The workbook does not add up: Fixed + Variable + Discretionary annual budget does not equal its Total Annual Expense Budget. The workbook\'s total is shown; the calculated total is kept for checking.',
       sourceValue: expBudgetReported,
       calculatedValue: expBudgetSum,
       requiresAdminReview: true,
@@ -438,18 +438,18 @@ export function validateBva(parsed, opts = {}) {
       warn(warnings, {
         code: 'distribution_entity_ytd_mismatch',
         section: 'distributions',
-        message: `${e.name}'s own YTD cell in the workbook (${money(e.reportedYtd)}) does not equal the sum of its quarters (${money(e.calculatedYtd)}). The entity-quarter total is used.`,
+        message: `${e.name}'s own YTD cell in the workbook (${money(e.reportedYtd)}) does not equal the sum of its quarters (${money(e.calculatedYtd)}). The workbook does not add up; its YTD cell is shown and the sum of the quarters is kept for checking.`,
         sourceValue: e.reportedYtd,
         calculatedValue: e.calculatedYtd,
         requiresAdminReview: true, // keep flagging the workbook formula error for BVA Review
-        blocksFinalize: false, // arithmetically correct; no override needed to use it
+        blocksFinalize: false,
       });
     }
     if (!grandTotalMatches) {
       const gapExplanation = explainDistributionGap(distEntities, parsed?.distributions?.reportedQuarterTotals);
       const message = gapExplanation
-        ? `Workbook total omitted ${gapExplanation.entity} ${QUARTER_LABEL[gapExplanation.quarter]} of ${money(gapExplanation.amount)}. Dashboard uses the recalculated entity-quarter total of ${money(distEntitySum)}.`
-        : 'Distribution entity quarterly totals do not match the workbook displayed total. The recalculated entity-quarter total is used.';
+        ? `The workbook does not add up: its Distributions YTD total omits ${gapExplanation.entity} ${QUARTER_LABEL[gapExplanation.quarter]} of ${money(gapExplanation.amount)}. The workbook's total is shown; the entity-quarter total of ${money(distEntitySum)} is kept for checking.`
+        : 'The workbook does not add up: the entities\' quarters do not sum to its Distributions YTD total. The workbook\'s total is shown; the entity-quarter total is kept for checking.';
       warn(warnings, {
         code: 'distribution_workbook_total_corrected',
         section: 'distributions',
@@ -457,7 +457,20 @@ export function validateBva(parsed, opts = {}) {
         sourceValue: distWorkbookTotal,
         calculatedValue: distEntitySum,
         requiresAdminReview: true, // keep flagging the workbook formula error for BVA Review
-        blocksFinalize: false, // arithmetically correct; no override needed to use it
+        blocksFinalize: false,
+      });
+    }
+  }
+  // Printed quarter column totals that differ from the sum of the entities.
+  const printedQ = parsed?.distributions?.reportedQuarterTotals || null;
+  if (printedQ && distEntities.length) {
+    const off = ['q1', 'q2', 'q3', 'q4'].filter((q) => printedQ[q] != null && !eq(distEntities.reduce((t, e) => t + n(e[q]), 0), printedQ[q]));
+    if (off.length) {
+      warn(warnings, {
+        code: 'distribution_quarter_total_mismatch',
+        section: 'distributions',
+        message: `The workbook does not add up: its ${off.map((q) => QUARTER_LABEL[q]).join(', ')} distribution total${off.length > 1 ? 's do' : ' does'} not equal the sum of the entities. The workbook's totals are shown.`,
+        requiresAdminReview: true,
       });
     }
   }
@@ -471,7 +484,7 @@ export function validateBva(parsed, opts = {}) {
     warn(warnings, {
       code: 'transfers_total_mismatch',
       section: 'transfers',
-      message: 'Recurring transfer amounts do not sum to the workbook transfer total. Calculated total is used.',
+      message: 'The workbook does not add up: recurring transfer amounts do not sum to its transfer total. Both are kept.',
       sourceValue: transfersReported,
       calculatedValue: transfersTotal,
       requiresAdminReview: true,
@@ -517,7 +530,7 @@ export function validateBva(parsed, opts = {}) {
           percentUsed: c.actualYtd == null || c.annualBudget == null ? null : n(c.annualBudget) !== 0 ? n(c.actualYtd) / n(c.annualBudget) : 0,
         })),
         actualTotal: incomeActualSum,
-        budgetTotal: incomeBudgetSum, // calculated wins
+        budgetTotal: incomeBudgetSum, // calculated, for checking (the dashboard shows display.annual_budgeted_income)
         workbookBudgetTotal: incomeBudgetReported == null ? null : round2(incomeBudgetReported),
         remaining: incomeRemaining,
         percentUsed: incomePercentUsed,
@@ -549,6 +562,18 @@ export function validateBva(parsed, opts = {}) {
       },
       transfers: { items: transferItems.map((t) => ({ ...t, amount: r2(t.amount) })), total: transfersTotal },
       detail: { categories: detailCategories },
+      // What the dashboard shows: the workbook's printed total when it has
+      // one, else the calculated total (a blank stays missing, never $0.00).
+      display: {
+        total_cash: printedOr(cashReported, cashSum),
+        ytd_income: printedOr(incomeActualReported, incomeActualSum),
+        annual_budgeted_income: printedOr(incomeBudgetReported, incomeBudgetSum),
+        ytd_expenses: printedOr(expActualReported, expActualSum),
+        annual_budgeted_expenses: printedOr(expBudgetReported, expBudgetSum),
+        distributions_ytd: printedOr(distWorkbookTotal, distEntitySum),
+        distribution_quarter_totals: Object.fromEntries(['q1', 'q2', 'q3', 'q4'].map((q) => [q, r2(parsed?.distributions?.reportedQuarterTotals?.[q])]).filter(([, v]) => v != null)),
+        entity_ytd: distEntities.map((e) => printedOr(e.reportedYtd, e.calculatedYtd)),
+      },
     },
   };
 }

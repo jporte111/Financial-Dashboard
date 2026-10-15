@@ -177,9 +177,8 @@ describe('publish: only a finalized, still-valid, reviewed period', () => {
     expect(codes(evaluatePublish({ ...period, status: 'final', checklist: fullChecklist }, lines))).toContain('not_final');
   });
 
-  it('every checklist item must be confirmed', () => {
-    const r = evaluatePublish(finalized(period, { bva_overrides: { ...allRecon, ...exclusions } }), lines);
-    expect(codes(r).filter((c) => c.startsWith('checklist_incomplete:'))).toHaveLength(PUBLISH_CHECKLIST.length);
+  it('the checklist is optional: nothing confirmed still publishes', () => {
+    expect(evaluatePublish(finalized(period), lines)).toEqual({ ok: true, blockers: [] });
   });
 
   it('passes with finalization, recorded overrides and a complete checklist', () => {

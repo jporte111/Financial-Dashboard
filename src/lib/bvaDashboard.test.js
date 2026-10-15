@@ -186,7 +186,12 @@ describe('cash reconciliation', () => {
     const vm = buildBvaDashboard(d, { month: false });
     expect(vm.cash.reconciles).toBe(false);
     expect(vm.states.cash).toBe(SECTION_STATE.DISCREPANCY);
-    expect(vm.cash.total).toBe(1000000); // calculated value is shown
+    expect(vm.cash.total).toBe(1000000); // a period stored before the printed-total rule: shown as published
+    d.period.printed_totals = true; // imported under the printed-total rule
+    const printed = buildBvaDashboard(d, { month: false });
+    expect(printed.cash.total).toBe(1100000); // the workbook's printed Total Cash is shown
+    expect(printed.cash.calculatedTotal).toBe(1000000); // ...the sum is kept for checking
+    expect(printed.cash.reconciles).toBe(false);
   });
 });
 
