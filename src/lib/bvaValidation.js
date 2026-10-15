@@ -23,7 +23,9 @@
 //   - Missing vs zero: a blank source value stays null all the way through.
 //     A total with a missing part is itself missing (null), never a partial
 //     sum. A missing Actual YTD / Annual Budget / balance / amount blocks
-//     finalization and cannot be overridden -- the workbook must be corrected.
+//     finalization, but it can be DEFERRED: accept the warning with a
+//     written reason to leave it blank for now and correct it later. The
+//     value is never read as $0.00.
 //   - Warnings carry `overridable`: false means no reason can clear it.
 
 import { n, round2, expectedPacePct, computeYtd, elapsedMonthsFromCutoff } from './bva.js';
@@ -248,8 +250,7 @@ export function validateBva(parsed, opts = {}) {
       block({
         code: `source_value_missing:${key}`,
         section: key,
-        message: `${label}: ${bad.map((x) => x.name || x.code || 'unnamed row').join(', ')} ${bad.length > 1 ? 'have' : 'has'} a blank ${fields.join(' / ')} in the workbook. A blank is not $0.00; correct the workbook.`,
-        overridable: false,
+        message: `${label}: ${bad.map((x) => x.name || x.code || 'unnamed row').join(', ')} ${bad.length > 1 ? 'have' : 'has'} a blank ${fields.join(' / ')} in the workbook. A blank is not $0.00 and stays blank; correct the workbook, or accept with a reason to leave it blank for now and correct it later.`,
       });
     }
   };

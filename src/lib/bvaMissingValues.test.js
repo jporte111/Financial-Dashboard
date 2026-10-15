@@ -76,7 +76,8 @@ describe('expected sections: absent, empty, or missing rows compared with the pr
     p.transfers.items.push({ amount: null, source: 'Acct B', purpose: 'Insurance' });
     const val = v(p);
     expect(val.reconciled.transfers.total).toBe(null);
-    expect(find(val, 'source_value_missing:transfers')).toMatchObject({ overridable: false });
+    expect(find(val, 'source_value_missing:transfers')).toMatchObject({ overridable: true, blocksFinalize: true });
+    expect(find(v(p, { overrides: { 'source_value_missing:transfers': { reason: 'left blank; correct later' } } }), 'source_value_missing:transfers')).toMatchObject({ blocksFinalize: false });
   });
 
   it('a stored parse from before the multi-sheet parser (no section inventory) is not re-judged for sections', () => {

@@ -50,6 +50,24 @@ export const PUBLISH_CHECKLIST = [
 const isMissing = (v) => v === null || v === undefined || v === '' || (typeof v === 'number' && !Number.isFinite(v));
 const isNonZero = (v) => !isMissing(v) && Number(v) !== 0;
 
+// Which validation warning a missing period total traces to, so accepting
+// that warning with a written reason ("leave blank for now, correct later")
+// also clears the total's blocker. The reporting cutoff has no such warning.
+export const REQUIRED_FIELD_WARNINGS = {
+  total_cash: 'source_value_missing:cash',
+  ytd_income: 'source_value_missing:income',
+  annual_budgeted_income: 'source_value_missing:income',
+  ytd_expenses: 'source_value_missing:expenses',
+  annual_budgeted_expenses: 'source_value_missing:expenses',
+  distributions_ytd: 'source_value_missing:distributions',
+};
+
+// Cleared by a reason on the blocker's own code, or on the validation
+// warning that reported the missing value (bare or open_reconciliation key).
+const clearedBy = (code, alt, overrides) =>
+  hasReason(overrides[code]) ||
+  (alt != null && (hasReason(overrides[alt]) || hasReason(overrides[`open_reconciliation:${alt}`])));
+
 export function elapsedMonthsFromCutoff(cutoffDate) {
   if (!cutoffDate) return null;
   const d = new Date(cutoffDate);
@@ -74,7 +92,15 @@ export function isMaterialUnassignedDetail(line) {
 function dataBlockers(period, lines, overrides) {
   const out = [];
   for (const f of REQUIRED_PERIOD_FIELDS) {
-    if (isMissing(period[f])) out.push(blocker(`required_value_missing:${f}`, `Required value "${f}" is missing from the import.`));
+    if (isMissing(period[f])) {
+      const code = `required_value_missing:${f}`;
+      const alt = REQUIRED_FIELD_WARNINGS[f] || null;
+      // The reporting cutoff cannot be deferred; any other missing total can
+      // be left blank for now with a written reason (corrected later).
+      if (f === 'reporting_cutoff_date' || !clearedBy(code, alt, overrides)) {
+        out.push({ ...blocker(code, `Required value "${f}" is missing from the import.`, f !== 'reporting_cutoff_date'), alt });
+      }
+    }
   }
   const expected = elapsedMonthsFromCutoff(period.reporting_cutoff_date);
   if (period.reporting_cutoff_date && expected === null) {
@@ -97,14 +123,19 @@ function dataBlockers(period, lines, overrides) {
   if (missingGroups.length || !summaries.some((l) => l.budget_group === 'income')) {
     out.push(blocker('import_incomplete', `Imported budget lines are incomplete (missing: ${[...missingGroups, ...(summaries.some((l) => l.budget_group === 'income') ? [] : ['income'])].join(', ')}).`));
   }
-  // Primary figures: a blank is missing, never $0.00, and cannot be
-  // overridden. Summary lines need both. A watch-list DETAIL row with no
+  // Primary figures: a blank is missing, never $0.00, and blocks until
+  // corrected or deferred with a written reason ("leave blank for now,
+  // correct later"). Summary lines need both. A watch-list DETAIL row with no
   // figures at all is not material; one with only one of the two is missing
   // the other.
   for (const l of lines) {
     const missing = ['ytd_actual', 'annual_budget'].filter((f) => isMissing(l[f]));
     if (l.bva_detail && missing.length !== 1) continue;
-    for (const f of missing) out.push(blocker(`required_line_value_missing:${l.id}:${f}`, `"${l.category}" is missing ${f}.`));
+    const alt = l.bva_detail ? 'source_value_missing:detail' : l.budget_group === 'income' ? 'source_value_missing:income' : 'source_value_missing:expenses';
+    for (const f of missing) {
+      const code = `required_line_value_missing:${l.id}:${f}`;
+      if (!clearedBy(code, alt, overrides)) out.push({ ...blocker(code, `"${l.category}" is missing ${f}.`, true), alt });
+    }
   }
 
   for (const w of Array.isArray(period.bva_validation_warnings) ? period.bva_validation_warnings : []) {
@@ -201,11 +232,14 @@ export function evaluatePublish(rawPeriod, lines = [], crossFindings = null, che
 // The overrides that finalize records: only those that clear a blocker that
 // was actually present, each with its reason, who and when.
 export function recordedOverrides(period, lines, overrides, by, at, crossFindings = null) {
-  const needed = [...dataBlockers(period, lines, {}), ...crossPeriodBlockers(crossFindings, {})].filter((b) => b.overridable).map((b) => b.code);
+  const blockers = [...dataBlockers(period, lines, {}), ...crossPeriodBlockers(crossFindings, {})].filter((b) => b.overridable);
   const out = { ...(period.bva_overrides || {}) };
-  for (const code of needed) {
-    const o = overrides[code] || overrides[code.replace(/^open_reconciliation:/, '')];
-    if (hasReason(o)) out[code] = { reason: o.reason.trim(), by, at };
+  for (const b of blockers) {
+    const o =
+      overrides[b.code] ||
+      overrides[String(b.code).replace(/^open_reconciliation:/, '')] ||
+      (b.alt ? overrides[b.alt] || overrides[`open_reconciliation:${b.alt}`] : null);
+    if (hasReason(o)) out[b.code] = { reason: o.reason.trim(), by, at };
   }
   return out;
 }

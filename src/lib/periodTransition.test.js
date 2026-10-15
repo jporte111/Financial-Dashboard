@@ -133,12 +133,18 @@ describe('finalize', () => {
     expect(d.bva_validation_warnings.find((w) => w.code === 'cash_total_mismatch')).toMatchObject({ overridden: true, blocksFinalize: false });
   });
 
-  it('a missing required value cannot be overridden past the server', async () => {
+  it('a missing required value defers past the server only with a written reason', async () => {
     const fx = draftFixture();
     fx.period = { ...fx.period, ytd_income: null };
-    const r = await run(fx, { action: 'finalize', period_id: 'p1', overrides: { 'required_value_missing:ytd_income': { reason: 'trust me' } } });
-    expect(r.status).toBe(409);
-    expect(r.writes).toEqual([]);
+    const refused = await run(fx, { action: 'finalize', period_id: 'p1', overrides: { 'required_value_missing:ytd_income': { reason: '  ' } } });
+    expect(refused.status).toBe(409);
+    expect(refused.writes).toEqual([]);
+    const r = await run(fx, { action: 'finalize', period_id: 'p1', overrides: { 'required_value_missing:ytd_income': { reason: 'left blank; correct in a later revision' } } });
+    expect(r.status).toBe(200);
+    expectOnlyStateWrite(r.writes);
+    const d = r.writes[0].data;
+    expect(d).toMatchObject({ status: 'final', bva_import_status: 'final' });
+    expect(d.bva_overrides['required_value_missing:ytd_income']).toMatchObject({ reason: 'left blank; correct in a later revision' });
   });
 });
 

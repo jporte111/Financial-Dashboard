@@ -71,15 +71,35 @@ describe('finalize: open reconciliations need a documented override', () => {
   });
 });
 
-describe('finalize: missing required source values always block', () => {
-  it.each(REQUIRED_PERIOD_FIELDS)('missing %s blocks and cannot be overridden', (f) => {
+describe('finalize: missing required source values block until corrected or deferred', () => {
+  it.each(REQUIRED_PERIOD_FIELDS.filter((f) => f !== 'reporting_cutoff_date'))('missing %s blocks, and defers with a written reason', (f) => {
     const { period, lines } = staged();
     for (const blank of [null, undefined, '']) {
       const p = { ...period, [f]: blank };
       const code = `required_value_missing:${f}`;
-      const r = evaluateFinalize(p, lines, { [code]: { reason: 'please' } });
-      expect(codes(r)).toContain(code);
-      expect(r.blockers.find((b) => b.code === code).overridable).toBe(false);
+      const noReason = evaluateFinalize(p, lines, {});
+      expect(codes(noReason)).toContain(code);
+      expect(noReason.blockers.find((b) => b.code === code).overridable).toBe(true);
+      const deferred = evaluateFinalize(p, lines, { [code]: { reason: 'please' } });
+      expect(codes(deferred)).not.toContain(code);
+    }
+  });
+
+  it('a missing cutoff date cannot be deferred', () => {
+    const { period, lines } = staged();
+    const code = 'required_value_missing:reporting_cutoff_date';
+    const r = evaluateFinalize({ ...period, reporting_cutoff_date: '' }, lines, { [code]: { reason: 'please' } });
+    expect(codes(r)).toContain(code);
+    expect(r.blockers.find((b) => b.code === code).overridable).toBe(false);
+  });
+
+  it('accepting the source warning defers the missing total it traces to', () => {
+    const { period, lines } = staged();
+    const p = { ...period, total_cash: null };
+    for (const key of ['source_value_missing:cash', 'open_reconciliation:source_value_missing:cash']) {
+      const r = evaluateFinalize(p, lines, { [key]: { reason: 'left blank; correct later' } });
+      expect(codes(r)).not.toContain('required_value_missing:total_cash');
+      expect(codes(r)).not.toContain('open_reconciliation:source_value_missing:cash');
     }
   });
 

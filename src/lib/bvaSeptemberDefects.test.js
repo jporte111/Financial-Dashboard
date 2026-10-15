@@ -50,14 +50,16 @@ describe('defect 1: blank YTD / budget cells stay missing (never 0)', () => {
     expect(p.detail.categories[0].actualYtd).toBe(null);
   });
 
-  it('validation leaves the affected totals missing and blocks, without an override', () => {
+  it('validation leaves the affected totals missing; a written reason defers the block', () => {
     const v = validateBva(p, { cutoffDate: '2026-08-31', overrides: { 'source_value_missing:expenses': { reason: 'x' } } });
     expect(v.reconciled.expenses.actualTotal).toBe(null);
     expect(v.reconciled.expenses.budgetTotal).toBe(null);
     expect(v.reconciled.expenses.groups[0]).toMatchObject({ actual: null, remaining: null, status: null });
     const w = v.warnings.find((x) => x.code === 'source_value_missing:expenses');
-    expect(w).toMatchObject({ blocksFinalize: true, overridable: false });
-    expect(v.warnings.find((x) => x.code === 'source_value_missing:detail')).toMatchObject({ overridable: false });
+    expect(w).toMatchObject({ blocksFinalize: false, overridable: true });
+    // Without the override it still blocks; the detail one stays open.
+    expect(find(validateBva(p, { cutoffDate: '2026-08-31' }), 'source_value_missing:expenses')).toMatchObject({ blocksFinalize: true });
+    expect(v.warnings.find((x) => x.code === 'source_value_missing:detail')).toMatchObject({ overridable: true, blocksFinalize: true });
   });
 
   it('the plan writes no null and no 0 for them, and lists the period totals as missing', () => {

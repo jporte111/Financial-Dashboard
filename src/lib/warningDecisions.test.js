@@ -59,7 +59,8 @@ describe('decision options', () => {
   it('offers an override only for overridable finalize blockers', () => {
     expect(decisionOptions({ code: 'cash_total_mismatch', resolution: 'unresolved', blocksFinalize: true, overridable: true }))
       .toEqual([{ mode: 'accept', label: 'Accept with a reason' }]);
-    expect(decisionOptions({ code: 'source_value_missing:cash', resolution: 'unresolved', blocksFinalize: true, overridable: false })).toEqual([]);
+    expect(decisionOptions({ code: 'source_value_missing:cash', resolution: 'unresolved', blocksFinalize: true, overridable: true }))
+      .toEqual([{ mode: 'accept', label: 'Accept with a reason' }]);
     expect(decisionOptions({ code: 'cash_total_mismatch', resolution: 'accepted', blocksFinalize: true, overridable: true })).toEqual([]);
   });
 });
