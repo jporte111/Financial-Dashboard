@@ -289,6 +289,26 @@ export function importPreflight(match) {
 
 // Derive a prior category-number -> group map from existing BudgetLine rows so
 // re-imports and new months keep human-confirmed detail groupings.
+// Confirmed watch-list groups carried forward from the previous month's report:
+// only for rows whose account code AND category name are unchanged, and only
+// confirmed groups (Fixed / Variable / Discretionary / Savings). A new or
+// renamed row is not carried -- it stays unassigned until an admin sets it.
+const CARRY_GROUPS = ['fixed', 'variable', 'discretionary', 'savings'];
+const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+export function carriedGroupMap(previousLines, detailRows) {
+  const prev = new Map();
+  for (const l of previousLines || []) {
+    if (l.bva_detail && l.group_confirmed && l.qb_code && CARRY_GROUPS.includes(l.budget_group)) prev.set(normKey(l.qb_code), l);
+  }
+  const out = {};
+  for (const d of detailRows || []) {
+    const key = normKey(d.code || '');
+    const p = key ? prev.get(key) : null;
+    if (p && normName(p.category) === normName(d.name)) out[key] = p.budget_group;
+  }
+  return out;
+}
+
 export function groupMapFromLines(lines) {
   const map = {};
   for (const l of lines || []) {

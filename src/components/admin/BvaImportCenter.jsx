@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { parseBvaWorkbook } from '@/lib/bvaParser';
 import { validateBva } from '@/lib/bvaValidation';
-import { planBvaImport, importTarget, groupMapFromLines } from '@/lib/bvaImport';
+import { planBvaImport, importTarget, groupMapFromLines, carriedGroupMap } from '@/lib/bvaImport';
 import {
   applyCorrections,
   overridesFromCorrections,
@@ -65,6 +65,9 @@ export default function BvaImportCenter() {
   const [targetId, setTargetId] = useState(null);
   const [targetInfo, setTargetInfo] = useState(null); // importTarget() result for the confirmed month
   const [savedGroupMap, setSavedGroupMap] = useState({}); // confirmed group mappings from the draft's saved lines
+  // Confirmed watch-list groups of the previous month's report, for rows whose
+  // code and category name are unchanged (bvaImport.carriedGroupMap).
+  const [carried, setCarried] = useState({ map: {}, from: null });
   const [me, setMe] = useState(null);
   const [saveState, setSaveState] = useState('idle');
   const lastPersistedRef = useRef('');
@@ -127,7 +130,7 @@ export default function BvaImportCenter() {
           .filter((p) => p && p.bva_import_status === 'final')
           .sort((a, b) => b.year - a.year || b.month - a.month)[0];
         if (!prior) {
-          if (!cancelled) setPrevious(null);
+          if (!cancelled) { setPrevious(null); setCarried({ map: {}, from: null }); }
           return;
         }
         const [lines, transfers] = await Promise.all([
@@ -135,6 +138,7 @@ export default function BvaImportCenter() {
           base44.entities.RecurringTransfer.filter({ period_id: prior.id }, undefined, 500),
         ]);
         if (!cancelled) {
+          setCarried({ map: carriedGroupMap(lines || [], parsed?.detail?.categories || []), from: prior.label || null });
           setPrevious({
             label: prior.label,
             month: prior.month,
@@ -203,7 +207,9 @@ export default function BvaImportCenter() {
   // values are overlaid and every dependent total is recalculated from them.
   const adjusted = useMemo(() => applyCorrections(parsed, corrections), [parsed, corrections]);
   const overrideMap = useMemo(() => overridesFromCorrections(corrections), [corrections]);
-  const mergedGroupMap = useMemo(() => ({ ...savedGroupMap, ...groupMapFromCorrections(corrections) }), [savedGroupMap, corrections]);
+  // Precedence: last month's confirmed groups, then this draft's own confirmed
+  // groups, then corrections made here -- nothing an admin set is replaced.
+  const mergedGroupMap = useMemo(() => ({ ...carried.map, ...savedGroupMap, ...groupMapFromCorrections(corrections) }), [carried, savedGroupMap, corrections]);
 
   const validation = useMemo(() => {
     if (!parsed) return null;
@@ -283,7 +289,7 @@ export default function BvaImportCenter() {
         ]);
         existing = { budgetLines: budgetLines || [], cashAccounts: cashAccounts || [], distributions: distributions || [], transfers: transfers || [] };
       }
-      const groupMap = { ...groupMapFromLines(existing.budgetLines), ...groupMapFromCorrections(corrections) };
+      const groupMap = { ...carried.map, ...groupMapFromLines(existing.budgetLines), ...groupMapFromCorrections(corrections) };
       const plan = planBvaImport({
         parsed: adjusted,
         validation,
@@ -625,6 +631,7 @@ export default function BvaImportCenter() {
           onSave={setSaveCorrection}
           onRemove={removeCorrection}
           savedGroupMap={savedGroupMap}
+          carried={carried}
           cutoffDate={confirm.cutoffDate}
           saveState={saveState}
           by={by}
