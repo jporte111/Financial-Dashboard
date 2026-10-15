@@ -83,6 +83,25 @@ describe('income budget + distributions handling', () => {
     expect(p.warnings.find((w) => w.code === 'income_budget_workbook_mismatch')).toMatchObject({ sourceValue: 1320000, calculatedValue: 1320012, knownDefect: true });
   });
 
+  it('income budget, known defect: an omitted line with a budget under $1 (not named "interest") is recognised too', () => {
+    const parsed = workbookLikeParsed();
+    parsed.income.categories.push({ code: null, name: 'Test Bank Sweep', monthActual: 0, actualYtd: 0.05, annualBudget: 0.12 });
+    parsed.income.reportedBudgetTotal = 1320012; // leaves out only the 0.12 line
+    const validation = validateBva(parsed, { cutoffDate: SAMPLE_CUTOFF });
+    const p = planBvaImport({ parsed, validation, confirm });
+    expect(p.periodData.annual_budgeted_income).toBe(1320012.12);
+    expect(validation.warnings.find((w) => w.code === 'income_budget_workbook_mismatch').knownDefect).toBe(true);
+  });
+
+  it('income budget: an omitted line of $1 or more, not named "interest", shows the printed total', () => {
+    const parsed = workbookLikeParsed();
+    parsed.income.categories.push({ code: null, name: 'Test Consulting', monthActual: 0, actualYtd: 1, annualBudget: 500 });
+    parsed.income.reportedBudgetTotal = 1320012; // leaves out only the 500 line
+    const validation = validateBva(parsed, { cutoffDate: SAMPLE_CUTOFF });
+    expect(planBvaImport({ parsed, validation, confirm }).periodData.annual_budgeted_income).toBe(1320012);
+    expect(validation.warnings.find((w) => w.code === 'income_budget_workbook_mismatch').knownDefect).toBe(false);
+  });
+
   it('income budget, any other difference: the printed total is stored, with the warning', () => {
     const parsed = workbookLikeParsed();
     parsed.income.reportedBudgetTotal = 1300000; // not explained by one line

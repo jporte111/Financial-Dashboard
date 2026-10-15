@@ -317,15 +317,18 @@ export function validateBva(parsed, opts = {}) {
     });
   }
   // Known workbook defect (owner exception, October 2026): the printed annual
-  // income budget leaves out an interest-income line. When the gap is exactly
-  // that line's budget, the CALCULATED total is shown; otherwise the printed one.
+  // income budget leaves out a bank interest-income line. It is recognised when
+  // the gap is exactly the budget of ONE omitted line that is named "interest"
+  // or has a budget under $1 (the interest lines carry sub-dollar budgets; the
+  // workbook does not otherwise mark them). Then the CALCULATED total is shown;
+  // any other difference shows the printed one.
   let incomeBudgetKnownDefect = false;
   if (incomeBudgetReported != null && incomeBudgetSum != null && !eq(incomeBudgetSum, incomeBudgetReported)) {
     // Name the exact cause when the gap is explained by specific lines whose
     // budgets the workbook's Total row leaves out (both values are kept).
     const gap = round2(n(incomeBudgetSum) - n(incomeBudgetReported));
     const omitted = gap > 0 ? incomeCats.filter((c) => c.annualBudget != null && eq(n(c.annualBudget), gap)) : [];
-    incomeBudgetKnownDefect = omitted.some((c) => /interest/i.test(String(c.name || '')));
+    incomeBudgetKnownDefect = omitted.length === 1 && (/interest/i.test(String(omitted[0].name || '')) || Math.abs(n(omitted[0].annualBudget)) < 1);
     const cause = omitted.length
       ? ` Its Total row omits the budget of: ${omitted.map((c) => `${c.name} (${money(n(c.annualBudget))})`).join(', ')}.`
       : '';

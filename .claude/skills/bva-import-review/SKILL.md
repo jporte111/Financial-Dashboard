@@ -38,8 +38,9 @@ with the warning (`knownDefect: true`):
 - Distributions YTD, when the whole grand-total gap is exactly one entity's quarter the
   column-subtotal formula skipped (`explainDistributionGap`); that quarter's column total
   is shown calculated too. Each entity's own printed YTD is not part of the exception.
-- The annual income budget, when the gap is exactly the budget of an omitted
-  interest-income line.
+- The annual income budget, when the gap is exactly the budget of ONE omitted line that
+  is named "interest" or has a budget under $1 (the bank interest lines carry sub-dollar
+  budgets and are not otherwise marked in the workbook).
 Any other disagreement shows the printed total.
 
 ## What blocks (October 2026 owner decision)
