@@ -94,7 +94,7 @@ export default function TrendsSection({ trend }) {
         <table className="w-full min-w-[760px] text-sm">
           <thead>
             <tr className="border-b border-stone-100 text-left text-xs uppercase tracking-[0.1em] text-stone-500">
-              <th className="px-4 py-3 font-normal">Data through</th>
+              <th className="whitespace-nowrap px-4 py-3 font-normal">Data through</th>
               <th className="px-4 py-3 text-right font-normal">Income</th>
               <th className="px-4 py-3 text-right font-normal">Expenses</th>
               <th className="px-4 py-3 text-right font-normal">Budget used · expected</th>
@@ -108,10 +108,10 @@ export default function TrendsSection({ trend }) {
           <tbody>
             {points.map((p) => (
               <tr key={p.dataMonth} className="border-b border-stone-100 last:border-0 tabular-nums" data-testid={`trend-row-${p.dataMonth}`}>
-                <td className="px-4 py-2.5">
-                  <span className="font-medium">{p.dataMonth}</span>
-                  <span className="ml-2 text-xs text-stone-400">{p.reportLabel} report</span>
-                  {p.beforeBva && <span className="ml-2 rounded-full bg-stone-100 px-2 py-0.5 text-[11px] text-stone-500">before BVA reporting</span>}
+                <td className="min-w-[170px] px-4 py-2.5">
+                  <span className="block whitespace-nowrap font-medium">{p.dataMonth}</span>
+                  <span className="block text-xs text-stone-400">{p.reportLabel} report</span>
+                  {p.beforeBva && <span className="mt-1 inline-block whitespace-nowrap rounded-full bg-stone-100 px-2 py-0.5 text-[11px] text-stone-500">before BVA reporting</span>}
                 </td>
                 <td className="px-4 py-2.5 text-right">{money(p.income.ytd)}</td>
                 <td className="px-4 py-2.5 text-right">{money(p.expenses.ytd)}</td>
