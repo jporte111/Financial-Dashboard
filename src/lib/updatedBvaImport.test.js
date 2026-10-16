@@ -50,7 +50,7 @@ function seed({ published = true, final = true, extraPeriods = [] } = {}) {
     Transaction: Array.from({ length: 12 }, (_, i) => ({ id: `x${i + 1}`, period_id: 'orig', date: '2026-07-02', amount: i + 1, category: 'ZZ', vendor: `Test vendor ${i}` })),
   };
 }
-const prepare = (db, extra = {}, user = ADMIN) => handlePeriodTransition(db.base44, { action: 'prepare_import', month: 7, year: 2026, filename: 'BVA Test July.xlsx', ...extra }, user, NOW);
+const prepare = (db, extra = {}, user = ADMIN, now = NOW) => handlePeriodTransition(db.base44, { action: 'prepare_import', month: 7, year: 2026, filename: 'BVA Test July.xlsx', ...extra }, user, now);
 const writesTo = (db, id) => db.log.filter((w) => w.id === id && w.op !== 'create');
 const versions = (db) => db.rows('ReportingPeriod').filter((p) => p.month === 7 && p.year === 2026);
 
@@ -123,7 +123,13 @@ describe('prepare_import: where an upload goes', () => {
     expect(rev.copy_status).not.toBe('verified');
     expect(importTarget(db.rows('ReportingPeriod'), 7, 2026, rev.id).allowed).toBe(false); // the importer refuses it
     Object.assign(copyOptions, COPY_DEFAULTS);
-    const again = await prepare(db);
+    // Straight away, another call does not copy into it (the first may still be copying).
+    const soon = await prepare(db);
+    expect(soon.status).toBe(409);
+    expect(soon.body.blockers[0].code).toBe('copy_in_progress');
+    // Once the copy is clearly stalled, the next upload resumes and verifies it.
+    const later = new Date(NOW.getTime() + 10 * 60 * 1000);
+    const again = await prepare(db, {}, ADMIN, later);
     expect(again.body).toMatchObject({ ok: true, mode: 'continue', target_id: rev.id });
     expect(db.tables.ReportingPeriod.get(rev.id).copy_status).toBe('verified');
     expect(PREPARE_COPY_ROUNDS).toBeGreaterThan(1);

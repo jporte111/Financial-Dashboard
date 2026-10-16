@@ -299,6 +299,10 @@ async function createRevision(svc, period, reasonIn, who, now) {
 // the open revision and reuses it; two calls at the same moment end with one
 // revision (createRevision keeps the earliest).
 export const PREPARE_COPY_ROUNDS = 4;
+// A copy younger than this may still be running in another call (there are no
+// locks): only the call that created the revision copies into it meanwhile, so
+// two uploads at the same moment never copy into the same revision twice.
+export const prepareOptions = { copyStaleMs: 3 * 60 * 1000 };
 export function updatedWorkbookReason({ filename, who, now, note }) {
   const base = `Updated BVA workbook ${String(filename || 'workbook').trim() || 'workbook'} uploaded by ${who} on ${today(now)}`;
   const extra = typeof note === 'string' ? note.trim() : '';
@@ -316,8 +320,13 @@ async function prepareImport(svc, body, user, now) {
   const RECOVERY = 'Open Review & Publish → History & recovery.';
 
   // Finish (or verify) an open revision's copy before anything imports into it.
-  const ensureCopied = async (rev) => {
+  const ensureCopied = async (rev, createdHere) => {
     if (rev.copy_status === 'verified') return { ok: true };
+    if (rev.copy_status === 'failed') return { ok: false, code: 'copy_failed', message: `The corrected version does not match the published report it was copied from, so nothing was imported. ${RECOVERY}` };
+    const started = Date.parse(rev.revision_created_at || rev.created_date || '');
+    if (!createdHere && Number.isFinite(started) && now.getTime() - started < prepareOptions.copyStaleMs) {
+      return { ok: false, code: 'copy_in_progress', message: 'The corrected version is still being prepared from the published report. Nothing was imported; try the upload again in a moment.' };
+    }
     const source = await getOrNull(rev.supersedes);
     if (!source) return { ok: false, code: 'source_missing', message: 'The version this correction was copied from no longer exists.' };
     try {
@@ -335,7 +344,7 @@ async function prepareImport(svc, body, user, now) {
     return { ok: false, code: 'copy_unverified', message: 'The copy of the published report is not finished yet. Nothing was imported; try the upload again in a moment.' };
   };
   const intoRevision = async (rev, created) => {
-    const c = await ensureCopied(rev);
+    const c = await ensureCopied(rev, created);
     if (!c.ok) return refuse(c.code, c.message, { target_id: rev.id });
     return reply(200, { ok: true, action, mode: created ? 'correct' : 'continue', target_id: rev.id, source_id: rev.supersedes, revision_number: revisionNumber(rev) });
   };

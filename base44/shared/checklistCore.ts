@@ -274,6 +274,7 @@ export const CATALOGUE: Record<string, { title: string; action: string; where: s
   // cross-period
   checks_unavailable: { title: 'Cross-period checks could not run', action: 'Nothing was changed. Try again in a moment.', where: REVIEW },
   copy_unverified: { title: 'The copy of the published report is not finished yet', action: 'Nothing was imported. Upload the workbook again in a moment.', where: IMPORT },
+  copy_in_progress: { title: 'The corrected version is still being prepared', action: 'Nothing was imported. Upload the workbook again in a moment.', where: IMPORT },
   copy_failed: { title: 'The corrected version does not match the published report', action: 'Nothing was imported. Open Review & Publish → History & recovery to discard it, then upload again.', where: REVIEW },
   open_revisions: { title: 'More than one correction is in progress', action: 'Open Review & Publish → History & recovery and discard the extra one.', where: REVIEW },
   no_target: { title: 'This month has no report an upload can update', action: 'Open Review & Publish → History & recovery.', where: REVIEW },
