@@ -43,8 +43,11 @@ export default function Admin() {
           </>
         ) : (
           <>
-            <strong>{versionLabel(period)}</strong> is {period.published ? 'published' : 'final'} and read-only. To correct it, create a
-            revision in Review &amp; Publish — clients keep seeing this version until the revision is published.
+            <strong>{period.label}</strong> is {period.published ? 'published' : 'final'} and read-only here. If you receive an updated BVA
+            workbook, upload it on the <strong>Import</strong> tab
+            {period.published
+              ? ' — clients keep seeing this report until you publish the correction.'
+              : ' — it updates this report (not yet shown to clients) and returns it to draft for review.'}
           </>
         )}
       </div>

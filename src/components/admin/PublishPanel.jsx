@@ -4,7 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { periodTransition } from '@/lib/periodTransition';
 import { ChecklistItems, ReviewGroups } from './PublicationReview';
-import { versionLabel, isRevision, isSuperseded } from '../../../base44/shared/periodVersions.ts';
+import { plainLabel, isRevision, isSuperseded } from '../../../base44/shared/periodVersions.ts';
 
 // Review stages an admin may set directly. "Final" is deliberately absent:
 // a period becomes final only through validated finalization (BVA Import),
@@ -79,7 +79,7 @@ export default function PublishPanel({ period, reload }) {
 
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-6">
-      <p className="font-display text-lg">Review & Publication — {versionLabel(period)}</p>
+      <p className="font-display text-lg">Review & Publication — {plainLabel(period)}</p>
       <p className="mt-1 text-sm text-stone-600">Status: <span className="font-medium">{statusLabel}</span></p>
 
       <div className="mt-5">

@@ -15,6 +15,7 @@ import {
   WARNING_SOURCE_PATHS,
 } from '@/lib/bvaCorrections';
 import { periodTransition } from '@/lib/periodTransition';
+import { usePeriodContext } from '@/lib/usePeriod';
 import { monthStates, isSuperseded, isDiscarded, isRevision, versionLabel } from '../../../base44/shared/periodVersions.ts';
 import { groupByCause, explain } from '../../../base44/shared/checklistCore.ts';
 import { CauseList } from '@/components/admin/PublicationReview';
@@ -49,6 +50,16 @@ function Line({ label, value, sub = null }) {
 }
 
 export default function BvaImportCenter() {
+  const periodCtx = usePeriodContext();
+  // The month picker and the other Admin tabs follow what was just imported.
+  const refreshPeriods = async (id) => {
+    try {
+      await periodCtx?.reload?.();
+      if (id) periodCtx?.setPeriodId?.(id);
+    } catch {
+      // the import itself succeeded; a page reload shows it
+    }
+  };
   const [file, setFile] = useState(null);
   const [parsed, setParsed] = useState(null);
   const [confirm, setConfirm] = useState({ month: '', year: '', cutoffDate: '' });
@@ -284,7 +295,7 @@ export default function BvaImportCenter() {
       try {
         const records = await recordsOf(basis);
         const revisionRecords = intent.mode === 'continue' && intent.target ? await recordsOf(intent.target) : null;
-        if (!cancelled) setCompareWith({ label: basis.label, published: !!basis.published, records, revisionRecords });
+        if (!cancelled) setCompareWith({ label: basis.label, published: !!basis.published, records, revisionRecords, source: basis.bva_parsed_source || null, revisionSource: intent.mode === 'continue' ? intent.target?.bva_parsed_source || null : null });
       } catch {
         if (!cancelled) setCompareWith(null);
       }
@@ -297,9 +308,23 @@ export default function BvaImportCenter() {
     try {
       const plan = planBvaImport({ parsed: adjusted, validation, confirm, groupMap: mergedGroupMap });
       const after = planRecords(plan);
+      // The workbook a version was imported from, before any manual
+      // corrections: re-uploading that same file is a duplicate even when the
+      // version's figures differ from it because of those corrections.
+      const sameAsSource = (src) => {
+        if (!src) return false;
+        try {
+          const v = validateBva(src, { cutoffDate: confirm.cutoffDate });
+          return changeSummary(planRecords(planBvaImport({ parsed: src, validation: v, confirm, groupMap: mergedGroupMap })), after).identical;
+        } catch {
+          return false;
+        }
+      };
       return {
         vsCurrent: changeSummary(compareWith.records, after),
         vsRevision: compareWith.revisionRecords ? changeSummary(compareWith.revisionRecords, after) : null,
+        sameAsCurrentSource: sameAsSource(compareWith.source),
+        sameAsRevisionSource: sameAsSource(compareWith.revisionSource),
       };
     } catch {
       return null;
@@ -310,9 +335,11 @@ export default function BvaImportCenter() {
   const duplicate = !applied && fromFile && summary
     ? intent?.mode === 'correct' && summary.vsCurrent.identical
       ? `This workbook has the same figures as the published ${compareWith.label} report; there is nothing to correct.`
-      : intent?.mode === 'continue' && summary.vsRevision?.identical
-        ? `This workbook is already imported into the ${compareWith.label} correction in progress; nothing would change.`
-        : null
+      : intent?.mode === 'correct' && summary.sameAsCurrentSource
+        ? `This is the same workbook the published ${compareWith.label} report was imported from; there is nothing to correct.`
+        : intent?.mode === 'continue' && (summary.vsRevision?.identical || summary.sameAsRevisionSource)
+          ? `This workbook is already imported into the ${compareWith.label} correction in progress; nothing would change.`
+          : null
     : null;
 
   const onFile = async (f) => {
@@ -362,7 +389,7 @@ export default function BvaImportCenter() {
           return;
         }
         chosenId = prep.target_id || chosenId;
-        addLog(prep.mode === 'correct' ? '✓ Corrected version created from the published report and its copy verified.' : '✓ Using the correction already in progress.');
+        addLog(prep.mode === 'correct' ? '✓ Correction started from the published report (clients still see the published report).' : '✓ Using the correction already in progress.');
       }
       const existingPeriods = await base44.entities.ReportingPeriod.list('-year', 300);
       // Refuse before any write. The target is the chosen draft revision, or the
@@ -377,7 +404,7 @@ export default function BvaImportCenter() {
         addLog(`✗ ${pre.reason} Nothing was changed.`);
         return;
       }
-      if (match) addLog(`Importing into ${versionLabel(match)}.`);
+      if (match) addLog(`Importing into ${isRevision(match) ? `the ${match.label} correction` : match.label}.`);
       if (pre.needsInvalidate) {
         const inv = await periodTransition('invalidate', match.id);
         if (!inv.ok) {
@@ -387,7 +414,7 @@ export default function BvaImportCenter() {
       }
       let existing = { budgetLines: [], cashAccounts: [], distributions: [], transfers: [] };
       if (match) {
-        addLog(`Existing ${MONTHS[Number(confirm.month) - 1]} ${confirm.year} period found (not published) — updating the draft in place.`);
+        if (!isRevision(match)) addLog(`Existing ${MONTHS[Number(confirm.month) - 1]} ${confirm.year} period found (not published) — updating the draft in place.`);
         const [budgetLines, cashAccounts, distributions, transfers] = await Promise.all([
           base44.entities.BudgetLine.filter({ period_id: match.id }, undefined, 1000),
           base44.entities.CashAccount.filter({ period_id: match.id }, undefined, 500),
@@ -455,6 +482,7 @@ export default function BvaImportCenter() {
           : '✓ Import applied as Draft (not visible to clients). Review discrepancies below, then finalize.'
       );
       setApplied({ periodId, action: plan.action });
+      refreshPeriods(periodId);
       setMatched(match ? { ...match, bva_corrections: corrections } : { id: periodId, published: false, month: Number(confirm.month), year: Number(confirm.year) });
       setSaveState('saved');
     } catch (e) {
@@ -477,6 +505,7 @@ export default function BvaImportCenter() {
         setBlockers([]);
         addLog('✓ Period marked Final (validated). Publish it from Review & Publish when ready.');
         setApplied({ ...applied, finalized: true });
+        refreshPeriods(applied.periodId);
       } else {
         setBlockers(res.blockers);
         setReviewAttempt((n) => n + 1);
@@ -597,10 +626,10 @@ export default function BvaImportCenter() {
               <div className={`mt-2 rounded-lg border p-3 text-sm ${intent.mode === 'blocked' ? 'border-rose-200 bg-rose-50 text-rose-800' : intent.mode === 'correct' || intent.mode === 'continue' ? 'border-amber-200 bg-amber-50 text-stone-700' : 'border-stone-200 bg-stone-50 text-stone-600'}`} data-testid="import-target" data-mode={intent.mode}>
                 {intent.mode === 'create' && <p>Creates the {MONTHS[Number(confirm.month) - 1]} {confirm.year} report as a draft.</p>}
                 {intent.mode === 'update' && <p>Updates the {intent.target ? versionLabel(intent.target) : `${MONTHS[Number(confirm.month) - 1]} ${confirm.year}`} draft{intent.target?.status === 'final' ? ' (it returns to draft, so it can be finalized again)' : ''}. Clients do not see it until it is published.</p>}
-                {intent.mode === 'correct' && <p><span className="font-medium">{intent.current.label} is published.</span> This upload becomes a corrected {intent.current.label} report. Clients keep seeing the current report until you publish the correction; the current version is kept in history.</p>}
+                {intent.mode === 'correct' && <p><span className="font-medium">{intent.current.label} is published.</span>{duplicate ? '' : ` This upload becomes a corrected ${intent.current.label} report. Clients keep seeing the current report until you publish the correction; the current version is kept in history.`}</p>}
                 {intent.mode === 'continue' && <p>Updates the correction of {intent.current?.label || versionLabel(intent.target)} you started{intent.target?.revision_created_at ? ` on ${String(intent.target.revision_created_at).slice(0, 10)}` : ''} (not yet published). Clients keep seeing the current report until you publish it.</p>}
                 {intent.mode === 'blocked' && <p>{intent.reason}</p>}
-                {intent.mode === 'correct' && !applied && (
+                {intent.mode === 'correct' && !applied && !duplicate && (
                   <input className="mt-2 h-8 w-full rounded-md border border-stone-200 bg-white px-3 text-xs" placeholder="Optional note about this correction (recorded with it)" value={note} onChange={(e) => setNote(e.target.value)} />
                 )}
                 {targetInfo?.allowed && targetInfo.candidates?.length > 1 && (
@@ -617,7 +646,7 @@ export default function BvaImportCenter() {
             {summary && !duplicate && (
               <ImportChangeSummary summary={summary.vsCurrent} comparedWith={compareWith.label} published={compareWith.published} />
             )}
-            {prevCorr && (prevCorr.notApplied.length > 0 || prevCorr.savingsKept.length > 0) && (
+            {prevCorr && !duplicate && (prevCorr.notApplied.length > 0 || prevCorr.savingsKept.length > 0) && (
               <div className="mt-3 rounded-xl border border-stone-200 bg-white p-4 text-sm" data-testid="previous-corrections">
                 {prevCorr.notApplied.length > 0 && (
                   <>

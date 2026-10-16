@@ -288,7 +288,7 @@ export function importPreflight(match) {
     return {
       allowed: false,
       action: 'refuse',
-      reason: `${match.label || 'This month'} is published. To correct it, create a revision (Admin → Review & Publish) and import into that revision.`,
+      reason: `${match.label || 'This month'} is published. To correct it, upload the updated BVA workbook on the Import tab.`,
     };
   }
   return { allowed: true, action: 'update', needsInvalidate: true };
@@ -375,7 +375,7 @@ export function importTarget(periods, month, year, chosenId = null) {
   } else if (open.length === 1) {
     target = open[0];
   } else if (state.current) {
-    return refuse(`${label} is published. To correct it, create a revision (Admin → Review & Publish) and import into that revision.`);
+    return refuse(`${label} is published. To correct it, upload the updated BVA workbook on the Import tab.`);
   } else {
     target = state.working;
   }

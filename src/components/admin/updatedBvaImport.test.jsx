@@ -91,4 +91,17 @@ describe('uploading an updated workbook for a published month', () => {
     expect((await screen.findByTestId('duplicate-upload')).textContent).toMatch(/same figures as the published August 2026 report; there is nothing to correct/);
     expect(screen.getByRole('button', { name: /Import correction/ }).disabled).toBe(true);
   });
+
+  it('the workbook the published report came from (figures differ only by a manual correction): still nothing to correct', async () => {
+    h.records.jul.CashAccount[0].balance += 7; // the published figure was corrected by hand
+    h.parsed = () => cleanParsed();
+    render(<BvaImportCenter />);
+    upload();
+    expect((await screen.findByTestId('duplicate-upload')).textContent).toMatch(/same workbook the published August 2026 report was imported from; there is nothing to correct/);
+    expect(screen.getByRole('button', { name: /Import correction/ }).disabled).toBe(true);
+    // nothing contradicts "nothing to correct": no note, no corrections panel
+    expect(screen.queryByPlaceholderText(/Optional note/)).toBeNull();
+    expect(screen.queryByTestId('previous-corrections')).toBeNull();
+    expect(screen.getByTestId('import-target').textContent).not.toMatch(/becomes a corrected/);
+  });
 });

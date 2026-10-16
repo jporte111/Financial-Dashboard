@@ -6,7 +6,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { handlePeriodTransition, updatedWorkbookReason, PREPARE_COPY_ROUNDS } from '../../base44/shared/periodTransitionCore.ts';
 import { copyOptions } from '../../base44/shared/periodRevisionCore.ts';
-import { monthState } from '../../base44/shared/periodVersions.ts';
+import { monthState, plainLabel } from '../../base44/shared/periodVersions.ts';
 import { planBvaImport, importTarget, importIntent } from './bvaImport.js';
 import { validateBva } from './bvaValidation.js';
 import { changeSummary, planRecords, previousCorrections } from './bvaChangeSummary.js';
@@ -158,6 +158,16 @@ describe('importIntent: what the screen says', () => {
   ])('%s -> %s', (_, periods, mode) => {
     expect(importIntent(periods, 7, 2026).mode).toBe(mode);
   });
+});
+
+describe('plainLabel: months, not versions, in the normal workflow', () => {
+  it.each([
+    [{ label: 'July 2026', status: 'final', published: true }, 'July 2026'],
+    [{ label: 'July 2026', status: 'final', published: true, revision_number: 2, supersedes: 'a' }, 'July 2026'],
+    [{ label: 'July 2026', status: 'draft', published: false, revision_number: 2, supersedes: 'a' }, 'July 2026 · draft correction'],
+    [{ label: 'July 2026', status: 'final', published: false, revision_number: 2, supersedes: 'a' }, 'July 2026 · final correction'],
+    [{ label: 'July 2026', status: 'final', published: false, superseded: true }, 'July 2026 · revision 1 (superseded)'],
+  ])('%o -> %s', (p, label) => expect(plainLabel(p)).toBe(label));
 });
 
 describe('changeSummary: what changed in the updated workbook', () => {

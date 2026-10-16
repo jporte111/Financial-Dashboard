@@ -99,6 +99,16 @@ export function currentPublished(periods: any[]) {
 export const isCurrentPublished = (periods: any[], p: any) =>
   !!p && monthState((periods || []).filter((x) => monthKey(x) === monthKey(p))).current?.id === p.id;
 
+// The label for the normal workflow, in months rather than versions: the
+// current report is just its month, a correction not yet published is named
+// as such; a replaced or discarded version keeps its revision label.
+export function plainLabel(p: any) {
+  if (!p) return '';
+  if (isSuperseded(p) || isDiscarded(p)) return versionLabel(p);
+  if (isRevision(p) && !p.published) return `${p.label} · ${isFinal(p) ? 'final' : 'draft'} correction`;
+  return p.label;
+}
+
 // A short admin label: "September 2026 · revision 2 (draft)".
 export function versionLabel(p: any) {
   if (!p) return '';
