@@ -1,5 +1,5 @@
 import React from 'react';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceArea } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts';
 import { fmtCurrency, fmtPct, pct100 } from '@/lib/finance';
 
 // Month-over-month trends (Phase 7). Everything comes from the server's
@@ -10,30 +10,36 @@ import { fmtCurrency, fmtPct, pct100 } from '@/lib/finance';
 
 const money = (v) => (v == null ? '—' : fmtCurrency(v, { cents: false }));
 const pct = (v) => (v == null ? '—' : fmtPct(pct100(v)));
-const axisMoney = (v) => (Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : `${Math.round(v / 1000)}k`);
+// Compact axis labels that stay distinct at any scale ("307", "1.5K", "2.1M").
+const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+const axisMoney = (v) => compact.format(v);
 const tip = { formatter: (v) => (v == null ? '—' : fmtCurrency(v, { cents: false })) };
 
-// The span of months marked "before BVA reporting", for the shaded band.
-function legacySpan(points) {
-  const legacy = points.filter((p) => p.beforeBva);
-  return legacy.length ? [legacy[0].dataMonth, legacy[legacy.length - 1].dataMonth] : null;
-}
+// A point from a month "before BVA reporting" is drawn as a grey hollow dot;
+// every other point is a small solid dot in the line's colour.
+const pointDot = (color) => (props) => {
+  const { cx, cy, payload, index } = props;
+  if (cx == null || cy == null) return null;
+  return payload?.beforeBva
+    ? <circle key={`d${index}`} cx={cx} cy={cy} r={4} fill="#fff" stroke="#a8a29e" strokeWidth={1.5} />
+    : <circle key={`d${index}`} cx={cx} cy={cy} r={2.5} fill={color} stroke={color} />;
+};
 
-function TrendChart({ title, data, series, span, testId }) {
+function TrendChart({ title, data, series, legacy, testId }) {
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-5" data-testid={testId}>
       <p className="text-xs uppercase tracking-[0.14em] text-stone-500">{title}</p>
-      <div className="mt-4 h-56">
+      {legacy && <p className="mt-1 text-[11px] text-stone-400"><span className="mr-1 inline-block h-2 w-2 rounded-full border border-stone-400 align-middle" />Hollow grey points: before BVA reporting</p>}
+      <div className="mt-3 h-56">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eee" />
-            {span && <ReferenceArea x1={span[0]} x2={span[1]} fill="#f5f5f4" fillOpacity={1} label={{ value: 'Before BVA reporting', position: 'insideTop', fontSize: 10, fill: '#a8a29e' }} />}
             <XAxis dataKey="dataMonth" tickFormatter={(v) => String(v).split(' ')[0]} tickLine={false} axisLine={false} fontSize={11} />
             <YAxis tickFormatter={axisMoney} tickLine={false} axisLine={false} fontSize={11} width={44} />
             <Tooltip {...tip} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             {series.map((s) => (
-              <Line key={s.key} type="linear" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={s.dashed ? 1.5 : 2} strokeDasharray={s.dashed ? '5 4' : undefined} dot={{ r: 2.5 }} connectNulls={false} isAnimationActive={false} />
+              <Line key={s.key} type="linear" dataKey={s.key} name={s.name} stroke={s.color} strokeWidth={s.dashed ? 1.5 : 2} strokeDasharray={s.dashed ? '5 4' : undefined} dot={pointDot(s.color)} activeDot={{ r: 4 }} connectNulls={false} isAnimationActive={false} />
             ))}
           </LineChart>
         </ResponsiveContainer>
@@ -50,11 +56,12 @@ export default function TrendsSection({ trend }) {
   if (points.length < 2) {
     return <p className="rounded-2xl border border-stone-200 bg-white p-6 text-sm text-stone-500" data-testid="trends-empty">Trends appear once two or more months are published.</p>;
   }
-  const span = legacySpan(points);
+  const legacy = points.some((p) => p.beforeBva);
   // Expected spending by now = that month's annual budget × its elapsed share
-  // of the year, only where the month has a budget (never for legacy months).
+  // of the year, only where the month has an annual budget.
   const data = points.map((p) => ({
     dataMonth: p.dataMonth,
+    beforeBva: p.beforeBva,
     incomeYtd: p.income.ytd,
     incomeBudget: p.income.budget,
     expensesYtd: p.expenses.ytd,
@@ -77,10 +84,10 @@ export default function TrendsSection({ trend }) {
         </div>
       )}
       <div className="grid gap-4 lg:grid-cols-2">
-        <TrendChart title={`Income · year to date ${trend.year}`} data={data} span={span} testId="trend-income" series={[{ key: 'incomeYtd', name: 'Received', color: '#0f766e' }, { key: 'incomeBudget', name: 'Annual budget', color: '#a8a29e', dashed: true }]} />
-        <TrendChart title={`Expenses · year to date ${trend.year}`} data={data} span={span} testId="trend-expenses" series={[{ key: 'expensesYtd', name: 'Spent', color: '#1c1917' }, { key: 'expectedByNow', name: 'Expected by now', color: '#a8a29e', dashed: true }]} />
-        <TrendChart title="Fixed / Variable / Discretionary · year to date" data={data} span={span} testId="trend-groups" series={[{ key: 'fixed', name: 'Fixed', color: '#44403c' }, { key: 'variable', name: 'Variable', color: '#0f766e' }, { key: 'discretionary', name: 'Discretionary', color: '#b45309' }]} />
-        <TrendChart title="Distributions · year to date" data={data} span={span} testId="trend-distributions" series={[{ key: 'distributions', name: 'Received', color: '#0f766e' }]} />
+        <TrendChart title={`Income · year to date ${trend.year}`} data={data} legacy={legacy} testId="trend-income" series={[{ key: 'incomeYtd', name: 'Received', color: '#0f766e' }, { key: 'incomeBudget', name: 'Annual budget', color: '#a8a29e', dashed: true }]} />
+        <TrendChart title={`Expenses · year to date ${trend.year}`} data={data} legacy={legacy} testId="trend-expenses" series={[{ key: 'expensesYtd', name: 'Spent', color: '#1c1917' }, { key: 'expectedByNow', name: 'Expected by now', color: '#a8a29e', dashed: true }]} />
+        <TrendChart title="Fixed / Variable / Discretionary · year to date" data={data} legacy={legacy} testId="trend-groups" series={[{ key: 'fixed', name: 'Fixed', color: '#44403c' }, { key: 'variable', name: 'Variable', color: '#0f766e' }, { key: 'discretionary', name: 'Discretionary', color: '#b45309' }]} />
+        <TrendChart title="Distributions · year to date" data={data} legacy={legacy} testId="trend-distributions" series={[{ key: 'distributions', name: 'Received', color: '#0f766e' }]} />
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-stone-200 bg-white" data-testid="trend-table">
