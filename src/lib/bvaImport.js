@@ -334,6 +334,29 @@ export function groupMapFromLines(lines) {
 // version the admin picked (e.g. "September 2026 · revision 2 (draft)").
 // Returns { allowed, action: 'create' | 'update', target, needsInvalidate,
 // candidates, reason }.
+// What uploading a workbook for this month will do, in plain terms (the
+// updated-BVA workflow). The server decides again at import time
+// (periodTransition 'prepare_import'); this only drives what the screen shows.
+//   create    no report for the month yet
+//   update    an unpublished draft / final report is updated in place
+//   correct   the month is published: the upload becomes a corrected version
+//             (clients keep the current one until the correction is published)
+//   continue  a correction is already in progress: the upload updates it
+//   blocked   an exceptional state (History & recovery)
+export function importIntent(periods, month, year) {
+  const versions = (periods || []).filter((p) => Number(p.month) === Number(month) && Number(p.year) === Number(year) && !isDiscarded(p));
+  if (!versions.length) return { mode: 'create', current: null, target: null };
+  const state = monthState(versions);
+  const label = versions[0].label || 'This month';
+  const blocked = (reason) => ({ mode: 'blocked', current: state.current || null, target: null, reason: `${reason} Open Review & Publish → History & recovery.` });
+  if (state.conflict) return blocked(`${label} has more than one published version.`);
+  if (state.pendingCleanup.length) return blocked(`An earlier replacement of ${label} did not finish.`);
+  if (state.openRevisions.length > 1) return blocked(`${label} has ${state.openRevisions.length} corrections in progress.`);
+  if (state.openRevisions.length === 1) return { mode: 'continue', current: state.current || null, target: state.openRevisions[0] };
+  if (state.current) return { mode: 'correct', current: state.current, target: null };
+  return { mode: 'update', current: null, target: state.working || null };
+}
+
 export function importTarget(periods, month, year, chosenId = null) {
   const versions = (periods || []).filter((p) => Number(p.month) === Number(month) && Number(p.year) === Number(year) && !isDiscarded(p));
   if (!versions.length) return { allowed: true, action: 'create', target: null, needsInvalidate: false, candidates: [] };

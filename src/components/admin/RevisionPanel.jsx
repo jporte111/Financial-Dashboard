@@ -11,7 +11,7 @@ const MIN_REASON = 10;
 // revision of the current version, continue or verify its copy, discard it,
 // finish an unfinished replacement, and see a conflict between versions.
 // Clients keep seeing the current published version until a revision is
-// published (PublishPanel → Publish replacement).
+// published (PublishPanel → Publish correction).
 export default function RevisionPanel({ period, periods, reload, onOpen }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);

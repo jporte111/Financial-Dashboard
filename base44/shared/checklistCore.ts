@@ -273,6 +273,11 @@ export const CATALOGUE: Record<string, { title: string; action: string; where: s
   unrecognized_content: { title: 'Figures outside every recognized section', action: 'They were not imported. Check they are not figures the dashboard should show.', where: IMPORT },
   // cross-period
   checks_unavailable: { title: 'Cross-period checks could not run', action: 'Nothing was changed. Try again in a moment.', where: REVIEW },
+  copy_unverified: { title: 'The copy of the published report is not finished yet', action: 'Nothing was imported. Upload the workbook again in a moment.', where: IMPORT },
+  copy_failed: { title: 'The corrected version does not match the published report', action: 'Nothing was imported. Open Review & Publish → History & recovery to discard it, then upload again.', where: REVIEW },
+  open_revisions: { title: 'More than one correction is in progress', action: 'Open Review & Publish → History & recovery and discard the extra one.', where: REVIEW },
+  no_target: { title: 'This month has no report an upload can update', action: 'Open Review & Publish → History & recovery.', where: REVIEW },
+  revision_not_found: { title: 'The corrected version could not be read back', action: 'Upload the workbook again.', where: IMPORT },
   previous_month_conflict: { title: 'The previous month has two published versions', action: 'Resolve that first in Review & Publish → Versions.', where: REVIEW },
   no_previous_period: { title: 'No earlier published period to compare with', action: 'No action.', where: REVIEW },
   previous_has_open_revision: { title: 'The previous month has an open revision', action: 'This month is compared with the version clients see now. Re-check after that revision is published.', where: REVIEW },

@@ -29,6 +29,10 @@
 //               warnings seen (checklistCore.ts). Refused for a published
 //               period and while a linked blocker is open. One write.
 //
+//   prepare_import  where a BVA upload goes (create / update a draft in place /
+//                   create + verify a draft revision of a published month /
+//                   reuse the open one); see prepareImport below
+//
 // Draft revisions (base44/shared/periodRevisionCore.ts, periodVersions.ts):
 //   create_revision  copy a final or published report (the month's current
 //                    version) into a new draft version; written reason
@@ -226,16 +230,157 @@ export async function writeChecklistItem(svc, period, key, record, who, now) {
   return { ok: false, reason: 'unverified' };
 }
 
+// Draft revisions: copy the month's current final / published version into a
+// new draft version (Phase 4 rules: one open revision per month; concurrent
+// creation keeps the earliest; schema check; copy + verify). Shared by
+// create_revision and prepare_import.
+async function createRevision(svc, period, reasonIn, who, now) {
+  const action = 'create_revision';
+  const refuse = (code, message) => reply(409, { ok: false, action, blockers: [{ code, message, overridable: false }] });
+  const listOf = (res) => (Array.isArray(res) ? res : (res && res.items) || []);
+  const monthVersions = async () => listOf(await svc.entities.ReportingPeriod.filter({ month: period.month, year: period.year }, undefined, 200));
+  const getOrNull = async (id) => { try { return (await svc.entities.ReportingPeriod.get(id)) || null; } catch { return null; } };
+  if (!period.published && !isFinal(period)) return refuse('source_not_final', 'Only a final or published report can be revised. Edit this draft directly.');
+  const reason = typeof reasonIn === 'string' ? reasonIn.trim() : '';
+  if (reason.length < MIN_REOPEN_REASON) return refuse('revision_reason_required', `Give a reason for the revision (at least ${MIN_REOPEN_REASON} characters).`);
+  const state = monthState(await monthVersions());
+  if (state.conflict) return refuse('version_conflict', `${period.label} has more than one published version; resolve that first.`);
+  if (state.pendingCleanup.length) return refuse('supersede_pending', `An earlier replacement of ${period.label} is not finished; finish it first.`);
+  if (state.openRevisions.length) return refuse('open_revision_exists', `${period.label} already has an open revision (revision ${revisionNumber(state.openRevisions[0])}).`);
+  if (state.current ? state.current.id !== period.id : state.working?.id !== period.id) {
+    return refuse('not_current_version', `Only the current version of ${period.label} can be revised.`);
+  }
+  const created = await svc.entities.ReportingPeriod.create(revisionRecord(period, { reason, by: who, now }));
+  // Base44 drops fields its schema does not declare. If the version fields
+  // did not stick (entity schemas older than these functions), the record
+  // would be an untracked second copy of the month: remove it and refuse.
+  const stored = (await getOrNull(created.id)) || created;
+  const lost = REQUIRED_REVISION_FIELDS.filter((f) => stored[f] === undefined || stored[f] === null || stored[f] === '');
+  if (lost.length) {
+    await discardStep(svc, { ...stored, revision_status: 'discarded' }).catch(() => {});
+    return refuse('schema_out_of_date', new SchemaOutOfDate(`ReportingPeriod.${lost[0]}`).message);
+  }
+  // No transactions: two admins could create revisions at the same moment.
+  // Keep the earliest; discard this one if it is not.
+  const open = monthState(await monthVersions()).openRevisions
+    .sort((a, b) => String(a.created_date || '').localeCompare(String(b.created_date || '')) || String(a.id).localeCompare(String(b.id)));
+  if (open.length > 1 && open[0].id !== created.id) {
+    await discardStep(svc, created).catch(() => {});
+    return refuse('concurrent_revision', `Another revision of ${period.label} was created at the same moment; use that one.`);
+  }
+  let copy;
+  try {
+    copy = await copyStep(svc, created, period);
+  } catch (e) {
+    if (!(e instanceof SchemaOutOfDate)) throw e;
+    await discardStep(svc, { ...stored, revision_status: 'discarded' }).catch(() => {});
+    return refuse('schema_out_of_date', e.message);
+  }
+  return reply(200, { ok: true, action: 'create_revision', period_id: created.id, source_id: period.id, revision_number: created.revision_number, copy: { done: copy.done, verified: copy.verified ?? null, copied: copy.copied } });
+}
+
+
+// ---- prepare_import: the target of a BVA upload (the updated-BVA workflow) --
+// The admin only uploads the workbook; this decides, from the month's versions
+// as the SERVER reads them, where the import goes -- using the Phase 4 rules
+// unchanged:
+//   - no version                      -> create (the importer creates it)
+//   - an unpublished draft / final    -> update it in place (a final one is
+//                                        reset to draft by 'invalidate')
+//   - published, no open revision     -> create a draft revision of the
+//                                        published version (written reason:
+//                                        "Updated BVA workbook <file> uploaded
+//                                        by <user> on <date>" + optional note),
+//                                        copy and verify it, then update it
+//   - one open revision               -> update it (its copy finished first)
+//   - conflicting published versions, an unfinished replacement, or more
+//     than one open revision          -> refused (History & recovery)
+// The published version is never written. Safe to repeat: a second call finds
+// the open revision and reuses it; two calls at the same moment end with one
+// revision (createRevision keeps the earliest).
+export const PREPARE_COPY_ROUNDS = 4;
+export function updatedWorkbookReason({ filename, who, now, note }) {
+  const base = `Updated BVA workbook ${String(filename || 'workbook').trim() || 'workbook'} uploaded by ${who} on ${today(now)}`;
+  const extra = typeof note === 'string' ? note.trim() : '';
+  return extra ? `${base}. Note: ${extra.slice(0, 500)}` : base;
+}
+async function prepareImport(svc, body, user, now) {
+  const action = 'prepare_import';
+  const who = user.email || user.full_name || 'admin';
+  const refuse = (code, message, extra = {}) => reply(409, { ok: false, action, blockers: [{ code, message, overridable: false }], ...extra });
+  const month = Number(body.month), year = Number(body.year);
+  if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(year)) return reply(400, { error: 'month and year required' });
+  const listOf = (res) => (Array.isArray(res) ? res : (res && res.items) || []);
+  const versionsOf = async () => listOf(await svc.entities.ReportingPeriod.filter({ month, year }, undefined, 200)).filter((p) => !isDiscarded(p));
+  const getOrNull = async (id) => { try { return (await svc.entities.ReportingPeriod.get(id)) || null; } catch { return null; } };
+  const RECOVERY = 'Open Review & Publish → History & recovery.';
+
+  // Finish (or verify) an open revision's copy before anything imports into it.
+  const ensureCopied = async (rev) => {
+    if (rev.copy_status === 'verified') return { ok: true };
+    const source = await getOrNull(rev.supersedes);
+    if (!source) return { ok: false, code: 'source_missing', message: 'The version this correction was copied from no longer exists.' };
+    try {
+      for (let i = 0; i < PREPARE_COPY_ROUNDS; i++) {
+        const copy = await copyStep(svc, rev, source);
+        if (copy.done && copy.verified) return { ok: true };
+        if (copy.done && copy.verified === false) {
+          return { ok: false, code: 'copy_failed', message: `The corrected version does not match the published report it was copied from, so nothing was imported. ${RECOVERY}` };
+        }
+      }
+    } catch (e) {
+      if (e instanceof SchemaOutOfDate) return { ok: false, code: 'schema_out_of_date', message: e.message };
+      return { ok: false, code: 'copy_unverified', message: 'The copy of the published report could not be completed just now. Nothing was imported; try the upload again in a moment.' };
+    }
+    return { ok: false, code: 'copy_unverified', message: 'The copy of the published report is not finished yet. Nothing was imported; try the upload again in a moment.' };
+  };
+  const intoRevision = async (rev, created) => {
+    const c = await ensureCopied(rev);
+    if (!c.ok) return refuse(c.code, c.message, { target_id: rev.id });
+    return reply(200, { ok: true, action, mode: created ? 'correct' : 'continue', target_id: rev.id, source_id: rev.supersedes, revision_number: revisionNumber(rev) });
+  };
+
+  let versions = await versionsOf();
+  if (!versions.length) return reply(200, { ok: true, action, mode: 'create', target_id: null });
+  let state = monthState(versions);
+  const label = versions[0].label || `${month}/${year}`;
+  if (state.conflict) return refuse('version_conflict', `${label} has more than one published version. ${RECOVERY}`);
+  if (state.pendingCleanup.length) return refuse('supersede_pending', `An earlier replacement of ${label} did not finish. ${RECOVERY}`);
+  if (state.openRevisions.length > 1) return refuse('open_revisions', `${label} has ${state.openRevisions.length} corrections in progress. ${RECOVERY}`);
+  if (state.openRevisions.length === 1) return intoRevision(state.openRevisions[0], false);
+  if (!state.current) {
+    const w = state.working;
+    if (!w) return refuse('no_target', `${label} has no version an import can update. ${RECOVERY}`);
+    return reply(200, { ok: true, action, mode: 'update', target_id: w.id });
+  }
+  // Published: create the draft revision of the version clients see.
+  const res = await createRevision(svc, state.current, updatedWorkbookReason({ filename: body.filename, who, now, note: body.note }), who, now);
+  if (res.status === 200) {
+    const rev = await getOrNull(res.body.period_id);
+    if (!rev) return refuse('revision_not_found', 'The corrected version could not be read back. Try the upload again.');
+    return intoRevision(rev, true);
+  }
+  // Someone else created it at the same moment: use that one.
+  const code = res.body?.blockers?.[0]?.code;
+  if (code === 'open_revision_exists' || code === 'concurrent_revision') {
+    versions = await versionsOf();
+    state = monthState(versions);
+    if (state.openRevisions.length === 1) return intoRevision(state.openRevisions[0], false);
+  }
+  return reply(res.status, { ...res.body, action });
+}
+
 export async function handlePeriodTransition(base44, body = {}, user, now = new Date()) {
   if (!user) return reply(401, { error: 'Unauthorized' });
   if (user.role !== 'admin') return reply(403, { error: 'Admins only' });
   const { action, period_id } = body;
-  if (!period_id && action !== 'create') return reply(400, { error: 'period_id required' });
-  if (!['create', 'check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage', 'create_revision', 'copy_revision', 'discard_revision', 'finish_supersede', 'confirm_checklist', 'unconfirm_checklist'].includes(action)) {
+  if (!period_id && action !== 'create' && action !== 'prepare_import') return reply(400, { error: 'period_id required' });
+  if (!['create', 'prepare_import', 'check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage', 'create_revision', 'copy_revision', 'discard_revision', 'finish_supersede', 'confirm_checklist', 'unconfirm_checklist'].includes(action)) {
     return reply(400, { error: 'unknown action' });
   }
   const svc = base44.asServiceRole;
   if (action === 'create') return createPeriod(svc, body.data, user, now);
+  if (action === 'prepare_import') return prepareImport(svc, body, user, now);
 
   const { period, lines } = await load(svc, period_id);
   if (!period) return reply(404, { error: 'Period not found' });
@@ -299,45 +444,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
       : 'The checklist change could not be confirmed as saved. Reload the page and check the item; try again if it is not shown as you set it.');
   }
 
-  if (action === 'create_revision') {
-    if (!period.published && !isFinal(period)) return refuse('source_not_final', 'Only a final or published report can be revised. Edit this draft directly.');
-    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
-    if (reason.length < MIN_REOPEN_REASON) return refuse('revision_reason_required', `Give a reason for the revision (at least ${MIN_REOPEN_REASON} characters).`);
-    const state = monthState(await monthVersions());
-    if (state.conflict) return refuse('version_conflict', `${period.label} has more than one published version; resolve that first.`);
-    if (state.pendingCleanup.length) return refuse('supersede_pending', `An earlier replacement of ${period.label} is not finished; finish it first.`);
-    if (state.openRevisions.length) return refuse('open_revision_exists', `${period.label} already has an open revision (revision ${revisionNumber(state.openRevisions[0])}).`);
-    if (state.current ? state.current.id !== period.id : state.working?.id !== period.id) {
-      return refuse('not_current_version', `Only the current version of ${period.label} can be revised.`);
-    }
-    const created = await svc.entities.ReportingPeriod.create(revisionRecord(period, { reason, by: who, now }));
-    // Base44 drops fields its schema does not declare. If the version fields
-    // did not stick (entity schemas older than these functions), the record
-    // would be an untracked second copy of the month: remove it and refuse.
-    const stored = (await getOrNull(created.id)) || created;
-    const lost = REQUIRED_REVISION_FIELDS.filter((f) => stored[f] === undefined || stored[f] === null || stored[f] === '');
-    if (lost.length) {
-      await discardStep(svc, { ...stored, revision_status: 'discarded' }).catch(() => {});
-      return refuse('schema_out_of_date', new SchemaOutOfDate(`ReportingPeriod.${lost[0]}`).message);
-    }
-    // No transactions: two admins could create revisions at the same moment.
-    // Keep the earliest; discard this one if it is not.
-    const open = monthState(await monthVersions()).openRevisions
-      .sort((a, b) => String(a.created_date || '').localeCompare(String(b.created_date || '')) || String(a.id).localeCompare(String(b.id)));
-    if (open.length > 1 && open[0].id !== created.id) {
-      await discardStep(svc, created).catch(() => {});
-      return refuse('concurrent_revision', `Another revision of ${period.label} was created at the same moment; use that one.`);
-    }
-    let copy;
-    try {
-      copy = await copyStep(svc, created, period);
-    } catch (e) {
-      if (!(e instanceof SchemaOutOfDate)) throw e;
-      await discardStep(svc, { ...stored, revision_status: 'discarded' }).catch(() => {});
-      return refuse('schema_out_of_date', e.message);
-    }
-    return reply(200, { ok: true, action, period_id: created.id, source_id: period.id, revision_number: created.revision_number, copy: { done: copy.done, verified: copy.verified ?? null, copied: copy.copied } });
-  }
+  if (action === 'create_revision') return createRevision(svc, period, body.reason, who, now);
 
   if (action === 'copy_revision') {
     if (!isRevision(period)) return refuse('not_a_revision', 'This period is not a revision.');
