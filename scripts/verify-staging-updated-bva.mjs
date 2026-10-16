@@ -3,7 +3,7 @@
 //
 // Run from the staging checkout (linked to the staging app), with the
 // owner-only .staging.env holding STAGING_APP_ID and STAGING_TOKEN:
-//   node scripts/verify-staging-revisions.mjs [--only=copy,lifecycle,interrupt,concurrency]
+//   node scripts/verify-staging-updated-bva.mjs
 //
 // Every period it creates is labelled "ZZ TEST ..." with an invented year and
 // is shaped like the largest real month (about 400 rows, mostly transactions).
@@ -235,7 +235,7 @@ check('A', 'the replaced version is kept, superseded and unpublished', orig.supe
 const after = await snapshot(s.pid);
 check('A', 'the replaced version\'s figures and rows are unchanged', sameContent(before, after), contentDiff(before, after));
 const p3 = await prepare(7, s.year);
-check('A', 'after publishing, a further upload starts a new correction of the published correction', p3.status === 200 && p3.body.mode === 'correct' && (await E.ReportingPeriod.get(p3.body.target_id)).supersedes === rid);
+check('A', 'after publishing, a further upload starts a new correction of the published correction', p3.status === 200 && p3.body.mode === 'correct' && (await E.ReportingPeriod.get(p3.body.target_id)).supersedes === rid, `${p3.status}:${p3.body?.mode || p3.body?.blockers?.[0]?.code}`);
 if (p3.body?.target_id) await transition('discard_revision', p3.body.target_id); // tidy
 
 // ==== B. two uploads at the same moment =========================================
