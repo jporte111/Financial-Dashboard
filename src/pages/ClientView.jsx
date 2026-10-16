@@ -7,12 +7,13 @@ import HeroMetrics from '@/components/client/HeroMetrics';
 import GroupCards from '@/components/client/GroupCards';
 import ClientSidePanel from '@/components/client/ClientSidePanel';
 import ClientDrilldown from '@/components/client/ClientDrilldown';
+import TrendsSection from '@/components/TrendsSection';
 
 // Public client view — no login required. Renders only published periods and
 // client-visible fields (enforced server-side by the publicDashboard function).
 // Anonymous visitors who hit any internal route are redirected here.
 export default function ClientView() {
-  const { loading, error, vm, periods, period, setSelectedId } = usePublicDashboard();
+  const { loading, error, vm, periods, period, setSelectedId, trend } = usePublicDashboard();
   const [selectedLine, setSelectedLine] = useState(null);
   const [signedIn, setSignedIn] = useState(false);
 
@@ -81,6 +82,12 @@ export default function ClientView() {
                 <ClientSidePanel vm={vm} />
               </div>
             </div>
+
+            <section className="mt-14">
+              <h2 className="font-display text-xl tracking-tight">Trends</h2>
+              <p className="mt-1 mb-5 text-sm text-stone-500">Year to date, month by month, from your published reports</p>
+              <TrendsSection trend={trend} />
+            </section>
 
             <footer className="mt-16 border-t border-stone-200 py-8 text-xs text-stone-400">
               Prepared by Namaste Financial Management · {vm.labels.reportHeading}

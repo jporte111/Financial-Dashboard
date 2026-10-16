@@ -20,6 +20,8 @@
 import { transactionsForCategory } from './categoryTransactionsCore.ts';
 import { effectiveRecord } from './sourceMissing.ts';
 import { currentPublished, isCurrentPublished, monthState, isSuperseded, isDiscarded } from './periodVersions.ts';
+import { buildTrend } from './trendCore.ts';
+import { cutoffIndex } from './crossPeriod.ts';
 
 export const isPublishedFinal = (p) => !!p && !!p.published && p.status === 'final';
 
@@ -135,7 +137,57 @@ export function publicTransfers(transfers) {
   return visible.map((t) => ({ id: t.id, amount: numOrNull(t.amount), source: label(t.source || null), purpose: t.purpose || null }));
 }
 
-const EMPTY = { periods: [], period: null, budgetLines: [], cashAccounts: [], distributions: [], transfers: [], savingsSpends: [] };
+const EMPTY = { periods: [], period: null, budgetLines: [], cashAccounts: [], distributions: [], transfers: [], savingsSpends: [], trend: null };
+
+// ---- month-over-month trend (Phase 7) -------------------------------------
+// Built from the CURRENT PUBLISHED months only, from the same public-shaped
+// records the client view renders (so each point equals that month's page).
+// Three reads for all the months of the latest data year; if any read fails
+// or may be incomplete, the trend is left out (null) -- never a partial one.
+export const TREND_READ_LIMIT = 5000;
+export const trendReadOptions = { delaysMs: [300, 800, 1500] };
+async function readAll(svc, entity, ids) {
+  const delays = trendReadOptions.delaysMs;
+  for (let i = 0; ; i++) {
+    try {
+      const res = await svc.entities[entity].filter({ period_id: { $in: ids } }, undefined, TREND_READ_LIMIT);
+      const rows = Array.isArray(res) ? res : (res && res.items) || [];
+      if (rows.length >= TREND_READ_LIMIT) throw new Error('trend read may be incomplete');
+      return rows;
+    } catch (e) {
+      if (i >= delays.length) throw e;
+      await new Promise((r) => setTimeout(r, delays[i]));
+    }
+  }
+}
+export async function buildPublicTrend(svc, published) {
+  try {
+    const idx = (p) => cutoffIndex(p) ?? Number(p.year) * 12 + Number(p.month) - 1;
+    const latestYear = Math.max(...published.map((p) => Math.floor(idx(p) / 12)));
+    const months = published.filter((p) => Math.floor(idx(p) / 12) === latestYear);
+    if (!months.length) return null;
+    const ids = months.map((p) => p.id);
+    const [lines, cash, dists] = [
+      await readAll(svc, 'BudgetLine', ids),
+      await readAll(svc, 'CashAccount', ids),
+      await readAll(svc, 'Distribution', ids),
+    ];
+    const of = (rows, id) => rows.filter((r) => r.period_id === id);
+    return buildTrend(months.map((p) => ({
+      id: p.id,
+      label: p.label,
+      month: p.month,
+      year: p.year,
+      legacy: p.bva_import_status !== 'final',
+      period: publicPeriod(p),
+      lines: of(lines, p.id).map(publicBudgetLine),
+      cashAccounts: of(cash, p.id).map(publicCashAccount),
+      distributions: of(dists, p.id).map(publicDistribution),
+    })));
+  } catch {
+    return null;
+  }
+}
 
 // Whole publicDashboard response. `svc` is base44.asServiceRole.
 export async function buildPublicDashboard(svc, body = {}) {
@@ -166,9 +218,12 @@ export async function buildPublicDashboard(svc, body = {}) {
     svc.entities.SavingsSpend.filter({ period_id: period.id }, undefined, 500),
   ]);
 
+  const trend = await buildPublicTrend(svc, published);
+
   return {
     periods: published.map(publicPeriod),
     period: publicPeriod(period),
+    trend,
     budgetLines: budgetLines.map(publicBudgetLine),
     cashAccounts: cashAccounts.map(publicCashAccount),
     distributions: distributions.map(publicDistribution),

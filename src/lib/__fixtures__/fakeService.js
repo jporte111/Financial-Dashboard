@@ -14,7 +14,8 @@ export function fakeService(seed = {}, { hook = null } = {}) {
     const k = Object.keys(data).find((key) => data[key] === null);
     if (k) throw Object.assign(new Error(`Error in field ${k}: Input should be a valid string`), { status: 422 });
   };
-  const matches = (r, q) => Object.entries(q || {}).every(([k, v]) => r[k] === v);
+  // Equality, plus the { $in: [...] } operator Base44's filter supports.
+  const matches = (r, q) => Object.entries(q || {}).every(([k, v]) => (v && typeof v === 'object' && Array.isArray(v.$in) ? v.$in.includes(r[k]) : r[k] === v));
   const entity = (name) => ({
     get: async (id) => {
       const r = tables[name].get(id);

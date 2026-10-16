@@ -49,6 +49,8 @@ export function usePublicDashboard() {
     error: state.error,
     vm,
     periods: data?.periods || [],
+    // Month-over-month trend; null when the server could not build it.
+    trend: data ? (data.trend ?? null) : undefined,
     period: data?.period || null,
     selectedId,
     setSelectedId,
