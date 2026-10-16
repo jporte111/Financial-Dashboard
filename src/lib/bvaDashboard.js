@@ -22,6 +22,7 @@ import {
 } from './bva.js';
 import { overridesFromCorrections, WARNING_SOURCE_PATHS } from './bvaCorrections.js';
 import { effectiveRecord } from '../../base44/shared/sourceMissing.ts';
+import { monthFigures } from '../../base44/shared/monthFigures.ts';
 
 const EXPENSE_GROUPS = ['fixed', 'variable', 'discretionary'];
 
@@ -288,6 +289,10 @@ export function buildBvaDashboard(data, opts = {}) {
         ? { mode: 'bva_draft', isBvaValidated: false, isLegacy: false, label: 'Draft BVA import — not finalized' }
         : { mode: 'legacy', isBvaValidated: false, isLegacy: true, label: 'Legacy period — not validated through BVA import' };
 
+  // The headline figures come from the calculation shared with the
+  // month-over-month trend (base44/shared/monthFigures.ts), so a trend point
+  // is always exactly what this page shows.
+  const shown = monthFigures({ period, lines, cashAccounts, distributions });
   const isDetail = (l) => !!(l.bva_detail || l.detail_flag);
   // Group-summary lines drive the Budget Overview and the snapshot. Monitored
   // DETAIL categories are a separate watchlist that rolls up into these groups
@@ -364,12 +369,8 @@ export function buildBvaDashboard(data, opts = {}) {
   // Total Expenses (see bvaImport.js) -- and falls back to the sum of the group
   // lines when none is stored. The sum is kept to show when the workbook does
   // not add up. It is NEVER the discretionary group alone.
-  const expensesCalculated = { ytd: expenseLines.length && eY.complete ? eY.value : null, budget: expenseLines.length && eB.complete ? eB.value : null };
-  const overallExpenses = printedRule
-    ? ytdOrMissing(num(period.ytd_expenses) ?? expensesCalculated.ytd, num(period.annual_budgeted_expenses) ?? expensesCalculated.budget, elapsedMonths)
-    : expenseLines.length
-      ? ytdOrMissing(expensesCalculated.ytd, expensesCalculated.budget, elapsedMonths)
-      : ytdOrMissing(num(period.ytd_expenses), num(period.annual_budgeted_expenses), elapsedMonths);
+  const expensesCalculated = shown.expensesCalculated;
+  const overallExpenses = ytdOrMissing(shown.expenses.ytd, shown.expenses.budget, elapsedMonths);
   // Current-month expenses — null ("Source value missing") when no source
   // carries a figure; a present zero still renders as $0.00; a total that
   // leaves out lines without a figure is marked partial.
@@ -382,9 +383,9 @@ export function buildBvaDashboard(data, opts = {}) {
   const iM = known(incomeLines.map((l) => l.month_actual));
   // The stored totals are what the workbook prints (bvaImport.js); the sums
   // of the income lines are kept to show when the workbook does not add up.
-  const incomeCalculated = { ytd: incomeLines.length && iY.complete ? iY.value : null, budget: incomeLines.length && iB.complete ? iB.value : null };
-  const ytdIncome = printedRule || !incomeLines.length ? r2n(num(period.ytd_income)) ?? incomeCalculated.ytd : incomeCalculated.ytd;
-  const annualBudgetedIncome = printedRule || !incomeLines.length ? r2n(num(period.annual_budgeted_income)) ?? incomeCalculated.budget : incomeCalculated.budget;
+  const incomeCalculated = shown.incomeCalculated;
+  const ytdIncome = shown.income.ytd;
+  const annualBudgetedIncome = shown.income.budget;
   const remainingIncomeBudget = annualBudgetedIncome == null || ytdIncome == null ? null : round2(annualBudgetedIncome - ytdIncome);
   const incomeBudgetUsedPct =
     annualBudgetedIncome == null || ytdIncome == null ? null : annualBudgetedIncome ? ytdIncome / annualBudgetedIncome : 0;
@@ -500,7 +501,7 @@ export function buildBvaDashboard(data, opts = {}) {
   const cashReconciles = cashReported == null || cashPartial || cashCalculated == null ? null : cashCalculated === cashReported;
   // The workbook's printed Total Cash when stored; else the sum of the
   // (known) balances, marked partial when one is missing.
-  const totalCash = printedRule ? (cashReported != null ? cashReported : cashRows.length ? cashCalculated : null) : cashRows.length ? cashCalculated : cashReported;
+  const totalCash = shown.cash.total;
 
   // ---- Distributions -----------------------------------------
   // Quarter applicability comes from the REPORT's cutoff date (never today):
@@ -551,7 +552,7 @@ export function buildBvaDashboard(data, opts = {}) {
   const printedQuarterTotals = printedRule
     ? Object.fromEntries(QUARTERS.map((q) => [q, r2n(num(period.distribution_quarter_totals?.[q]))]).filter(([, v]) => v != null))
     : {};
-  const distributionsYtd = storedDistributions != null ? storedDistributions : distEntitySum;
+  const distributionsYtd = shown.distributions.ytd;
   const distReconciles = storedDistributions == null || distPartial || distEntitySum == null ? null : distEntitySum === storedDistributions;
 
   // ---- Savings & Distributions cards ------------------------

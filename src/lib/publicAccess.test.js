@@ -103,7 +103,7 @@ describe('publicDashboard: published + final only, server-side', () => {
 
   it('returns nothing when no period is published', async () => {
     const out = await buildPublicDashboard(fakeBase44([DRAFT_JUL, FINAL_UNPUBLISHED]).asServiceRole, {});
-    expect(out).toEqual({ periods: [], period: null, budgetLines: [], cashAccounts: [], distributions: [], transfers: [], savingsSpends: [] });
+    expect(out).toEqual({ periods: [], period: null, budgetLines: [], cashAccounts: [], distributions: [], transfers: [], savingsSpends: [], trend: null });
   });
 });
 
@@ -127,6 +127,8 @@ describe('publicDashboard: explicit field allow-lists', () => {
     expect(Object.keys(out.distributions[0]).sort()).toEqual(['id', 'entity_name', 'q1', 'q2', 'q3', 'q4', 'workbook_ytd'].sort());
     expect(Object.keys(out.transfers[0]).sort()).toEqual(['id', 'amount', 'source', 'purpose'].sort());
     expect(Object.keys(out.savingsSpends[0]).sort()).toEqual(['id', 'category', 'ytd_amount'].sort());
+    expect(Object.keys(out.trend).sort()).toEqual(['cashSinceLast', 'explanations', 'points', 'year']);
+    expect(Object.keys(out.trend.points[0]).sort()).toEqual(['beforeBva', 'cash', 'cashPartial', 'dataMonth', 'dataMonthIndex', 'distributionsYtd', 'expectedPacePct', 'expenses', 'groups', 'income', 'reportId', 'reportLabel', 'supersedes']);
   });
 
   it('keeps every figure the client sees unchanged', async () => {

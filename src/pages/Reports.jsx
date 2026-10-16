@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { base44 } from '@/api/base44Client';
 import { usePeriodContext } from '@/lib/usePeriod';
 import SectionHeading from '@/components/SectionHeading';
-import TrendCharts from '@/components/TrendCharts';
+import TrendsSection from '@/components/TrendsSection';
 import { FileText, Lock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -10,8 +10,12 @@ export default function Reports() {
   const { isAdmin } = usePeriodContext();
   const [reports, setReports] = useState([]);
 
+  // Trends: the same payload clients receive (current published versions
+  // only), so admins see exactly what Sonia sees -- never drafts.
+  const [trend, setTrend] = useState(undefined);
   useEffect(() => {
     base44.entities.SavedReport.list('sort_order').then(setReports);
+    base44.functions.invoke('publicDashboard', {}).then((r) => setTrend((r?.data ?? r)?.trend ?? null)).catch(() => setTrend(null));
   }, []);
 
   const visible = reports.filter((r) => isAdmin || r.visibility === 'client');
@@ -42,8 +46,8 @@ export default function Reports() {
       </section>
 
       <section>
-        <SectionHeading title="Trends" subtitle="Across finalized reporting periods" />
-        <TrendCharts />
+        <SectionHeading title="Trends" subtitle="Year to date, month by month, from the published reports (as clients see them)" />
+        {trend === undefined ? <p className="text-sm text-stone-400">Loading…</p> : <TrendsSection trend={trend} />}
       </section>
     </div>
   );
