@@ -14,6 +14,7 @@ import CashCard from '@/components/CashCard';
 import RecurringTransfersCard from '@/components/RecurringTransfersCard';
 import StatusPill from '@/components/StatusPill';
 import { AlertTriangle } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const DETAIL_FILTERS = [
   ['all', 'All'],
@@ -59,7 +60,15 @@ export default function Dashboard() {
   const monthMode = vm.monthMode;
 
   return (
-    <div className="space-y-14">
+    <div>
+      <Tabs defaultValue="overview" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="warnings">
+            Validation Warnings{vm.warnings.list.length > 0 ? ` (${vm.warnings.list.length})` : ''}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview" className="space-y-14">
       {vm.provenance.label && (
         <div
           className={`flex items-start gap-2 rounded-xl border p-4 text-sm ${
@@ -73,8 +82,6 @@ export default function Dashboard() {
           </p>
         </div>
       )}
-
-      {vm.warnings.list.length > 0 && <WarningStatusPanel warnings={vm.warnings} period={period} />}
 
       <section>
         <SectionHeading
@@ -193,6 +200,18 @@ export default function Dashboard() {
       <section>
         <RecurringTransfersCard transfers={vm.transfers.items} />
       </section>
+
+        </TabsContent>
+        <TabsContent value="warnings" className="space-y-6">
+          {vm.warnings.list.length > 0 ? (
+            <WarningStatusPanel warnings={vm.warnings} period={period} />
+          ) : (
+            <div className="rounded-2xl border border-stone-200 bg-white p-6 text-sm text-stone-500">
+              No validation warnings for this period — every reconciliation passed.
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
       <CategoryDrilldown line={selected} periodId={periodId} monthsElapsed={vm.elapsedMonths} onClose={() => setSelected(null)} />
     </div>
