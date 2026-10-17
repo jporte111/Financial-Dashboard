@@ -135,7 +135,7 @@ export function ReviewGroups({ review, comparedWith, onShowWarnings = null }) {
           return (
             <div key={key} className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm" data-testid="review-warnings-pointer">
               <p className="text-stone-700">
-                {count ? `${count} warning${count === 1 ? '' : 's'} — they never block finalizing or publishing.` : 'No warnings.'}{' '}
+                {count ? `${count === 1 ? '1 warning — it never blocks' : `${count} warnings — they never block`} finalizing or publishing.` : 'No warnings.'}{' '}
                 {count > 0 && (
                   <button type="button" onClick={onShowWarnings} className="font-medium text-stone-900 underline decoration-stone-300 underline-offset-4 hover:decoration-stone-600">
                     See Validation Warnings

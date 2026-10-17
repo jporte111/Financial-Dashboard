@@ -35,7 +35,7 @@ export default function HeroMetrics({ vm }) {
         </Metric>
         <Metric label={LABEL.incomeYtd} value={fmtCurrency(s.ytdIncome)}>
           <Tag>
-            {fmtPct(pct100(s.incomeBudgetUsedPct))} of annual budget · {fmtPct(pct100(vm.pacePct))} expected
+            {fmtPct(pct100(s.incomeBudgetUsedPct))} of budget · {fmtPct(pct100(vm.pacePct))} expected
           </Tag>
         </Metric>
         <Metric label={LABEL.expensesYtd} value={fmtCurrency(s.ytdExpenses)}>

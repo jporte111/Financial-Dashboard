@@ -47,6 +47,7 @@ export default function ValidationWarnings({ period, onOpenReview }) {
   const causes = published ? recorded : (review?.causes || []).filter((c) => c.bucket === 'warnings');
   const flat = !published && review && !Array.isArray(review.causes) ? review.warnings || [] : [];
   const count = causes.length + flat.length;
+  const findings = causes.reduce((n, c) => n + (c.members?.length || 1), 0) + flat.length;
   const blockerCount = review ? (review.causes ? review.causes.filter((c) => c.bucket === 'blockers').length : (review.blockers || []).length) : 0;
   const loading = !published && check === undefined;
 
@@ -84,7 +85,7 @@ export default function ValidationWarnings({ period, onOpenReview }) {
         ) : (
           <>
             <p className="text-xs uppercase tracking-[0.12em] text-stone-500">
-              {count} warning{count === 1 ? '' : 's'}, grouped by cause
+              {count} cause{count === 1 ? '' : 's'}{findings !== count ? ` · ${findings} findings` : ''} — grouped by root cause
             </p>
             {causes.length > 0 && <CauseList causes={causes} bucket="warnings" />}
             {flat.length > 0 && (

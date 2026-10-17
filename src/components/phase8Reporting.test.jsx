@@ -134,7 +134,7 @@ describe('Validation Warnings tab', () => {
     render(<ReviewGroups review={{ causes: [warningCause, blockerCause], blockers: [], warnings: [], needsReview: [], completed: [], notes: [] }} onShowWarnings={onShowWarnings} />);
     expect(screen.getByTestId('review-blockers').textContent).toMatch(/A line has no Actual YTD/);
     expect(screen.queryByText('A distribution quarter is blank')).toBeNull();
-    expect(screen.getByTestId('review-warnings-pointer').textContent).toMatch(/1 warning — they never block/);
+    expect(screen.getByTestId('review-warnings-pointer').textContent).toMatch(/1 warning — it never blocks finalizing or publishing/);
     fireEvent.click(screen.getByText('See Validation Warnings'));
     expect(onShowWarnings).toHaveBeenCalled();
   });
