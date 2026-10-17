@@ -385,7 +385,8 @@ export default function BvaImportCenter() {
       if (intent?.mode === 'correct' || intent?.mode === 'continue' || intent?.mode === 'blocked') {
         const prep = await periodTransition('prepare_import', null, { month: confirm.month, year: confirm.year, filename: file?.name || '', note });
         if (!prep.ok) {
-          addLog(`✗ ${(prep.blockers?.[0]?.message) || prep.error} Nothing was imported.`);
+          const why = (prep.blockers?.[0]?.message) || prep.error || 'Refused.';
+          addLog(`✗ ${why}${/Nothing was imported/.test(why) ? '' : ' Nothing was imported.'}`);
           return;
         }
         chosenId = prep.target_id || chosenId;
@@ -627,7 +628,7 @@ export default function BvaImportCenter() {
                 {intent.mode === 'create' && <p>Creates the {MONTHS[Number(confirm.month) - 1]} {confirm.year} report as a draft.</p>}
                 {intent.mode === 'update' && <p>Updates the {intent.target ? versionLabel(intent.target) : `${MONTHS[Number(confirm.month) - 1]} ${confirm.year}`} draft{intent.target?.status === 'final' ? ' (it returns to draft, so it can be finalized again)' : ''}. Clients do not see it until it is published.</p>}
                 {intent.mode === 'correct' && <p><span className="font-medium">{intent.current.label} is published.</span>{duplicate ? '' : ` This upload becomes a corrected ${intent.current.label} report. Clients keep seeing the current report until you publish the correction; the current version is kept in history.`}</p>}
-                {intent.mode === 'continue' && <p>Updates the correction of {intent.current?.label || versionLabel(intent.target)} you started{intent.target?.revision_created_at ? ` on ${String(intent.target.revision_created_at).slice(0, 10)}` : ''} (not yet published). Clients keep seeing the current report until you publish it.</p>}
+                {intent.mode === 'continue' && <p>Updates the correction of {intent.current?.label || versionLabel(intent.target)} you started{intent.target?.revision_created_at ? ` on ${String(intent.target.revision_created_at).slice(0, 10)}` : ''} (not yet published{intent.target?.status === 'final' ? '; it returns to draft, so it can be finalized again' : ''}). Clients keep seeing the current report until you publish it.</p>}
                 {intent.mode === 'blocked' && <p>{intent.reason}</p>}
                 {intent.mode === 'correct' && !applied && !duplicate && (
                   <input className="mt-2 h-8 w-full rounded-md border border-stone-200 bg-white px-3 text-xs" placeholder="Optional note about this correction (recorded with it)" value={note} onChange={(e) => setNote(e.target.value)} />

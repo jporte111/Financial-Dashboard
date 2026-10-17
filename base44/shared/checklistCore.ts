@@ -276,6 +276,8 @@ export const CATALOGUE: Record<string, { title: string; action: string; where: s
   copy_unverified: { title: 'The copy of the published report is not finished yet', action: 'Nothing was imported. Upload the workbook again in a moment.', where: IMPORT },
   copy_in_progress: { title: 'The corrected version is still being prepared', action: 'Nothing was imported. Upload the workbook again in a moment.', where: IMPORT },
   copy_failed: { title: 'The corrected version does not match the published report', action: 'Nothing was imported. Open Review & Publish → History & recovery to discard it, then upload again.', where: REVIEW },
+  copy_failed_retry: { title: 'The copy of the published report could not be verified', action: 'It was removed and nothing was imported. Upload the workbook again.', where: IMPORT },
+  state_settling: { title: 'The report just changed and the change is not visible yet', action: 'Nothing was imported. Upload the workbook again in a few seconds.', where: IMPORT },
   open_revisions: { title: 'More than one correction is in progress', action: 'Open Review & Publish → History & recovery and discard the extra one.', where: REVIEW },
   no_target: { title: 'This month has no report an upload can update', action: 'Open Review & Publish → History & recovery.', where: REVIEW },
   revision_not_found: { title: 'The corrected version could not be read back', action: 'Upload the workbook again.', where: IMPORT },

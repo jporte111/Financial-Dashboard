@@ -351,8 +351,10 @@ export function importIntent(periods, month, year) {
   const blocked = (reason) => ({ mode: 'blocked', current: state.current || null, target: null, reason: `${reason} Open Review & Publish → History & recovery.` });
   if (state.conflict) return blocked(`${label} has more than one published version.`);
   if (state.pendingCleanup.length) return blocked(`An earlier replacement of ${label} did not finish.`);
-  if (state.openRevisions.length > 1) return blocked(`${label} has ${state.openRevisions.length} corrections in progress.`);
-  if (state.openRevisions.length === 1) return { mode: 'continue', current: state.current || null, target: state.openRevisions[0] };
+  // A correction not yet published (open, or final and waiting to be
+  // published) is updated in place; there is never a second one.
+  if (state.unpublishedRevisions.length > 1) return blocked(`${label} has ${state.unpublishedRevisions.length} corrections in progress.`);
+  if (state.unpublishedRevisions.length === 1) return { mode: 'continue', current: state.current || null, target: state.unpublishedRevisions[0] };
   if (state.current) return { mode: 'correct', current: state.current, target: null };
   return { mode: 'update', current: null, target: state.working || null };
 }
@@ -361,7 +363,7 @@ export function importTarget(periods, month, year, chosenId = null) {
   const versions = (periods || []).filter((p) => Number(p.month) === Number(month) && Number(p.year) === Number(year) && !isDiscarded(p));
   if (!versions.length) return { allowed: true, action: 'create', target: null, needsInvalidate: false, candidates: [] };
   const state = monthState(versions);
-  const open = state.openRevisions;
+  const open = state.unpublishedRevisions; // open or final-not-yet-published corrections
   const label = versions[0].label || 'This month';
   const refuse = (reason) => ({ allowed: false, action: 'refuse', target: null, needsInvalidate: false, candidates: open, reason });
   const usable = (p) => !p.published && !isSuperseded(p) && (!isRevision(p) || p.copy_status === 'verified');
