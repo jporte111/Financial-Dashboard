@@ -68,11 +68,17 @@ const sameRow = (a: any, b: any) => a.r === b.r && a.d === b.d && a.a === b.a &&
 // exactly, reconcile against the version's own BVA lines, then switch the
 // version to this import in one write.
 export async function commitDetail(svc: any, period: any, body: any, who: string, now: Date) {
-  const refuse = (code: string, message: string, extra: any = {}) => ({ status: 409, body: { ok: false, action: 'commit_detail', blockers: [{ code, message, overridable: false }], ...extra } });
-  const refusal = attachRefusal(period);
-  if (refusal) return refuse(refusal.code, refusal.message);
   const { import_id, file } = body || {};
   if (!/^\d{13}-[a-z0-9]{6,}$/.test(String(import_id || ''))) return { status: 400, body: { error: 'import_id required' } };
+  // A refused commit removes what its upload staged (never the attached import).
+  const refuse = async (code: string, message: string, extra: any = {}) => {
+    if (period?.detail_import?.import_id !== import_id) {
+      for (const c of await chunksOf(svc, period.id, import_id).catch(() => [])) await svc.entities.TransactionDetailChunk.delete(c.id).catch(() => {});
+    }
+    return { status: 409, body: { ok: false, action: 'commit_detail', blockers: [{ code, message, overridable: false }], ...extra } };
+  };
+  const refusal = attachRefusal(period);
+  if (refusal) return refuse(refusal.code, refusal.message);
   const read = readDetailReport(modelFromPackage(body.package));
   const checks = validateDetailReport(read);
   if (!checks.ok) return refuse('detail_checks_failed', 'The transaction report did not pass its checks, so nothing was attached.', { checks: checks.checks });

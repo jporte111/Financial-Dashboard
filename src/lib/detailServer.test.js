@@ -202,6 +202,30 @@ describe('drill-down endpoints', () => {
   });
 });
 
+describe('no orphaned uploads (found on staging)', () => {
+  it('a refused commit removes the chunks its upload staged; the attached import stays', async () => {
+    const db = fakeService(seed());
+    await attach(db, 'p1');
+    const current = db.tables.ReportingPeriod.get('p1').detail_import.import_id;
+    const bad = structuredClone(MODEL); bad.rows.find((x) => /^\d\d\//.test(String(x.B || ''))).I += 0.01;
+    expect((await attach(db, 'p1', { model: bad })).body.blockers[0].code).toBe('detail_checks_failed');
+    expect((await attach(db, 'p1', { tamperChunk: (r) => { r[0].a += 1; return r; } })).body.blockers[0].code).toBe('detail_staged_mismatch');
+    expect(new Set(chunks(db, 'p1').map((c) => c.import_id))).toEqual(new Set([current]));
+  });
+  it('a correction copies only the attached import, never an abandoned upload\'s chunks', async () => {
+    const db = fakeService(seed());
+    await attach(db, 'p1');
+    await T(db, 'finalize', 'p1');
+    Object.assign(db.tables.ReportingPeriod.get('p1'), { published: true, publication_date: '2026-10-17' });
+    db.tables.TransactionDetailChunk.set('orphan', { id: 'orphan', period_id: 'p1', import_id: `${Date.now()}-orphan01`, seq: 0, rows: [{ r: 1, d: '2026-01-01', a: 1, p: 'x', ok: true }] });
+    const prep = await handlePeriodTransition(db.base44, { action: 'prepare_import', month: 8, year: 2026, filename: 'ZZ corrected.xlsx' }, ADMIN, NOW);
+    const rev = db.tables.ReportingPeriod.get(prep.body.target_id);
+    expect(rev.copy_status).toBe('verified');
+    expect(chunks(db, rev.id).every((c) => c.import_id === rev.detail_import.import_id)).toBe(true);
+    expect(chunks(db, rev.id).flatMap((c) => c.rows).length).toBe(rev.detail_import.rows_stored);
+  });
+});
+
 describe('Phase 4: a correction starts with a copy; the published detail never changes', () => {
   it('upload a corrected BVA -> the correction has the detail; re-attaching changes only the correction', async () => {
     const db = fakeService(seed());

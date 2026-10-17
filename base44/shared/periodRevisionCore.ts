@@ -69,6 +69,15 @@ async function retrying(fn: () => Promise<any>) {
 
 const rowsOf = async (svc: any, entity: string, periodId: string) =>
   listOf(await retrying(() => svc.entities[entity].filter({ period_id: periodId }, undefined, 5000)));
+// The source rows a revision copies. Transaction detail: only the chunks of the
+// version's ATTACHED import -- never chunks staged by an upload that was refused
+// or abandoned.
+const sourceRowsOf = async (svc: any, entity: string, source: any) => {
+  const all = await rowsOf(svc, entity, source.id);
+  if (entity !== 'TransactionDetailChunk') return all;
+  const current = source?.detail_import?.status === 'attached' ? source.detail_import.import_id : null;
+  return current ? all.filter((c: any) => c.import_id === current) : [];
+};
 
 export function periodCopy(source: any) {
   return withoutNulls(Object.fromEntries(Object.entries(source).filter(([k]) => !NOT_COPIED.has(k))));
@@ -120,7 +129,7 @@ export async function copyStep(svc: any, revision: any, source: any) {
   const started = Date.now();
   const copied: Record<string, number> = {};
   for (const entity of COPY_ENTITIES) {
-    const sources = await rowsOf(svc, entity, source.id);
+    const sources = await sourceRowsOf(svc, entity, source);
     const have = new Set((await rowsOf(svc, entity, revision.id)).map((r: any) => r.copied_from));
     const todo = sources.filter((s: any) => !have.has(s.id));
     for (let i = 0; i < todo.length; i += copyOptions.batchSize) {
@@ -161,7 +170,7 @@ export async function verifyCopy(svc: any, revision: any, source: any) {
   let ok = true;
   const copyOf: Record<string, any[]> = {};
   for (const entity of COPY_ENTITIES) {
-    const sources = await rowsOf(svc, entity, source.id);
+    const sources = await sourceRowsOf(svc, entity, source);
     const copies = await rowsOf(svc, entity, revision.id);
     copyOf[entity] = copies;
     const bySource = new Map<string, any[]>();
