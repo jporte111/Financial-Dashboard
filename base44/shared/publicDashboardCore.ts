@@ -22,6 +22,8 @@ import { effectiveRecord } from './sourceMissing.ts';
 import { currentPublished, isCurrentPublished, monthState, isSuperseded, isDiscarded } from './periodVersions.ts';
 import { buildTrend } from './trendCore.ts';
 import { cutoffIndex } from './crossPeriod.ts';
+import { attachedDetailRows, liveReconciliation } from './detailServer.ts';
+import { clientDetail, rowsForLine } from './detailReport.ts';
 
 export const isPublishedFinal = (p) => !!p && !!p.published && p.status === 'final';
 
@@ -248,19 +250,25 @@ const reply = (status, body) => ({ status, body });
 
 // Drill-down for anonymous visitors (and signed-in non-admins).
 //
-// Transaction fields a client may receive: an explicit allowlist. No
-// transaction-detail source is approved for clients yet, and detail will be
-// offered only to authenticated client users -- never through this anonymous
-// endpoint -- so the allowlist is EMPTY: the response carries no transaction
-// rows and this handler does not read transactions at all. Adding a field
-// needs the owner's approval of an authoritative export and of the field.
-export const PUBLIC_TRANSACTION_FIELDS: string[] = [];
+// Transaction fields a client may receive: an explicit allowlist. Phase 5b
+// (owner, 2026-10-17): the QuickBooks Transaction Report (Excel), attached to
+// a published report version, is the approved source, and the no-login client
+// view may show exactly date, payee, signed amount and plain account name
+// (this updates the Phase 5a rule that kept detail to signed-in users). Rows
+// come only from the version's attached detail (TransactionDetailChunk) --
+// never from legacy Transaction records -- and only for accounts confirmed in
+// a cost group; a watch-list line that does not reconcile shows no rows.
+export const PUBLIC_TRANSACTION_FIELDS: string[] = ['date', 'payee', 'amount', 'account'];
 // Never client-visible, whatever is approved later.
 export const NEVER_CLIENT_TRANSACTION_FIELDS = [
   'id', 'period_id', 'internal_notes', 'review_status', 'review_flags', 'reviewed_by',
   'qb_transaction_id', 'qb_account', 'account_id', 'full_account_path', 'copied_from', 'source', 'treatment',
+  // Phase 5b detail fields kept internal
+  'description', 'memo', 'payment_account', 'qb_type', 'qb_num', 'account_number', 'client_visible', 'vendor',
 ];
-export const PUBLIC_DRILLDOWN_KEYS = ['period_id', 'category', 'detail_available', 'transactions'];
+export const PUBLIC_DRILLDOWN_KEYS = ['period_id', 'category', 'detail_available', 'transactions', 'note', 'listed_total', 'data_month'];
+// The reconciliation entry for one budget line (group lines share their group's entry).
+export const detailEntryFor = (reconciliation, line) => (reconciliation?.lines || []).find((e) => e.line_id === line.id || (e.line_ids || []).includes(line.id)) || null;
 
 // Published and final periods only, and only the month's current version
 // (draft revisions and replaced versions are refused); the line is resolved
@@ -282,8 +290,15 @@ export async function handlePublicCategoryRequest(base44, body = {}) {
   const line = await resolveLine(svc, period.id, body);
   if (!line || line.drilldown_enabled === false) return reply(404, { error: 'Category not available' });
 
-  // PUBLIC_TRANSACTION_FIELDS is empty: no rows, and no transaction reads.
-  return reply(200, { period_id: period.id, category: line.category, detail_available: false, transactions: [] });
+  // Phase 5b: rows only from the version's attached detail, judged by the
+  // reconciliation stored when the version was finalized (frozen).
+  const entry = period.detail_import?.status === 'attached' ? detailEntryFor(period.detail_import.reconciliation, line) : null;
+  if (!entry) return reply(200, { period_id: period.id, category: line.category, detail_available: false, transactions: [] });
+  let rows;
+  try { rows = await attachedDetailRows(svc, period); } catch (e) { return reply(503, { error: e.message, code: e.code || 'detail_incomplete' }); }
+  const c = clientDetail(rows || [], entry);
+  const transactions = c.transactions.map((t) => Object.fromEntries(PUBLIC_TRANSACTION_FIELDS.map((k) => [k, t[k]])));
+  return reply(200, { period_id: period.id, category: line.category, detail_available: true, transactions, note: c.note, listed_total: c.listed_total, data_month: String(period.reporting_cutoff_date || '').slice(0, 7) || null });
 }
 
 // Signed-in drill-down: admins keep full access to any period (including
@@ -304,6 +319,32 @@ export async function handleCategoryTransactionsRequest(base44, body = {}, user)
   const state = monthState(Array.isArray(versions) ? versions : []);
   if (isSuperseded(period) || isDiscarded(period) || state.pendingCleanup.some((v) => v.id === period.id)) {
     return reply(409, { error: 'This version was replaced by a newer one; open the current version.', code: 'superseded_version' });
+  }
+  // Phase 5b: a version with attached detail answers from it (all fields,
+  // plus the reconciliation); otherwise the earlier behaviour.
+  if (period.detail_import?.status === 'attached') {
+    const svc = base44.asServiceRole;
+    const line = await resolveLine(svc, period.id, { category });
+    const lines = await svc.entities.BudgetLine.filter({ period_id: period.id }, undefined, 5000);
+    // unpublished: compared with the current figures; published: as stored
+    const reconciliation = period.published ? period.detail_import.reconciliation : await liveReconciliation(svc, period, Array.isArray(lines) ? lines : []);
+    const entry = line ? detailEntryFor(reconciliation, line) : null;
+    let rows;
+    try { rows = await attachedDetailRows(svc, period); } catch (e) { return reply(503, { error: e.message, code: e.code || 'detail_incomplete' }); }
+    const month = String(period.reporting_cutoff_date || '').slice(0, 7);
+    const mine = entry ? rowsForLine(rows || [], entry) : [];
+    return reply(200, {
+      period_id: period.id, category, source: 'detail_report', detail_available: !!entry,
+      reconciliation: entry, client: entry ? clientDetail(rows || [], entry) : null,
+      unmapped: reconciliation?.unmapped || null, unconfirmed: reconciliation?.unconfirmed || [],
+      total: mine.length, ytd_amount: mine.reduce((s, r) => s + r.a, 0) / 100,
+      month_amount: mine.filter((r) => r.d.startsWith(month)).reduce((s, r) => s + r.a, 0) / 100,
+      transactions: mine.map((r) => ({
+        id: `r${r.r}`, date: r.d, vendor: r.py || '', description: r.m || '', amount: r.a / 100, account: r.ac || '',
+        full_account_path: r.p, account_number: r.n || '', qb_type: r.ty || '', qb_num: r.no || '', payment_account: r.pm || '',
+        client_visible: !!r.ok, in_month: r.d.startsWith(month), source: 'detail_report',
+      })),
+    });
   }
   return reply(200, await transactionsForCategory(base44, period, category, qb_account_names));
 }

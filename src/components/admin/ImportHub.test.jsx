@@ -64,12 +64,14 @@ function makeBvaFile() {
 }
 
 describe('Admin Import hub — BVA is the only financial-data source; QuickBooks is fully removed', () => {
-  it('has exactly two subtabs: BVA Import and BVA Review — no QuickBooks Import', () => {
+  it('has three subtabs: BVA Import, BVA Review and Transaction Detail (drill-down only) — no QuickBooks Import', () => {
     renderHub();
     expect(screen.getByRole('tab', { name: /^BVA Import$/i })).toBeTruthy();
     expect(screen.getByRole('tab', { name: /^BVA Review$/i })).toBeTruthy();
+    // Phase 5b: the Transaction Report export supplies drill-down detail only; it never feeds a figure
+    expect(screen.getByRole('tab', { name: /^Transaction Detail$/i })).toBeTruthy();
     expect(screen.queryByRole('tab', { name: /quickbooks/i })).toBeNull();
-    expect(screen.getAllByRole('tab')).toHaveLength(2);
+    expect(screen.getAllByRole('tab')).toHaveLength(3);
   });
 
   it('defaults to the BVA Import subtab and shows the BVA workbook control', () => {

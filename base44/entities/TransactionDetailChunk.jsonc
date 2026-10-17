@@ -1,0 +1,51 @@
+{
+  "name": "TransactionDetailChunk",
+  "type": "object",
+  // Phase 5b: the transaction detail (QuickBooks Transaction Report, Excel)
+  // attached to ONE report version, in chunks of rows. Admins may read it;
+  // nobody may write it directly -- only the backend (service role) writes,
+  // through periodTransition stage_detail / commit_detail and the Phase 4
+  // revision copy. A version reads only the chunks of its current import
+  // (ReportingPeriod.detail_import.import_id). A published or superseded
+  // version's chunks are never written again. Anonymous visitors never read
+  // this entity: the public drill-down returns date, payee, signed amount and
+  // plain account name only (base44/shared/detailReport.ts clientDetail).
+  "rls": {
+    "create": { "user_condition": { "role": "server_only" } },
+    "read": { "user_condition": { "role": "admin" } },
+    "update": { "user_condition": { "role": "server_only" } },
+    "delete": { "user_condition": { "role": "server_only" } }
+  },
+  "properties": {
+    "copied_from": {
+      "rls": {
+        "write": false
+      },
+      "type": "string",
+      "description": "Draft revisions: id of the record this one was copied from (set only by the server when a revision is created)."
+    },
+    "period_id": {
+      "type": "string"
+    },
+    "import_id": {
+      "type": "string",
+      "description": "The import this chunk belongs to (matches ReportingPeriod.detail_import.import_id when attached)."
+    },
+    "seq": {
+      "type": "number",
+      "description": "Chunk order within the import (0, 1, 2, ...)."
+    },
+    "rows": {
+      "type": "array",
+      "description": "Transactions through the version's cutoff. Keys: r (sheet row), d (date), py (payee), a (signed amount, whole cents), ac (plain account name), p (full account path), n (own account number), ns (account numbers in the path), g (top-level group), ok (client-visible: numbered or confirmed account in a cost group), ty (QuickBooks type), no (Num), m (memo), pm (payment account). Internal except d, py, a, ac.",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "required": [
+    "period_id",
+    "import_id",
+    "seq"
+  ]
+}

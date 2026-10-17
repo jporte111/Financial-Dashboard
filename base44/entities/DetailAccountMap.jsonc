@@ -1,0 +1,37 @@
+{
+  "name": "DetailAccountMap",
+  "type": "object",
+  // Phase 5b: confirmed mappings for QuickBooks accounts that have no account
+  // number of their own (e.g. "...:6575 - Doctor Visits:Sonia",
+  // "3. DISCRETIONARY COSTS:Nataliya Wedding"). Until an account's full path is
+  // confirmed here, its transactions count toward their cost group but toward
+  // no watch-list line, and are not shown to the client. A confirmation takes
+  // effect when detail is next attached to a report version; it never changes
+  // detail already attached to a published version. Admin-only.
+  "rls": {
+    "create": { "user_condition": { "role": "admin" } },
+    "read": { "user_condition": { "role": "admin" } },
+    "update": { "user_condition": { "role": "admin" } },
+    "delete": { "user_condition": { "role": "admin" } }
+  },
+  "properties": {
+    "account_path": {
+      "type": "string",
+      "description": "Full QuickBooks account path, whitespace-normalised."
+    },
+    "plain_name": {
+      "type": "string",
+      "description": "The account name shown to the client."
+    },
+    "confirmed_by": {
+      "type": "string"
+    },
+    "confirmed_at": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "account_path",
+    "plain_name"
+  ]
+}

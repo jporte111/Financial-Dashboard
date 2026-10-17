@@ -4,6 +4,7 @@ import { periodTransition } from '@/lib/periodTransition';
 import { CauseList } from './PublicationReview';
 import { groupByCause, explain } from '../../../base44/shared/checklistCore.ts';
 import { plainLabel } from '../../../base44/shared/periodVersions.ts';
+import { detailWarnings } from '../../../base44/shared/detailReport.ts';
 
 // Validation Warnings tab: every non-blocking warning for the selected report,
 // grouped by root cause, in one place. Warnings never block finalizing or
@@ -31,13 +32,15 @@ export default function ValidationWarnings({ period, onOpenReview }) {
   // Warnings recorded at import (published reports), grouped like the server's.
   const recorded = useMemo(() => {
     const list = Array.isArray(period?.bva_validation_warnings) ? period.bva_validation_warnings : [];
+    // plus the transaction-detail comparison stored when the report was finalized
+    const detail = period?.detail_import?.status === 'attached' ? detailWarnings(period.detail_import.reconciliation) : [];
     return groupByCause(
-      list.filter((w) => !w.blocksFinalize).map((w) => {
+      [...list, ...detail].filter((w) => !w.blocksFinalize).map((w) => {
         const e = explain(w.code);
         return { code: w.code, title: e.title, problem: w.message || e.title, action: e.action, where: e.where, kind: 'warning' };
       })
     );
-  }, [period?.bva_validation_warnings]);
+  }, [period?.bva_validation_warnings, period?.detail_import]);
 
   if (!period) {
     return <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50 p-6 text-sm text-stone-500">No report selected.</div>;

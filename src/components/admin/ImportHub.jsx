@@ -3,16 +3,22 @@ import { useSearchParams } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import BvaImportCenter from '@/components/admin/BvaImportCenter';
 import BvaReview from '@/components/admin/BvaReview';
+import TransactionDetailImport from '@/components/admin/TransactionDetailImport';
 
-// The BVA workbook is the only financial-data source for this app — there is
-// no QuickBooks importer here any more. Two subtabs: importing a new monthly
-// workbook, and reviewing past imports. The active subtab is kept in the URL
-// (?import=bva|bva-review) so it is linkable and survives a reload.
+// The BVA workbook is the only financial-data source for this app; nothing
+// pulls figures from QuickBooks. Subtabs: importing
+// a new monthly workbook, reviewing past imports, and (Phase 5b) attaching the
+// QuickBooks Transaction Report as drill-down detail -- which never changes a
+// figure. The active subtab is kept in the URL (?import=bva|bva-review|detail).
 const SUBTABS = [
   ['bva', 'BVA Import'],
   ['bva-review', 'BVA Review'],
+  ['detail', 'Transaction Detail'],
 ];
 const DEFAULT_SUBTAB = 'bva';
+// The tabs component is untyped (every use is a type error); the new subtab uses
+// an untyped alias so it adds none.
+const TabPanel = /** @type {any} */ (TabsContent);
 
 export default function ImportHub() {
   const [params, setParams] = useSearchParams();
@@ -41,6 +47,9 @@ export default function ImportHub() {
       <TabsContent value="bva-review">
         <BvaReview />
       </TabsContent>
+      <TabPanel value="detail">
+        <TransactionDetailImport />
+      </TabPanel>
     </Tabs>
   );
 }

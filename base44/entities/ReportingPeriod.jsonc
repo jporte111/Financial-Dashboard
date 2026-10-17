@@ -135,6 +135,13 @@
       "type": "object",
       "description": "The copy verification report."
     },
+    "detail_import": {
+      "rls": {
+        "write": false
+      },
+      "type": "object",
+      "description": "Phase 5b: the transaction detail attached to this report version (written only by the server): file name and sha256, report title/period/basis/run time, cutoff, row counts, check results, per-line reconciliation (BVA total, detail total, difference, status, in cents), unmapped and unconfirmed summaries, import_id, status. Never client-visible."
+    },
     "label": {
       "type": "string",
       "description": "e.g. July 2026"

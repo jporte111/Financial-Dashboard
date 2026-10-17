@@ -50,12 +50,14 @@ import { monthState, isRevision, isSuperseded, isDiscarded, isFinal, revisionNum
 import { REVISION_FIELDS, REQUIRED_REVISION_FIELDS, SchemaOutOfDate, revisionRecord, copyStep, discardStep } from './periodRevisionCore.ts';
 import { alignedPrevious, alignedNext, crossPeriodChecks, laterMonthChecks, UNAVAILABLE } from './crossPeriod.ts';
 import { CHECKLIST_ITEMS, CHECKLIST_KEYS, partHashes, warningCodes, checklistStatus, confirmationRecord, itemMessage, isDataBlocker, buildReview } from './checklistCore.ts';
+import { stageDetail, commitDetail, liveReconciliation } from './detailServer.ts';
+import { detailWarnings } from './detailReport.ts';
 
 // Base44 rejects null for string and number fields (HTTP 422), so a cleared
 // timestamp / name is written as '' -- the gate treats '' as "not set".
 export const CLEARED = '';
 // State written by the server; never accepted from the caller on create.
-export const PROTECTED_FIELDS = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log', 'checklist_confirmations', ...REVISION_FIELDS];
+export const PROTECTED_FIELDS = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log', 'checklist_confirmations', 'detail_import', ...REVISION_FIELDS];
 
 export const MIN_REOPEN_REASON = 10;
 export const STAGES = ['draft', 'transactions_posted', 'categories_reviewed', 'classes_reviewed', 'reports_reviewed'];
@@ -458,7 +460,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
   if (user.role !== 'admin') return reply(403, { error: 'Admins only' });
   const { action, period_id } = body;
   if (!period_id && action !== 'create' && action !== 'prepare_import') return reply(400, { error: 'period_id required' });
-  if (!['create', 'prepare_import', 'check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage', 'create_revision', 'copy_revision', 'discard_revision', 'finish_supersede', 'confirm_checklist', 'unconfirm_checklist'].includes(action)) {
+  if (!['create', 'prepare_import', 'check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage', 'create_revision', 'copy_revision', 'discard_revision', 'finish_supersede', 'confirm_checklist', 'unconfirm_checklist', 'stage_detail', 'commit_detail'].includes(action)) {
     return reply(400, { error: 'unknown action' });
   }
   const svc = base44.asServiceRole;
@@ -468,6 +470,10 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
   const { period, lines } = await load(svc, period_id);
   if (!period) return reply(404, { error: 'Period not found' });
   const who = user.email || user.full_name || 'admin';
+  // Phase 5b transaction detail (detailServer.ts): staged in chunks, then
+  // committed in one switch; only unpublished, unreplaced versions.
+  if (action === 'stage_detail') { const r = await stageDetail(svc, period, body); return reply(r.status, { action, ...r.body }); }
+  if (action === 'commit_detail') { const r = await commitDetail(svc, period, body, who, now); return reply(r.status, { action, ...r.body }); }
   const update = async (data) => {
     await svc.entities.ReportingPeriod.update(period.id, data);
     return reply(200, { ok: true, action, period_id: period.id, state: { ...pickState(period), ...pickState(data) } });
@@ -497,8 +503,10 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
     const publish = evaluatePublish(period, lines, cross.findings, cl.items);
     // A draft's open issues are what finalize will ask about; a final period's, what publish will.
     const final = period.status === 'final' && period.bva_import_status === 'final';
-    const review = buildReview({ period, blockers: final ? publish.blockers : finalize.blockers, crossFindings: cross.findings, crossRan: !!cross.previous && !cross.unavailable, items: cl.items, previousLabel: cross.previous?.label || null, dataWarnings: dataWarnings(period, lines) });
-    return reply(200, { ok: true, finalize, publish, cross_period: cross, checklist: { items: cl.items, unavailable: !!cl.unavailable }, review });
+    // Transaction detail differences are warnings only (never blockers).
+    const detail = await liveReconciliation(svc, period, lines);
+    const review = buildReview({ period, blockers: final ? publish.blockers : finalize.blockers, crossFindings: cross.findings, crossRan: !!cross.previous && !cross.unavailable, items: cl.items, previousLabel: cross.previous?.label || null, dataWarnings: [...dataWarnings(period, lines), ...detailWarnings(detail)] });
+    return reply(200, { ok: true, finalize, publish, cross_period: cross, checklist: { items: cl.items, unavailable: !!cl.unavailable }, review, detail: detail ? { reconciliation: detail } : null });
   }
 
   // Superseded and discarded versions are kept as they are.
@@ -570,6 +578,9 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
       const o = recorded[`open_reconciliation:${w.code}`];
       return o && w.blocksFinalize ? { ...w, overridden: true, override: o, blocksFinalize: false } : w;
     });
+    // The attached detail's reconciliation is refreshed against the final
+    // figures, so what is published records the comparison as published.
+    const detail = period.detail_import?.status === 'attached' ? await liveReconciliation(svc, period, lines) : null;
     return update({
       status: 'final',
       bva_import_status: 'final',
@@ -578,6 +589,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
       bva_overrides: recorded,
       bva_validation_warnings: warnings,
       last_updated: today(now),
+      ...(detail ? { detail_import: { ...period.detail_import, reconciliation: detail, reconciled_at: at } } : {}),
     });
   }
 
