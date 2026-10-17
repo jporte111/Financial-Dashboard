@@ -100,6 +100,7 @@ describe('cutoff, signs and mapping', () => {
     expect(plainAccountName('2. VARIABLE COSTS:6550 - ZZ Medical:6575 - ZZ Doctor Visits:ZZ Person A')).toBe('ZZ Doctor Visits – ZZ Person A');
     expect(plainAccountName('3. DISCRETIONARY COSTS:6845 - ZZ Personal:ZZ SPA (deleted)')).toBe('ZZ Personal – ZZ SPA');
     expect(plainAccountName('3. DISCRETIONARY COSTS:ZZ Event')).toBe('ZZ Event');
+    expect(plainAccountName('2.  VARIABLE COSTS')).toBe('Variable Costs – general'); // posted to the group itself
     expect(plainAccountName('x:6575 - ZZ Doctor Visits:ZZ Person A', 'Doctor visits (A)')).toBe('Doctor visits (A)');
     expect(pathNumbers('2. VARIABLE COSTS:6550 - ZZ Medical:6575 - ZZ Doctor Visits:ZZ Person A')).toEqual(['6550', '6575']);
   });

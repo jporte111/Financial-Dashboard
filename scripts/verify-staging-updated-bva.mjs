@@ -308,7 +308,7 @@ for (let cycle = 1; cycle <= CYCLES; cycle++) {
   const fRev = viaFilter.find((v) => v.id === revId), fPrev = viaFilter.find((v) => v.id === published);
   const seen = `filter: rev ${fRev?.published ? 'pub' : 'unpub'}, prev ${fPrev?.superseded ? 'sup' : 'live'} | get: rev ${viaGetRev?.published ? 'pub' : 'unpub'}, prev ${viaGetPrev?.superseded ? 'sup' : 'live'}`;
   const tgt = p.body?.target_id ? await E.ReportingPeriod.get(p.body.target_id) : null;
-  const code = p.status === 200 ? p.body.mode : p.body?.blockers?.[0]?.code || p.status;
+  const code = p.status === 200 ? p.body.mode : p.body?.blockers?.[0]?.code || `${p.status}${p.body?.error ? ` (${String(p.body.error).slice(0, 160)})` : ''}`;
   if (tgt?.copy_verification && tgt.copy_status !== 'verified') info(`cycle ${cycle} copy ${tgt.copy_status}: ${copySummary(tgt.copy_verification)} (copy checked ${tgt.copy_verification.checked_at}, created ${tgt.created_date})`);
   const right = p.status === 200 && p.body.mode === 'correct' && tgt?.supersedes === revId;
   const safeRetry = p.status === 409 && ['state_settling'].includes(code);

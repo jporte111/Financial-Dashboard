@@ -51,6 +51,11 @@ export function plainAccountName(p: string, confirmedName: string | null = null)
   if (confirmedName && confirmedName.trim()) return confirmedName.trim();
   const s = segments(p);
   if (!s.length) return '';
+  // transactions posted to the cost group itself ("2.  VARIABLE COSTS")
+  if (s.length === 1 && topGroupOf(s[0])) {
+    const words = normSegment(s[0]).replace(/^\d+\.\s*/, '').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+    return `${words} – general`;
+  }
   const last = cleanName(s[s.length - 1]);
   if (segmentNumber(s[s.length - 1]) || s.length < 2 || topGroupOf(s[s.length - 2])) return last;
   return `${cleanName(s[s.length - 2])} – ${last}`;
