@@ -95,7 +95,7 @@ describe('Admin Import hub — BVA is the only financial-data source; QuickBooks
       expect(within(container).getByText('Reporting month')).toBeTruthy();
       expect(within(container).getByText('Reporting year')).toBeTruthy();
       expect(within(container).getByText('Reporting cutoff date')).toBeTruthy();
-      expect(within(container).getByRole('button', { name: /Apply import \(Draft\)/i })).toBeTruthy();
+      expect(within(container).getByRole('button', { name: /Import \(draft\)/i })).toBeTruthy();
     });
     // cutoff pre-fills from the workbook cell, not the filename
     const dateInput = container.querySelector('input[type="date"]');

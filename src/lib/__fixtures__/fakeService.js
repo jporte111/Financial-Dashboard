@@ -1,11 +1,12 @@
 // An in-memory Base44 service role for server tests (fictional data only).
 // Every write is logged in order. `hook(entity, op, args, phase)` may throw:
 // phase 'before' = the write is refused; 'after' = it happened, the response
-// was lost.
+// was lost. `read(entity, op, args, result)` may replace what a read returns
+// (to simulate Base44's read-after-write lag: a stale view of recent writes).
 export const ENTITIES = ['ReportingPeriod', 'BudgetLine', 'CashAccount', 'Distribution', 'RecurringTransfer', 'SavingsSpend', 'Transaction', 'Account'];
 const clone = (x) => (x === undefined ? x : structuredClone(x));
 
-export function fakeService(seed = {}, { hook = null } = {}) {
+export function fakeService(seed = {}, { hook = null, read = null } = {}) {
   const tables = Object.fromEntries(ENTITIES.map((e) => [e, new Map((seed[e] || []).map((r) => [r.id, clone(r)]))]));
   const log = [];
   let n = 0;
@@ -16,14 +17,15 @@ export function fakeService(seed = {}, { hook = null } = {}) {
   };
   // Equality, plus the { $in: [...] } operator Base44's filter supports.
   const matches = (r, q) => Object.entries(q || {}).every(([k, v]) => (v && typeof v === 'object' && Array.isArray(v.$in) ? v.$in.includes(r[k]) : r[k] === v));
+  const seen = (name, op, args, result) => (read ? read(name, op, args, result) : result);
   const entity = (name) => ({
     get: async (id) => {
-      const r = tables[name].get(id);
+      const r = seen(name, 'get', { id }, tables[name].has(id) ? clone(tables[name].get(id)) : undefined);
       if (!r) throw Object.assign(new Error('Object not found'), { status: 404 });
-      return clone(r);
+      return r;
     },
-    filter: async (q) => [...tables[name].values()].filter((r) => matches(r, q)).map(clone),
-    list: async () => [...tables[name].values()].map(clone),
+    filter: async (q) => seen(name, 'filter', { q }, [...tables[name].values()].filter((r) => matches(r, q)).map(clone)),
+    list: async () => seen(name, 'list', {}, [...tables[name].values()].map(clone)),
     create: async (data) => {
       await run(name, 'create', { data }, 'before');
       rejectNulls(data);

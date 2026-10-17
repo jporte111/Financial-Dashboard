@@ -32,6 +32,9 @@ export const isRevision = (p: any) => !!p?.supersedes;
 export const isFinal = (p: any) => p?.status === 'final' || p?.bva_import_status === 'final';
 // A revision still being worked on: not discarded, superseded, final or published.
 export const isOpenRevision = (p: any) => isRevision(p) && !isDiscarded(p) && !isSuperseded(p) && !p.published && !isFinal(p);
+// A correction not yet published: open, or marked final and waiting to be
+// published. Only one may exist per month; a new upload updates it in place.
+export const isUnpublishedRevision = (p: any) => isRevision(p) && !isDiscarded(p) && !isSuperseded(p) && !p.published;
 
 // Fixed display order among competing versions -- see the header.
 const displayOrder = (a: any, b: any) =>
@@ -80,6 +83,7 @@ export function monthState(versions: any[]) {
     conflict: current.length > 1 ? current : null, // competing published versions
     pendingCleanup: candidates.filter((c) => replaced.has(c.id)), // replaced, not yet marked superseded
     openRevisions: live.filter(isOpenRevision),
+    unpublishedRevisions: live.filter(isUnpublishedRevision), // open + final-not-yet-published corrections
     working,
     versions: live,
   };
@@ -98,6 +102,16 @@ export function currentPublished(periods: any[]) {
 // Is `p` the version clients currently see for its month?
 export const isCurrentPublished = (periods: any[], p: any) =>
   !!p && monthState((periods || []).filter((x) => monthKey(x) === monthKey(p))).current?.id === p.id;
+
+// The label for the normal workflow, in months rather than versions: the
+// current report is just its month, a correction not yet published is named
+// as such; a replaced or discarded version keeps its revision label.
+export function plainLabel(p: any) {
+  if (!p) return '';
+  if (isSuperseded(p) || isDiscarded(p)) return versionLabel(p);
+  if (isRevision(p) && !p.published) return `${p.label} · ${isFinal(p) ? 'final' : 'draft'} correction`;
+  return p.label;
+}
 
 // A short admin label: "September 2026 · revision 2 (draft)".
 export function versionLabel(p: any) {

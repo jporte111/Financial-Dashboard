@@ -8,6 +8,7 @@ import BudgetLinesEditor from '@/components/admin/BudgetLinesEditor';
 import SupportingDataEditor from '@/components/admin/SupportingDataEditor';
 import PublishPanel from '@/components/admin/PublishPanel';
 import RevisionPanel from '@/components/admin/RevisionPanel';
+import { importIntent } from '@/lib/bvaImport';
 import ReviewQueue from '@/components/admin/ReviewQueue';
 import PeriodsManager from '@/components/admin/PeriodsManager';
 import TransactionsEditor from '@/components/admin/TransactionsEditor';
@@ -42,8 +43,11 @@ export default function Admin() {
           </>
         ) : (
           <>
-            <strong>{versionLabel(period)}</strong> is {period.published ? 'published' : 'final'} and read-only. To correct it, create a
-            revision in Review &amp; Publish — clients keep seeing this version until the revision is published.
+            <strong>{period.label}</strong> is {period.published ? 'published' : 'final'} and read-only here. If you receive an updated BVA
+            workbook, upload it on the <strong>Import</strong> tab
+            {period.published
+              ? ' — clients keep seeing this report until you publish the correction.'
+              : ' — it updates this report (not yet shown to clients) and returns it to draft for review.'}
           </>
         )}
       </div>
@@ -147,8 +151,16 @@ export default function Admin() {
       </TabsContent>
 
       <TabsContent value="review" className="space-y-5">
-        <RevisionPanel period={period} periods={periods} reload={reload} onOpen={(id) => setPeriodId(id)} />
         <PublishPanel period={period} reload={reload} />
+        {/* Versions are for audit and exceptional recovery; a corrected BVA is
+            simply uploaded on the Import tab. Opens by itself when the month
+            needs attention (conflicting versions, an unfinished replacement). */}
+        <details className="rounded-2xl border border-stone-200 bg-white p-4" open={!!period && importIntent(periods, period.month, period.year).mode === 'blocked'} data-testid="history-recovery">
+          <summary className="cursor-pointer text-sm font-medium text-stone-700">History &amp; recovery</summary>
+          <div className="mt-4">
+            <RevisionPanel period={period} periods={periods} reload={reload} onOpen={(id) => setPeriodId(id)} />
+          </div>
+        </details>
         <fieldset disabled={locked} className="min-w-0 disabled:opacity-70" data-testid="review-editors">
           <ReviewQueue periodId={periodId} />
         </fieldset>

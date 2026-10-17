@@ -11,7 +11,7 @@ const MIN_REASON = 10;
 // revision of the current version, continue or verify its copy, discard it,
 // finish an unfinished replacement, and see a conflict between versions.
 // Clients keep seeing the current published version until a revision is
-// published (PublishPanel → Publish replacement).
+// published (PublishPanel → Publish correction).
 export default function RevisionPanel({ period, periods, reload, onOpen }) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -24,7 +24,7 @@ export default function RevisionPanel({ period, periods, reload, onOpen }) {
   const current = state.current;
   const byId = new Map(versions.map((v) => [v.id, v]));
   const canRevise =
-    !state.conflict && !state.pendingCleanup.length && !state.openRevisions.length &&
+    !state.conflict && !state.pendingCleanup.length && !state.unpublishedRevisions.length &&
     (period.published || isFinal(period)) && !isSuperseded(period) &&
     (current ? current.id === period.id : state.working?.id === period.id);
 

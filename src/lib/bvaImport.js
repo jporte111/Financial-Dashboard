@@ -288,7 +288,7 @@ export function importPreflight(match) {
     return {
       allowed: false,
       action: 'refuse',
-      reason: `${match.label || 'This month'} is published. To correct it, create a revision (Admin → Review & Publish) and import into that revision.`,
+      reason: `${match.label || 'This month'} is published. To correct it, upload the updated BVA workbook on the Import tab.`,
     };
   }
   return { allowed: true, action: 'update', needsInvalidate: true };
@@ -334,11 +334,36 @@ export function groupMapFromLines(lines) {
 // version the admin picked (e.g. "September 2026 · revision 2 (draft)").
 // Returns { allowed, action: 'create' | 'update', target, needsInvalidate,
 // candidates, reason }.
+// What uploading a workbook for this month will do, in plain terms (the
+// updated-BVA workflow). The server decides again at import time
+// (periodTransition 'prepare_import'); this only drives what the screen shows.
+//   create    no report for the month yet
+//   update    an unpublished draft / final report is updated in place
+//   correct   the month is published: the upload becomes a corrected version
+//             (clients keep the current one until the correction is published)
+//   continue  a correction is already in progress: the upload updates it
+//   blocked   an exceptional state (History & recovery)
+export function importIntent(periods, month, year) {
+  const versions = (periods || []).filter((p) => Number(p.month) === Number(month) && Number(p.year) === Number(year) && !isDiscarded(p));
+  if (!versions.length) return { mode: 'create', current: null, target: null };
+  const state = monthState(versions);
+  const label = versions[0].label || 'This month';
+  const blocked = (reason) => ({ mode: 'blocked', current: state.current || null, target: null, reason: `${reason} Open Review & Publish → History & recovery.` });
+  if (state.conflict) return blocked(`${label} has more than one published version.`);
+  if (state.pendingCleanup.length) return blocked(`An earlier replacement of ${label} did not finish.`);
+  // A correction not yet published (open, or final and waiting to be
+  // published) is updated in place; there is never a second one.
+  if (state.unpublishedRevisions.length > 1) return blocked(`${label} has ${state.unpublishedRevisions.length} corrections in progress.`);
+  if (state.unpublishedRevisions.length === 1) return { mode: 'continue', current: state.current || null, target: state.unpublishedRevisions[0] };
+  if (state.current) return { mode: 'correct', current: state.current, target: null };
+  return { mode: 'update', current: null, target: state.working || null };
+}
+
 export function importTarget(periods, month, year, chosenId = null) {
   const versions = (periods || []).filter((p) => Number(p.month) === Number(month) && Number(p.year) === Number(year) && !isDiscarded(p));
   if (!versions.length) return { allowed: true, action: 'create', target: null, needsInvalidate: false, candidates: [] };
   const state = monthState(versions);
-  const open = state.openRevisions;
+  const open = state.unpublishedRevisions; // open or final-not-yet-published corrections
   const label = versions[0].label || 'This month';
   const refuse = (reason) => ({ allowed: false, action: 'refuse', target: null, needsInvalidate: false, candidates: open, reason });
   const usable = (p) => !p.published && !isSuperseded(p) && (!isRevision(p) || p.copy_status === 'verified');
@@ -352,7 +377,7 @@ export function importTarget(periods, month, year, chosenId = null) {
   } else if (open.length === 1) {
     target = open[0];
   } else if (state.current) {
-    return refuse(`${label} is published. To correct it, create a revision (Admin → Review & Publish) and import into that revision.`);
+    return refuse(`${label} is published. To correct it, upload the updated BVA workbook on the Import tab.`);
   } else {
     target = state.working;
   }

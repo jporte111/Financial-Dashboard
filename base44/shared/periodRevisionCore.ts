@@ -38,7 +38,12 @@ export class SchemaOutOfDate extends Error {
 }
 export const REQUIRED_REVISION_FIELDS = ['supersedes', 'revision_number', 'copy_status', 'revision_status'];
 
-export const copyOptions = { batchSize: 50, budgetMs: 60 * 1000, attempts: 5, firstDelayMs: 500 };
+// visibleDelaysMs / verifyDelaysMs: Base44 reads can lag rows just created.
+// After copying an entity the copy waits (these pauses) until the new rows are
+// visible, so a resumed copy never copies them twice; and a verification that
+// finds rows only MISSING (nothing duplicated, extra, changed or misplaced) is
+// repeated after these pauses before the copy is declared failed.
+export const copyOptions = { batchSize: 50, budgetMs: 60 * 1000, attempts: 5, firstDelayMs: 500, visibleDelaysMs: [300, 600, 1200, 2000], verifyDelaysMs: [500, 1000, 2000, 3000, 4000] };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const withoutNulls = (o: Record<string, any>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined));
 const listOf = (res: any) => (Array.isArray(res) ? res : (res && res.items) || []);
@@ -97,6 +102,18 @@ export function revisionRecord(source: any, { reason, by, now }: { reason: strin
 }
 
 // Copy what is not yet copied, within the time budget; verify when complete.
+// Wait until `expected` rows of `entity` are visible for the revision.
+async function awaitVisible(svc: any, entity: string, revisionId: string, expected: number) {
+  for (const ms of copyOptions.visibleDelaysMs || []) {
+    if ((await rowsOf(svc, entity, revisionId)).length >= expected) return;
+    await sleep(ms);
+  }
+}
+// A failed verification caused only by rows not visible yet.
+const onlyMissing = (report: any) =>
+  !report.period?.changed &&
+  Object.values(report.entities || {}).every((e: any) => !e.duplicates && !e.extra && !e.changed && !e.wrong_period);
+
 export async function copyStep(svc: any, revision: any, source: any) {
   const started = Date.now();
   const copied: Record<string, number> = {};
@@ -106,7 +123,10 @@ export async function copyStep(svc: any, revision: any, source: any) {
     const todo = sources.filter((s: any) => !have.has(s.id));
     for (let i = 0; i < todo.length; i += copyOptions.batchSize) {
       // Every call copies at least one batch, so a resumed copy always progresses.
-      if (Object.keys(copied).length && Date.now() - started > copyOptions.budgetMs) return { done: false, copied };
+      if (Object.keys(copied).length && Date.now() - started > copyOptions.budgetMs) {
+        if (copied[entity]) await awaitVisible(svc, entity, revision.id, have.size + copied[entity]);
+        return { done: false, copied };
+      }
       const batch = todo.slice(i, i + copyOptions.batchSize).map((s: any) => rowCopy(s, revision.id));
       await retrying(() => svc.entities[entity].bulkCreate(batch));
       // Base44 drops fields its schema does not declare: if copied_from did not
@@ -118,8 +138,14 @@ export async function copyStep(svc: any, revision: any, source: any) {
       }
       copied[entity] = (copied[entity] || 0) + batch.length;
     }
+    if (copied[entity]) await awaitVisible(svc, entity, revision.id, have.size + copied[entity]);
   }
-  const report = await verifyCopy(svc, revision, source);
+  let report = await verifyCopy(svc, revision, source);
+  for (const ms of copyOptions.verifyDelaysMs || []) {
+    if (report.ok || !onlyMissing(report)) break;
+    await sleep(ms);
+    report = await verifyCopy(svc, revision, source);
+  }
   await retrying(() => svc.entities.ReportingPeriod.update(revision.id, { copy_status: report.ok ? 'verified' : 'failed', copy_verification: report }));
   return { done: true, verified: report.ok, copied, report };
 }

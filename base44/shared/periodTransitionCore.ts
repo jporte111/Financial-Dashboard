@@ -29,6 +29,10 @@
 //               warnings seen (checklistCore.ts). Refused for a published
 //               period and while a linked blocker is open. One write.
 //
+//   prepare_import  where a BVA upload goes (create / update a draft in place /
+//                   create + verify a draft revision of a published month /
+//                   reuse the open one); see prepareImport below
+//
 // Draft revisions (base44/shared/periodRevisionCore.ts, periodVersions.ts):
 //   create_revision  copy a final or published report (the month's current
 //                    version) into a new draft version; written reason
@@ -226,16 +230,240 @@ export async function writeChecklistItem(svc, period, key, record, who, now) {
   return { ok: false, reason: 'unverified' };
 }
 
+// Draft revisions: copy the month's current final / published version into a
+// new draft version (Phase 4 rules: one open revision per month; concurrent
+// creation keeps the earliest; schema check; copy + verify). Shared by
+// create_revision and prepare_import.
+async function createRevision(svc, period, reasonIn, who, now) {
+  const action = 'create_revision';
+  const refuse = (code, message) => reply(409, { ok: false, action, blockers: [{ code, message, overridable: false }] });
+  const listOf = (res) => (Array.isArray(res) ? res : (res && res.items) || []);
+  const monthVersions = async () => listOf(await svc.entities.ReportingPeriod.filter({ month: period.month, year: period.year }, undefined, 200));
+  const getOrNull = async (id) => { try { return (await svc.entities.ReportingPeriod.get(id)) || null; } catch { return null; } };
+  if (!period.published && !isFinal(period)) return refuse('source_not_final', 'Only a final or published report can be revised. Edit this draft directly.');
+  const reason = typeof reasonIn === 'string' ? reasonIn.trim() : '';
+  if (reason.length < MIN_REOPEN_REASON) return refuse('revision_reason_required', `Give a reason for the revision (at least ${MIN_REOPEN_REASON} characters).`);
+  const state = monthState(await monthVersions());
+  if (state.conflict) return refuse('version_conflict', `${period.label} has more than one published version; resolve that first.`);
+  if (state.pendingCleanup.length) return refuse('supersede_pending', `An earlier replacement of ${period.label} is not finished; finish it first.`);
+  if (state.unpublishedRevisions.length) return refuse('open_revision_exists', `${period.label} already has a correction that is not published yet (revision ${revisionNumber(state.unpublishedRevisions[0])}).`);
+  if (state.current ? state.current.id !== period.id : state.working?.id !== period.id) {
+    return refuse('not_current_version', `Only the current version of ${period.label} can be revised.`);
+  }
+  const created = await svc.entities.ReportingPeriod.create(revisionRecord(period, { reason, by: who, now }));
+  // Base44 drops fields its schema does not declare. If the version fields
+  // did not stick (entity schemas older than these functions), the record
+  // would be an untracked second copy of the month: remove it and refuse.
+  const stored = (await getOrNull(created.id)) || created;
+  const lost = REQUIRED_REVISION_FIELDS.filter((f) => stored[f] === undefined || stored[f] === null || stored[f] === '');
+  if (lost.length) {
+    await discardStep(svc, { ...stored, revision_status: 'discarded' }).catch(() => {});
+    return refuse('schema_out_of_date', new SchemaOutOfDate(`ReportingPeriod.${lost[0]}`).message);
+  }
+  // No transactions: two admins could create revisions at the same moment.
+  // Keep the earliest; discard this one if it is not.
+  const open = monthState(await monthVersions()).openRevisions
+    .sort((a, b) => String(a.created_date || '').localeCompare(String(b.created_date || '')) || String(a.id).localeCompare(String(b.id)));
+  if (open.length > 1 && open[0].id !== created.id) {
+    await discardStep(svc, created).catch(() => {});
+    return refuse('concurrent_revision', `Another revision of ${period.label} was created at the same moment; use that one.`);
+  }
+  let copy;
+  try {
+    copy = await copyStep(svc, created, period);
+  } catch (e) {
+    if (!(e instanceof SchemaOutOfDate)) throw e;
+    await discardStep(svc, { ...stored, revision_status: 'discarded' }).catch(() => {});
+    return refuse('schema_out_of_date', e.message);
+  }
+  return reply(200, { ok: true, action: 'create_revision', period_id: created.id, source_id: period.id, revision_number: created.revision_number, copy: { done: copy.done, verified: copy.verified ?? null, copied: copy.copied } });
+}
+
+
+// ---- prepare_import: the target of a BVA upload (the updated-BVA workflow) --
+// The admin only uploads the workbook; this decides, from the month's versions
+// as the SERVER reads them, where the import goes -- using the Phase 4 rules
+// unchanged:
+//   - no version                      -> create (the importer creates it)
+//   - an unpublished draft / final    -> update it in place (a final one is
+//                                        reset to draft by 'invalidate')
+//   - published, no correction yet    -> create a draft revision of the
+//                                        published version (written reason:
+//                                        "Updated BVA workbook <file> uploaded
+//                                        by <user> on <date>" + optional note),
+//                                        copy and verify it, then update it
+//   - one unpublished correction      -> update it (open, or final and not yet
+//                                        published: reset to draft like any
+//                                        final unpublished report)
+//   - conflicting published versions, an unfinished replacement, or more
+//     than one correction             -> refused (History & recovery)
+// The published version is never written. Safe to repeat: a second call finds
+// the correction and reuses it; two calls at the same moment end with one
+// revision (createRevision keeps the earliest).
+//
+// Read-after-write lag: right after a publish, Base44 may not yet show it to
+// these reads (the correction still unpublished, or the replaced version not
+// yet superseded). Before deciding, the month is CONFIRMED: every version the
+// decision rests on is re-read by id and must agree with the list, and the
+// half-published patterns must be absent. If not, the month is read again
+// after a short pause (prepareOptions.settleDelaysMs). If it never settles the
+// upload is refused with 'state_settling' ("try again in a few seconds") and
+// nothing is written. A replacement still unfinished long after its publish is
+// a real interruption: refused as before, with the pointer to recovery.
+export const PREPARE_COPY_ROUNDS = 4;
+// A copy younger than this may still be running in another call (there are no
+// locks): only the call that created the revision copies into it meanwhile, so
+// two uploads at the same moment never copy into the same revision twice.
+// settleDelaysMs: pauses between reads of a month that has not settled.
+// recentPublishMs: an unfinished replacement younger than this is treated as a
+// publish still becoming visible, not as an interruption.
+export const prepareOptions = { copyStaleMs: 3 * 60 * 1000, settleDelaysMs: [400, 800, 1600, 2400], recentPublishMs: 2 * 60 * 1000 };
+export function updatedWorkbookReason({ filename, who, now, note }) {
+  const base = `Updated BVA workbook ${String(filename || 'workbook').trim() || 'workbook'} uploaded by ${who} on ${today(now)}`;
+  const extra = typeof note === 'string' ? note.trim() : '';
+  return extra ? `${base}. Note: ${extra.slice(0, 500)}` : base;
+}
+
+// createRevision refusals that a stale read can cause: read again, then decide.
+const SETTLE_CODES = new Set(['not_current_version', 'supersede_pending', 'version_conflict', 'open_revision_exists', 'concurrent_revision']);
+const STATE_KEYS = ['published', 'superseded', 'superseded_by', 'status', 'bva_import_status', 'revision_status', 'copy_status'];
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+// What the server saw (ids and flags only), returned with a refusal for diagnosis.
+const observed = (versions) => versions.map((v) => ({ id: v.id, rev: revisionNumber(v), published: !!v.published, superseded: !!v.superseded, final: isFinal(v), revision_status: v.revision_status || null, copy_status: v.copy_status || null }));
+
+async function prepareImport(svc, body, user, now) {
+  const action = 'prepare_import';
+  const who = user.email || user.full_name || 'admin';
+  const refuse = (code, message, extra = {}) => reply(409, { ok: false, action, blockers: [{ code, message, overridable: false }], ...extra });
+  const month = Number(body.month), year = Number(body.year);
+  if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(year)) return reply(400, { error: 'month and year required' });
+  const listOf = (res) => (Array.isArray(res) ? res : (res && res.items) || []);
+  const versionsOf = async () => listOf(await svc.entities.ReportingPeriod.filter({ month, year }, undefined, 200)).filter((p) => !isDiscarded(p));
+  const getOrNull = async (id) => { try { return (await svc.entities.ReportingPeriod.get(id)) || null; } catch { return null; } };
+  const RECOVERY = 'Open Review & Publish → History & recovery.';
+  const SETTLING = 'just changed and the change is not visible yet. Nothing was imported; try the upload again in a few seconds.';
+
+  // Finish (or verify) a correction's copy before anything imports into it.
+  const ensureCopied = async (rev, createdHere) => {
+    if (rev.copy_status === 'verified') return { ok: true };
+    if (rev.copy_status === 'failed') return { ok: false, code: 'copy_failed', message: `The corrected version does not match the published report it was copied from, so nothing was imported. ${RECOVERY}` };
+    const started = Date.parse(rev.revision_created_at || rev.created_date || '');
+    if (!createdHere && Number.isFinite(started) && now.getTime() - started < prepareOptions.copyStaleMs) {
+      return { ok: false, code: 'copy_in_progress', message: 'The corrected version is still being prepared from the published report. Nothing was imported; try the upload again in a moment.' };
+    }
+    const source = await getOrNull(rev.supersedes);
+    if (!source) return { ok: false, code: 'source_missing', message: 'The version this correction was copied from no longer exists.' };
+    try {
+      for (let i = 0; i < PREPARE_COPY_ROUNDS; i++) {
+        const copy = await copyStep(svc, rev, source);
+        if (copy.done && copy.verified) return { ok: true };
+        if (copy.done && copy.verified === false) {
+          return { ok: false, code: 'copy_failed', message: `The corrected version does not match the published report it was copied from, so nothing was imported. ${RECOVERY}` };
+        }
+      }
+    } catch (e) {
+      if (e instanceof SchemaOutOfDate) return { ok: false, code: 'schema_out_of_date', message: e.message };
+      return { ok: false, code: 'copy_unverified', message: 'The copy of the published report could not be completed just now. Nothing was imported; try the upload again in a moment.' };
+    }
+    return { ok: false, code: 'copy_unverified', message: 'The copy of the published report is not finished yet. Nothing was imported; try the upload again in a moment.' };
+  };
+  const intoRevision = async (rev, created, attempts) => {
+    const c = await ensureCopied(rev, created);
+    if (!c.ok) {
+      // A correction THIS call created whose copy failed verification holds
+      // nothing anyone imported: remove it, so the next upload starts afresh
+      // instead of being stuck behind it.
+      if (created && c.code === 'copy_failed') {
+        const gone = await discardStep(svc, { ...rev, revision_status: 'discarded' }).then((d) => d.done).catch(() => false);
+        if (gone) return refuse('copy_failed_retry', 'The copy of the published report could not be verified, so it was removed and nothing was imported. Try the upload again.', { target_id: null });
+      }
+      return refuse(c.code, c.message, { target_id: rev.id });
+    }
+    return reply(200, { ok: true, action, mode: created ? 'correct' : 'continue', target_id: rev.id, source_id: rev.supersedes, revision_number: revisionNumber(rev), settle_attempts: attempts });
+  };
+
+  // Read the month and confirm it: { versions, state } when settled, or
+  // { unsettled: reason } when a publish (or another upload) is still
+  // becoming visible.
+  const confirmMonth = async () => {
+    const versions = await versionsOf();
+    const state = monthState(versions);
+    const byId = new Map(versions.map((v) => [v.id, v]));
+    // A version marked superseded by a correction that shows as never
+    // published (neither published now nor itself replaced since).
+    for (const v of versions) {
+      if (isSuperseded(v) && v.superseded_by) {
+        const by = byId.get(v.superseded_by);
+        if (!by || (!by.published && !isSuperseded(by) && !isDiscarded(by))) return { unsettled: 'replacement_not_visible', versions };
+      }
+    }
+    // The versions the decision rests on, re-read by id, must agree with the list.
+    const keyIds = [state.current?.id, ...state.unpublishedRevisions.map((r) => r.id), ...state.pendingCleanup.map((r) => r.id), state.working?.id].filter(Boolean);
+    for (const id of [...new Set(keyIds)]) {
+      const fresh = await getOrNull(id);
+      const listed = byId.get(id);
+      if (!fresh || STATE_KEYS.some((k) => JSON.stringify(fresh[k] ?? null) !== JSON.stringify(listed[k] ?? null))) return { unsettled: 'reads_disagree', versions };
+    }
+    return { versions, state };
+  };
+
+  let lastUnsettled = null;
+  const delays = prepareOptions.settleDelaysMs || [];
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    if (attempt) await pause(delays[attempt - 1]);
+    const seen = await confirmMonth();
+    if (seen.unsettled) { lastUnsettled = seen; continue; }
+    const { versions, state } = seen;
+    if (!versions.length) return reply(200, { ok: true, action, mode: 'create', target_id: null, settle_attempts: attempt + 1 });
+    const label = versions[0].label || `${month}/${year}`;
+    if (state.conflict) return refuse('version_conflict', `${label} has more than one published version. ${RECOVERY}`, { observed: observed(versions) });
+    if (state.pendingCleanup.length) {
+      // The second write of a publish not visible yet -- or a publish that
+      // really was interrupted. Only time tells them apart.
+      const newest = Math.max(...state.versions.filter((v) => v.published).map((v) => Date.parse(v.updated_date || v.publication_date || '') || 0));
+      if (now.getTime() - newest < prepareOptions.recentPublishMs) { lastUnsettled = { unsettled: 'replacement_pending', versions }; continue; }
+      return refuse('supersede_pending', `An earlier replacement of ${label} did not finish. ${RECOVERY}`, { observed: observed(versions) });
+    }
+    if (state.unpublishedRevisions.length > 1) return refuse('open_revisions', `${label} has ${state.unpublishedRevisions.length} corrections in progress. ${RECOVERY}`, { observed: observed(versions) });
+    if (state.unpublishedRevisions.length === 1) {
+      // A FINAL correction also looks like this for a moment right after it is
+      // published (neither publish write visible yet): confirm it on a second read.
+      if (isFinal(state.unpublishedRevisions[0]) && attempt === 0 && delays.length) { lastUnsettled = { unsettled: 'final_correction_recheck', versions }; continue; }
+      return intoRevision(state.unpublishedRevisions[0], false, attempt + 1);
+    }
+    if (!state.current) {
+      const w = state.working;
+      if (!w) return refuse('no_target', `${label} has no version an import can update. ${RECOVERY}`, { observed: observed(versions) });
+      return reply(200, { ok: true, action, mode: 'update', target_id: w.id, settle_attempts: attempt + 1 });
+    }
+    // Published: create the draft revision of the version clients see.
+    const res = await createRevision(svc, state.current, updatedWorkbookReason({ filename: body.filename, who, now, note: body.note }), who, now);
+    if (res.status === 200) {
+      const rev = await getOrNull(res.body.period_id);
+      if (!rev) return refuse('revision_not_found', 'The corrected version could not be read back. Try the upload again.');
+      return intoRevision(rev, true, attempt + 1);
+    }
+    // Someone else created it at the same moment, or createRevision read the
+    // month differently (lag): read the month again and decide from that.
+    const code = res.body?.blockers?.[0]?.code;
+    if (SETTLE_CODES.has(code)) { lastUnsettled = { unsettled: `create_revision:${code}`, versions }; continue; }
+    return reply(res.status, { ...res.body, action });
+  }
+  const label = lastUnsettled?.versions?.[0]?.label || `${month}/${year}`;
+  return refuse('state_settling', `${label} ${SETTLING}`, { reason: lastUnsettled?.unsettled || null, observed: observed(lastUnsettled?.versions || []) });
+}
+
 export async function handlePeriodTransition(base44, body = {}, user, now = new Date()) {
   if (!user) return reply(401, { error: 'Unauthorized' });
   if (user.role !== 'admin') return reply(403, { error: 'Admins only' });
   const { action, period_id } = body;
-  if (!period_id && action !== 'create') return reply(400, { error: 'period_id required' });
-  if (!['create', 'check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage', 'create_revision', 'copy_revision', 'discard_revision', 'finish_supersede', 'confirm_checklist', 'unconfirm_checklist'].includes(action)) {
+  if (!period_id && action !== 'create' && action !== 'prepare_import') return reply(400, { error: 'period_id required' });
+  if (!['create', 'prepare_import', 'check', 'finalize', 'publish', 'reopen', 'invalidate', 'set_stage', 'create_revision', 'copy_revision', 'discard_revision', 'finish_supersede', 'confirm_checklist', 'unconfirm_checklist'].includes(action)) {
     return reply(400, { error: 'unknown action' });
   }
   const svc = base44.asServiceRole;
   if (action === 'create') return createPeriod(svc, body.data, user, now);
+  if (action === 'prepare_import') return prepareImport(svc, body, user, now);
 
   const { period, lines } = await load(svc, period_id);
   if (!period) return reply(404, { error: 'Period not found' });
@@ -299,45 +527,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
       : 'The checklist change could not be confirmed as saved. Reload the page and check the item; try again if it is not shown as you set it.');
   }
 
-  if (action === 'create_revision') {
-    if (!period.published && !isFinal(period)) return refuse('source_not_final', 'Only a final or published report can be revised. Edit this draft directly.');
-    const reason = typeof body.reason === 'string' ? body.reason.trim() : '';
-    if (reason.length < MIN_REOPEN_REASON) return refuse('revision_reason_required', `Give a reason for the revision (at least ${MIN_REOPEN_REASON} characters).`);
-    const state = monthState(await monthVersions());
-    if (state.conflict) return refuse('version_conflict', `${period.label} has more than one published version; resolve that first.`);
-    if (state.pendingCleanup.length) return refuse('supersede_pending', `An earlier replacement of ${period.label} is not finished; finish it first.`);
-    if (state.openRevisions.length) return refuse('open_revision_exists', `${period.label} already has an open revision (revision ${revisionNumber(state.openRevisions[0])}).`);
-    if (state.current ? state.current.id !== period.id : state.working?.id !== period.id) {
-      return refuse('not_current_version', `Only the current version of ${period.label} can be revised.`);
-    }
-    const created = await svc.entities.ReportingPeriod.create(revisionRecord(period, { reason, by: who, now }));
-    // Base44 drops fields its schema does not declare. If the version fields
-    // did not stick (entity schemas older than these functions), the record
-    // would be an untracked second copy of the month: remove it and refuse.
-    const stored = (await getOrNull(created.id)) || created;
-    const lost = REQUIRED_REVISION_FIELDS.filter((f) => stored[f] === undefined || stored[f] === null || stored[f] === '');
-    if (lost.length) {
-      await discardStep(svc, { ...stored, revision_status: 'discarded' }).catch(() => {});
-      return refuse('schema_out_of_date', new SchemaOutOfDate(`ReportingPeriod.${lost[0]}`).message);
-    }
-    // No transactions: two admins could create revisions at the same moment.
-    // Keep the earliest; discard this one if it is not.
-    const open = monthState(await monthVersions()).openRevisions
-      .sort((a, b) => String(a.created_date || '').localeCompare(String(b.created_date || '')) || String(a.id).localeCompare(String(b.id)));
-    if (open.length > 1 && open[0].id !== created.id) {
-      await discardStep(svc, created).catch(() => {});
-      return refuse('concurrent_revision', `Another revision of ${period.label} was created at the same moment; use that one.`);
-    }
-    let copy;
-    try {
-      copy = await copyStep(svc, created, period);
-    } catch (e) {
-      if (!(e instanceof SchemaOutOfDate)) throw e;
-      await discardStep(svc, { ...stored, revision_status: 'discarded' }).catch(() => {});
-      return refuse('schema_out_of_date', e.message);
-    }
-    return reply(200, { ok: true, action, period_id: created.id, source_id: period.id, revision_number: created.revision_number, copy: { done: copy.done, verified: copy.verified ?? null, copied: copy.copied } });
-  }
+  if (action === 'create_revision') return createRevision(svc, period, body.reason, who, now);
 
   if (action === 'copy_revision') {
     if (!isRevision(period)) return refuse('not_a_revision', 'This period is not a revision.');
@@ -465,7 +655,7 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
   if (action === 'invalidate') {
     // An import into a version that has an open revision would bypass it
     // (e.g. a browser still running the previous app version).
-    if (monthState(await monthVersions()).openRevisions.some((r) => r.supersedes === period.id)) {
+    if (monthState(await monthVersions()).unpublishedRevisions.some((r) => r.supersedes === period.id)) {
       return refuse('open_revision_exists', `${period.label} has an open revision; import into the revision instead.`);
     }
     if (period.published) {

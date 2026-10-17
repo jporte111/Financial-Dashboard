@@ -4,7 +4,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { periodTransition } from '@/lib/periodTransition';
 import { ChecklistItems, ReviewGroups } from './PublicationReview';
-import { versionLabel, isRevision, isSuperseded } from '../../../base44/shared/periodVersions.ts';
+import { plainLabel, isRevision, isSuperseded } from '../../../base44/shared/periodVersions.ts';
 
 // Review stages an admin may set directly. "Final" is deliberately absent:
 // a period becomes final only through validated finalization (BVA Import),
@@ -23,7 +23,7 @@ export default function PublishPanel({ period, reload }) {
   const [confirmReopen, setConfirmReopen] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
   const [reopenLabel, setReopenLabel] = useState('');
-  const [replaceLabel, setReplaceLabel] = useState(''); // typed confirmation for publishing a revision
+  const [replaceConfirmed, setReplaceConfirmed] = useState(false); // confirmation for publishing a correction
   const { toast } = useToast();
 
   const isPublished = !!period?.published;
@@ -37,7 +37,7 @@ export default function PublishPanel({ period, reload }) {
     setConfirmReopen(false);
     setReopenReason('');
     setReopenLabel('');
-    setReplaceLabel('');
+    setReplaceConfirmed(false);
     if (!periodId) return;
     let cancelled = false;
     periodTransition('check', periodId).then((r) => !cancelled && setCheck(r.ok ? r : null));
@@ -79,7 +79,7 @@ export default function PublishPanel({ period, reload }) {
 
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-6">
-      <p className="font-display text-lg">Review & Publication — {versionLabel(period)}</p>
+      <p className="font-display text-lg">Review & Publication — {plainLabel(period)}</p>
       <p className="mt-1 text-sm text-stone-600">Status: <span className="font-medium">{statusLabel}</span></p>
 
       <div className="mt-5">
@@ -124,15 +124,12 @@ export default function PublishPanel({ period, reload }) {
       )}
 
       {revision && !isPublished && isFinal && (
-        <div className="mt-6 rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm text-stone-700">
-          Publishing this revision replaces the version clients see now, in one step. The replaced version is kept (marked
-          superseded), not deleted.
-          <input
-            className="mt-2 w-full rounded-md border border-stone-200 bg-white p-2 text-sm"
-            placeholder={`Type "${period.label}" to confirm the replacement`}
-            value={replaceLabel}
-            onChange={(e) => setReplaceLabel(e.target.value)}
-          />
+        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-stone-700" data-testid="publish-correction-confirm">
+          <p>Publishing this correction replaces the {period.label} report clients see now, in one step. The current version is kept in history (not deleted).</p>
+          <label className="mt-2 flex items-start gap-2">
+            <input type="checkbox" className="mt-0.5" checked={replaceConfirmed} onChange={(e) => setReplaceConfirmed(e.target.checked)} />
+            <span>I want clients to see this corrected {period.label} report.</span>
+          </label>
         </div>
       )}
 
@@ -140,14 +137,14 @@ export default function PublishPanel({ period, reload }) {
         {!isPublished && !superseded && (
           <Button
             onClick={async () => {
-              const res = await run(() => periodTransition('publish', period.id), revision ? 'Published as the replacement' : 'Published to Sonia');
-              if (res.ok && res.supersede_pending) toast({ title: 'Published — but marking the replaced version superseded did not finish', description: 'Finish it in Versions above. Clients already see this revision.' });
-              if (res.ok && res.conflict) toast({ title: 'Another version of this month is also published', description: 'See Versions above and resolve it.' });
+              const res = await run(() => periodTransition('publish', period.id), revision ? 'Correction published' : 'Published to Sonia');
+              if (res.ok && res.supersede_pending) toast({ title: 'Published — but marking the replaced version superseded did not finish', description: 'Finish it in History & recovery. Clients already see the correction.' });
+              if (res.ok && res.conflict) toast({ title: 'Another version of this month is also published', description: 'See History & recovery and resolve it.' });
             }}
-            disabled={busy || !isFinal || publishBlockers.length > 0 || (revision && replaceLabel !== period.label)}
+            disabled={busy || !isFinal || publishBlockers.length > 0 || (revision && !replaceConfirmed)}
             className="rounded-full"
           >
-            {revision ? 'Publish replacement' : 'Publish to Sonia'}
+            {revision ? 'Publish correction' : 'Publish to Sonia'}
           </Button>
         )}
         {isFinal && !isPublished && !superseded && !confirmReopen && (
