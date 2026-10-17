@@ -66,6 +66,8 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
               </>
             )}
 
+            {detail.data?.source === 'detail_report' && <DetailReconciliation data={detail.data} />}
+
             <div className="mt-8 flex items-center justify-between">
               <h4 className="text-xs uppercase tracking-[0.14em] text-stone-500">Transactions</h4>
               {txns && txns.length > 0 && (
@@ -104,6 +106,12 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
                           {t.description && t.vendor ? ` · ${t.description}` : ''}
                           {sub ? ` · ${sub}` : ''}
                         </p>
+                        {t.source === 'detail_report' && (
+                          <p className="truncate text-[11px] text-stone-400" data-testid="internal-row">
+                            {t.full_account_path}{t.payment_account ? ` · ${t.payment_account}` : ''}{t.qb_type ? ` · ${t.qb_type}` : ''}{t.qb_num ? ` #${t.qb_num}` : ''}
+                            {t.client_visible ? '' : ' · not shown to the client (account not confirmed or outside the cost groups)'}
+                          </p>
+                        )}
                       </div>
                       <p className={`shrink-0 text-sm tabular-nums ${t.amount < 0 ? 'text-emerald-700' : ''}`}>{fmtCurrency(t.amount)}</p>
                     </div>
@@ -115,5 +123,26 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
         )}
       </SheetContent>
     </Sheet>
+  );
+}
+
+// Phase 5b (internal): how the attached transaction detail compares with the
+// report line, and what the client sees for it.
+const usd = (c) => (c == null ? '—' : fmtCurrency(c / 100));
+const STATUS_TEXT = { reconciled: 'Reconciled', difference: 'Differs from the report', no_detail: 'No transactions in the detail', bva_missing: 'Report figure missing' };
+function DetailReconciliation({ data }) {
+  const e = data.reconciliation;
+  if (!e) return <p className="mt-6 text-sm text-stone-500" data-testid="detail-reconciliation">This line is not matched to the transaction detail.</p>;
+  return (
+    <div className={`mt-6 rounded-xl border p-4 text-sm ${e.status === 'reconciled' ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`} data-testid="detail-reconciliation" data-status={e.status}>
+      <p className="font-medium">Transaction detail: {STATUS_TEXT[e.status] || e.status}</p>
+      <p className="mt-1 tabular-nums text-stone-700">Report {usd(e.bva_total)} · detail {usd(e.detail_total)} · difference {usd(e.difference)}</p>
+      {e.withheld > 0 && <p className="mt-1 text-stone-600">{e.withheld} transaction(s) from accounts without a confirmed mapping are not shown to the client.</p>}
+      <p className="mt-2 text-xs text-stone-500">
+        Client sees: {data.client?.transactions?.length ? `${data.client.transactions.length} transaction(s) — ` : 'no transactions — '}
+        &ldquo;{data.client?.note}&rdquo;
+      </p>
+      <p className="mt-1 text-xs text-stone-400">Warnings only: the report figure is used on the dashboard and publishing is never blocked.</p>
+    </div>
   );
 }

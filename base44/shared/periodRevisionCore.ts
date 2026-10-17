@@ -12,7 +12,9 @@
 // the initial copy was complete and faithful; later edits and corrected imports
 // go through the normal finalization checks like any draft.
 
-export const COPY_ENTITIES = ['BudgetLine', 'CashAccount', 'Distribution', 'RecurringTransfer', 'SavingsSpend', 'Transaction'];
+// TransactionDetailChunk: Phase 5b transaction detail; a correction starts with
+// a copy of the published version's detail (replaced if detail is re-attached).
+export const COPY_ENTITIES = ['BudgetLine', 'CashAccount', 'Distribution', 'RecurringTransfer', 'SavingsSpend', 'Transaction', 'TransactionDetailChunk'];
 
 // Server-written version fields of a ReportingPeriod.
 export const REVISION_FIELDS = [

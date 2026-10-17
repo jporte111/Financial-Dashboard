@@ -223,6 +223,10 @@ export const CATALOGUE: Record<string, { title: string; action: string; where: s
   import_incomplete: { title: 'Budget lines are incomplete', action: 'Income and all three expense groups are required. Import the full workbook again.', where: IMPORT },
   required_line_value_missing: { title: 'A budget line is missing a figure', action: 'Shown as missing (never $0.00). Ask the bookkeeper to fill it in if it should have a value; nothing is required to publish.', where: WORKBOOK },
   detail_unassigned: { title: 'A watch-list row has no confirmed group', action: 'Shown as Unassigned and not counted in any group. Classify it (Fixed / Variable / Discretionary) if it belongs to one.', where: IMPORT },
+  // Phase 5b transaction detail (warnings only; the BVA figure is always used)
+  detail_difference: { title: 'Transaction detail differs from the report', action: 'The report figure is used on the dashboard. The drill-down shows the transactions with a neutral note (a group), or no transactions (a watch-list line). Check with the bookkeeper if the difference is unexpected; nothing is required to publish.', where: 'Import → Transaction Detail' },
+  detail_unmapped: { title: 'Transactions outside the three cost groups', action: 'They are kept internal and are not shown to the client or counted in any line. Nothing is required to publish.', where: 'Import → Transaction Detail' },
+  detail_unconfirmed: { title: 'Accounts without their own number are not confirmed', action: 'Confirm each account\'s full path and plain name in Import → Transaction Detail, then attach the detail again, to show its transactions to the client. Nothing is required to publish.', where: 'Import → Transaction Detail' },
   // import validation
   cash_total_mismatch: { title: 'Cash accounts do not add up to Total Cash', action: 'The workbook does not add up. Its printed Total Cash is shown; the sum of the accounts is kept for checking. Ask the bookkeeper to check the cash block.', where: IMPORT },
   cutoff_already_reported: { title: 'The previous period already covers this cutoff', action: 'Check the cutoff date; each period must cover a later month.', where: IMPORT },
@@ -359,6 +363,9 @@ const entry = (code: string, message: string | null, extra: any = {}) => {
 // cause is read once. Grouping changes NOTHING about the rules: each member
 // keeps its own code and severity; only structural members block.
 const CAUSE_DEFS = [
+  { key: 'transaction_detail', title: 'Transaction detail and the report', where: 'Import → Transaction Detail',
+    action: 'The report figures are used on the dashboard; these only affect the drill-down. Nothing is required to publish.',
+    match: fam('detail_difference', 'detail_unmapped', 'detail_unconfirmed') },
   { key: 'structure', title: 'Parts of the workbook could not be read', where: WORKBOOK,
     action: 'Where a required section is missing, unreadable or duplicated, the workbook cannot be shown faithfully: correct it and import again. Figures outside every recognized section are not imported until they can be mapped safely; check they are not figures the dashboard should show.',
     match: fam('section_missing', 'section_unparsed', 'duplicate_section_conflict', 'duplicate_section_identical', 'expense_group_missing', 'import_incomplete',

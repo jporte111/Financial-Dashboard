@@ -3,7 +3,7 @@
 // phase 'before' = the write is refused; 'after' = it happened, the response
 // was lost. `read(entity, op, args, result)` may replace what a read returns
 // (to simulate Base44's read-after-write lag: a stale view of recent writes).
-export const ENTITIES = ['ReportingPeriod', 'BudgetLine', 'CashAccount', 'Distribution', 'RecurringTransfer', 'SavingsSpend', 'Transaction', 'Account'];
+export const ENTITIES = ['ReportingPeriod', 'BudgetLine', 'CashAccount', 'Distribution', 'RecurringTransfer', 'SavingsSpend', 'Transaction', 'Account', 'TransactionDetailChunk', 'DetailAccountMap'];
 const clone = (x) => (x === undefined ? x : structuredClone(x));
 
 export function fakeService(seed = {}, { hook = null, read = null } = {}) {

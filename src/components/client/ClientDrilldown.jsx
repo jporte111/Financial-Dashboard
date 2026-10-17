@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { useDrilldownTransactions } from '@/lib/useDrilldownTransactions';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
@@ -23,8 +23,8 @@ function Stat({ label, value, hint = null }) {
 
 // Body shared by the desktop side sheet and the mobile full-screen sheet.
 function DrilldownBody({ line, periodId, monthsElapsed }) {
-  // The public endpoint resolves the line itself and returns no transaction
-  // rows (no transaction-detail source is approved for clients).
+  // The public endpoint resolves the line itself; rows come only from the
+  // published report's attached transaction detail (Phase 5b).
   const detail = useDrilldownTransactions(
     'publicCategoryTransactions',
     line ? { period_id: periodId, budget_line_id: line.id, category: line.category } : null,
@@ -60,8 +60,11 @@ function DrilldownBody({ line, periodId, monthsElapsed }) {
 }
 
 // What the transactions section says. A failed request is an error with a
-// retry -- never "no transactions".
+// retry -- never "no transactions". Phase 5b: rows come from the report's
+// attached transaction detail (date, payee, signed amount, plain account name),
+// grouped by account, with the server's neutral reconciliation note.
 function DrilldownDetail({ detail }) {
+  const [span, setSpan] = useState('ytd');
   if (detail.status === 'loading') return <p className="py-8 text-sm text-stone-400">Loading…</p>;
   if (detail.status === 'error') {
     return (
@@ -73,24 +76,73 @@ function DrilldownDetail({ detail }) {
       </div>
     );
   }
-  if (detail.status !== 'rows') {
+  const note = detail.data?.note || null;
+  if (detail.status === 'unavailable') {
     return (
       <p className="py-8 text-sm text-stone-500" data-testid="drilldown-unavailable">
         Transaction-level detail isn&apos;t shown on this dashboard. The figures above come from the monthly workbook.
       </p>
     );
   }
+  if (detail.status !== 'rows') {
+    return <p className="py-6 text-sm text-stone-500" data-testid="drilldown-note">{note || 'No transactions are listed for this category.'}</p>;
+  }
+  return <DetailList rows={detail.rows} note={note} dataMonth={detail.data?.data_month || null} span={span} setSpan={setSpan} />;
+}
+
+const monthName = (ym) => (ym ? format(new Date(`${ym}-15T00:00:00Z`), 'MMMM yyyy') : '');
+function DetailList({ rows, note, dataMonth, span, setSpan }) {
+  const shown = span === 'month' && dataMonth ? rows.filter((t) => String(t.date).startsWith(dataMonth)) : rows;
+  const groups = useMemo(() => {
+    const m = new Map();
+    for (const t of shown) {
+      const k = t.account || 'Other';
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(t);
+    }
+    return [...m].map(([account, list]) => ({ account, list: list.sort((a, b) => String(b.date).localeCompare(String(a.date))), total: list.reduce((s, t) => s + Number(t.amount || 0), 0) }))
+      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+  }, [shown]);
+  const many = shown.length > 40;
+  const tab = (k, label) => (
+    <button type="button" onClick={() => setSpan(k)} aria-pressed={span === k}
+      className={`rounded-full px-3 py-1 text-xs font-medium ${span === k ? 'bg-stone-900 text-white' : 'text-stone-600 hover:bg-stone-100'}`}>{label}</button>
+  );
   return (
-    <div className="mt-3 overflow-y-auto rounded-xl border border-stone-200 lg:max-h-[40vh]">
-      {detail.rows.map((t, i) => (
-        <div key={i} className={`flex items-start justify-between gap-4 px-4 py-3 ${i ? 'border-t border-stone-100' : ''}`}>
-          <div className="min-w-0">
-            <p className="text-sm font-medium">{t.vendor || t.description || '—'}</p>
-            <p className="truncate text-xs text-stone-500">{t.date ? format(new Date(t.date), 'MMM d, yyyy') : ''}</p>
-          </div>
-          <p className={`shrink-0 text-sm tabular-nums ${t.amount < 0 ? 'text-emerald-700' : ''}`}>{fmtCurrency(t.amount)}</p>
+    <div className="mt-3 space-y-3" data-testid="drilldown-rows">
+      {note && <p className="text-sm text-stone-600" data-testid="drilldown-note">{note}</p>}
+      {dataMonth && (
+        <div className="flex gap-1">
+          {tab('ytd', 'Year to date')}
+          {tab('month', monthName(dataMonth))}
         </div>
-      ))}
+      )}
+      {!shown.length ? (
+        <p className="py-4 text-sm text-stone-500">No transactions in {monthName(dataMonth)}.</p>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-stone-200">
+          {groups.map((g, gi) => (
+            <details key={g.account} open={!many} className={gi ? 'border-t border-stone-200' : ''} data-testid="drilldown-account">
+              <summary className="flex cursor-pointer items-center justify-between gap-3 bg-stone-50 px-4 py-2.5 text-sm">
+                <span className="min-w-0 truncate font-medium">{g.account} <span className="font-normal text-stone-400">· {g.list.length}</span></span>
+                <span className="shrink-0 tabular-nums">{fmtCurrency(g.total)}</span>
+              </summary>
+              {g.list.map((t, i) => (
+                <div key={i} className="flex items-start justify-between gap-4 border-t border-stone-100 px-4 py-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm">{t.payee || '—'}</p>
+                    <p className="text-xs text-stone-500">{t.date ? format(new Date(`${t.date}T00:00:00`), 'MMM d, yyyy') : ''}</p>
+                  </div>
+                  <p className={`shrink-0 text-right text-sm tabular-nums ${t.amount < 0 ? 'text-emerald-700' : ''}`}>
+                    {fmtCurrency(t.amount)}
+                    {t.amount < 0 && <span className="block text-[11px] text-emerald-700">Refund/Credit</span>}
+                  </p>
+                </div>
+              ))}
+            </details>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -171,7 +171,7 @@ describe('publicCategoryTransactions: server-side publication and line checks', 
     const { status, body } = await call({ period_id: 'p-aug', budget_line_id: 'l1' });
     expect(status).toBe(200);
     expect(body).toEqual({ period_id: 'p-aug', category: 'Groceries', detail_available: false, transactions: [] });
-    expect(Object.keys(body).sort()).toEqual([...PUBLIC_DRILLDOWN_KEYS].sort());
+    expect(Object.keys(body).every((k) => PUBLIC_DRILLDOWN_KEYS.includes(k))).toBe(true);
     expect(JSON.stringify(body)).not.toMatch(/Corner Market|June Market|6100 Food|import/);
   });
 
@@ -184,10 +184,10 @@ describe('publicCategoryTransactions: server-side publication and line checks', 
     expect(reads).not.toContain('Account');
   });
 
-  it('the client field allowlist is empty and can never include internal fields', () => {
-    expect(PUBLIC_TRANSACTION_FIELDS).toEqual([]); // no client fields approved yet
+  it('the client field allowlist is exactly the approved four and can never include internal fields', () => {
+    expect(PUBLIC_TRANSACTION_FIELDS).toEqual(['date', 'payee', 'amount', 'account']); // owner, Phase 5b (2026-10-17)
     expect(PUBLIC_TRANSACTION_FIELDS.filter((f) => NEVER_CLIENT_TRANSACTION_FIELDS.includes(f))).toEqual([]);
-    for (const f of ['internal_notes', 'review_status', 'review_flags', 'reviewed_by', 'qb_transaction_id', 'qb_account', 'account_id', 'full_account_path', 'copied_from', 'source', 'treatment', 'id']) {
+    for (const f of ['internal_notes', 'review_status', 'review_flags', 'reviewed_by', 'qb_transaction_id', 'qb_account', 'account_id', 'full_account_path', 'copied_from', 'source', 'treatment', 'id', 'memo', 'description', 'payment_account', 'qb_type', 'qb_num', 'account_number']) {
       expect(NEVER_CLIENT_TRANSACTION_FIELDS).toContain(f);
     }
   });
