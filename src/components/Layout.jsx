@@ -8,7 +8,7 @@ import { formatDateOnly } from '@/lib/finance';
 
 const NAV = [
   { to: '/', label: 'Dashboard' },
-  { to: '/budget', label: 'Budget (Excel)' },
+  { to: '/budget', label: 'Budget' },
   { to: '/savings', label: 'Savings & Distributions' },
   { to: '/cash', label: 'Cash' },
   { to: '/reports', label: 'Reports' },

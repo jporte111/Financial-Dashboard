@@ -52,15 +52,16 @@ export {
   savingsStatus as bvaSavingsStatus,
 } from './bva.js';
 
-// "$1,234.56 Under Budget" / "$1,234.56 Over Budget" / "On pace"
-// (positive variance = spending below the expected pace; negative = above)
-export function fmtVariance(amount, { cents = true } = {}) {
+// "$1,234.56 below expected pace" / "$1,234.56 above expected pace" / "On pace"
+// (positive variance = spending below the expected pace; negative = above).
+// basis 'month': the current month against its monthly budget instead.
+export function fmtVariance(amount, { cents = true, basis = 'pace' } = {}) {
   if (isMissingNumber(amount)) return MISSING_TEXT;
   const v = Number(amount);
   const rounded = Math.round(v * 100) / 100;
-  if (rounded === 0) return 'On pace';
-  const label = rounded > 0 ? 'Under Budget' : 'Over Budget';
-  return `${fmtCurrency(Math.abs(rounded), { cents })} ${label}`;
+  if (rounded === 0) return basis === 'month' ? 'On budget' : 'On pace';
+  const side = rounded > 0 ? 'below' : 'above';
+  return `${fmtCurrency(Math.abs(rounded), { cents })} ${side} ${basis === 'month' ? 'monthly budget' : 'expected pace'}`;
 }
 
 // "+2.91%" / "-0.65%" with an explicit sign
@@ -69,6 +70,15 @@ export const fmtSignedPct = (n) => {
   const v = Number(n) * 100;
   const sign = v > 0 ? '+' : v < 0 ? '-' : '';
   return `${sign}${Math.abs(v).toFixed(2)}%`;
+};
+
+// The pace gap in percentage points: "7.69 pts below pace" / "0.65 pts above
+// pace" / "On pace". `pct` is expected pace % − % used (positive = below pace).
+export const fmtPacePoints = (pct) => {
+  if (isMissingNumber(pct)) return MISSING_TEXT;
+  const v = Math.round(Number(pct) * 10000) / 100;
+  if (v === 0) return 'On pace';
+  return `${Math.abs(v).toFixed(2)} pts ${v > 0 ? 'below' : 'above'} pace`;
 };
 
 export const GROUP_LABELS = {
@@ -84,7 +94,7 @@ export const GROUP_LABELS = {
 // reconciliation table) have been removed along with QuickBooks itself;
 // these maps stay only because StatusPill and BudgetBar still merge them
 // with the current PACE_STATUS_* maps for a single shared lookup.
-export const STATUS_TEXT = { under: 'Under Budget', near: 'Near Budget', over: 'Over Budget' };
+export const STATUS_TEXT = { under: 'Below Budget', near: 'Near Budget', over: 'Above Budget' };
 
 export const STATUS_STYLES = {
   under: { text: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200', bar: 'bg-emerald-500', dot: 'bg-emerald-500' },

@@ -719,19 +719,24 @@ export default function BvaImportCenter() {
 
           {causes.length > 0 && (
             <div className="rounded-2xl border border-stone-200 bg-white p-6" data-testid="import-causes">
-              <p className="text-xs uppercase tracking-[0.14em] text-stone-500">Review before publishing, by cause</p>
+              <p className="text-xs uppercase tracking-[0.14em] text-stone-500">Before importing</p>
               <p className="mt-1 text-xs text-stone-500">
                 {serverReview?.causes ? 'Includes the checks against the previous month, for the draft as last applied.' : 'This workbook\'s own checks; the checks against the previous month run once the draft is applied.'}
                 {' '}The dashboard shows what the workbook contains; blanks are shown as missing (never $0.00). Warnings never block and need no written reason. Only a problem that stops the workbook being shown faithfully must be fixed.
               </p>
-              {[['blockers', 'Must be fixed — the workbook cannot be shown faithfully', 'text-rose-700'], ['warnings', 'Highlighted for review (never blocks)', 'text-amber-700']].map(([bucket, label, tone]) => (
-                causes.some((c) => c.bucket === bucket) ? (
-                  <div key={bucket} className="mt-4 text-sm" data-testid={`import-causes-${bucket}`}>
-                    <p className={`text-xs font-medium uppercase tracking-[0.12em] ${tone}`}>{label}</p>
-                    <CauseList causes={causes} bucket={bucket} />
-                  </div>
-                ) : null
-              ))}
+              {causes.some((c) => c.bucket === 'blockers') && (
+                <div className="mt-4 text-sm" data-testid="import-causes-blockers">
+                  <p className="text-xs font-medium uppercase tracking-[0.12em] text-rose-700">Must be fixed — the workbook cannot be shown faithfully</p>
+                  <CauseList causes={causes} bucket="blockers" />
+                </div>
+              )}
+              {/* Warnings are read in one place, the Validation Warnings tab. */}
+              {causes.some((c) => c.bucket === 'warnings') && (
+                <p className="mt-4 text-sm text-stone-600" data-testid="import-causes-warnings">
+                  {causes.filter((c) => c.bucket === 'warnings').length} warning cause{causes.filter((c) => c.bucket === 'warnings').length === 1 ? '' : 's'} — never blocking.
+                  {' '}Once the draft is imported they are listed, with what to do, in the <span className="font-medium">Validation Warnings</span> tab.
+                </p>
+              )}
             </div>
           )}
 

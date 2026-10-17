@@ -33,7 +33,7 @@ export default function Budget() {
       <section>
         <SectionHeading
           title="Budget Overview"
-          subtitle={`${vm.labels.displayMonth} · ${monthMode ? 'This Month' : 'Year to Date'} · BVA snapshot`}
+          subtitle={`${vm.labels.reportLine} · ${monthMode ? 'This Month' : 'Year to Date'}`}
         />
         {vm.states.groups === SECTION_STATE.NOT_IMPORTED ? (
           <p className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
@@ -50,7 +50,7 @@ export default function Budget() {
       </section>
 
       <section>
-        <SectionHeading title="Income" subtitle="Received against annual budgeted income · BVA snapshot" />
+        <SectionHeading title="Income" subtitle="Received against annual budgeted income" />
         <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
           <div className="hidden grid-cols-6 gap-4 border-b border-stone-100 px-6 py-3 text-xs uppercase tracking-[0.12em] text-stone-500 md:grid">
             <span className="col-span-2">Account / Category</span>

@@ -17,7 +17,7 @@ export const STAGES = [
   ['reports_reviewed', 'Reports Reviewed'],
 ];
 
-export default function PublishPanel({ period, reload }) {
+export default function PublishPanel({ period, reload, onShowWarnings = null }) {
   const [check, setCheck] = useState(null); // server-side evaluation, read-only
   const [busy, setBusy] = useState(false);
   const [confirmReopen, setConfirmReopen] = useState(false);
@@ -76,11 +76,23 @@ export default function PublishPanel({ period, reload }) {
   const review = check?.review || null;
   const comparedWith = check?.cross_period?.previous?.label || null;
   const statusLabel = isPublished ? 'Published' : isFinal ? 'Final (not yet published)' : 'Draft';
+  // Is the report ready? Only structural blockers stop it; warnings never do.
+  const blockerCount = review ? (Array.isArray(review.causes) ? review.causes.filter((c) => c.bucket === 'blockers').length : review.blockers.length) : publishBlockers.length;
+  const readiness = isPublished || superseded || !check
+    ? null
+    : blockerCount
+      ? { ok: false, text: `${blockerCount} problem${blockerCount === 1 ? '' : 's'} must be fixed before this report can be ${isFinal ? 'published' : 'finalized'} (listed below).` }
+      : { ok: true, text: isFinal ? 'Ready to publish — nothing blocks it.' : 'Ready to finalize in BVA Import — nothing blocks it.' };
 
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-6">
       <p className="font-display text-lg">Review & Publication — {plainLabel(period)}</p>
       <p className="mt-1 text-sm text-stone-600">Status: <span className="font-medium">{statusLabel}</span></p>
+      {readiness && (
+        <p className={`mt-3 rounded-xl border p-3 text-sm ${readiness.ok ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-800'}`} data-testid="readiness" data-ready={readiness.ok ? 'yes' : 'no'}>
+          {readiness.text}
+        </p>
+      )}
 
       <div className="mt-5">
         <p className="text-xs uppercase tracking-[0.12em] text-stone-500">Review Stage</p>
@@ -110,7 +122,7 @@ export default function PublishPanel({ period, reload }) {
 
       {!isPublished && review && (
         <div className="mt-6">
-          <ReviewGroups review={review} comparedWith={comparedWith} />
+          <ReviewGroups review={review} comparedWith={comparedWith} onShowWarnings={onShowWarnings} />
         </div>
       )}
 

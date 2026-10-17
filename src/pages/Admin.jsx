@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { usePeriodContext } from '@/lib/usePeriod';
 import { versionLabel, isSuperseded, isDiscarded } from '../../base44/shared/periodVersions.ts';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
@@ -14,6 +15,14 @@ import PeriodsManager from '@/components/admin/PeriodsManager';
 import TransactionsEditor from '@/components/admin/TransactionsEditor';
 import AccountHierarchyManager from '@/components/admin/AccountHierarchyManager';
 import ImportHub from '@/components/admin/ImportHub';
+import ValidationWarnings from '@/components/admin/ValidationWarnings';
+
+// The tabs component is untyped (every use is a type error); the new tab uses
+// these untyped aliases so it adds none.
+const TabTrigger = /** @type {any} */ (TabsTrigger);
+const TabPanel = /** @type {any} */ (TabsContent);
+
+const TABS = ['data', 'transactions', 'accounts', 'import', 'review', 'warnings', 'periods'];
 
 export default function Admin() {
   const { isAdmin, period, periodId, periods, setPeriodId, reload } = usePeriodContext();
@@ -23,7 +32,9 @@ export default function Admin() {
   const transfers = useEntityByPeriod('RecurringTransfer', periodId);
   const savings = useEntityByPeriod('SavingsSpend', periodId);
   // Controlled so the Periods list can open a period's Monthly Data.
-  const [tab, setTab] = useState(() => (period ? 'data' : 'import'));
+  // ?tab=warnings (from the Dashboard's warnings link) opens that tab.
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(() => (TABS.includes(params.get('tab')) ? params.get('tab') : period ? 'data' : 'import'));
   const openPeriod = (id) => {
     setPeriodId(id);
     setTab('data'); // read-only there when the period is published or final
@@ -70,6 +81,7 @@ export default function Admin() {
         <TabsTrigger value="accounts" className="rounded-full">Accounts</TabsTrigger>
         <TabsTrigger value="import" className="rounded-full">Import</TabsTrigger>
         <TabsTrigger value="review" className="rounded-full">Review & Publish</TabsTrigger>
+        <TabTrigger value="warnings" className="rounded-full">Validation Warnings</TabTrigger>
         <TabsTrigger value="periods" className="rounded-full">Periods</TabsTrigger>
       </TabsList>
 
@@ -151,7 +163,7 @@ export default function Admin() {
       </TabsContent>
 
       <TabsContent value="review" className="space-y-5">
-        <PublishPanel period={period} reload={reload} />
+        <PublishPanel period={period} reload={reload} onShowWarnings={() => setTab('warnings')} />
         {/* Versions are for audit and exceptional recovery; a corrected BVA is
             simply uploaded on the Import tab. Opens by itself when the month
             needs attention (conflicting versions, an unfinished replacement). */}
@@ -165,6 +177,10 @@ export default function Admin() {
           <ReviewQueue periodId={periodId} />
         </fieldset>
       </TabsContent>
+
+      <TabPanel value="warnings">
+        <ValidationWarnings period={period} onOpenReview={() => setTab('review')} />
+      </TabPanel>
 
       <TabsContent value="periods">
         <PeriodsManager periods={periods} selectedId={periodId} reload={reload} onOpen={openPeriod} />

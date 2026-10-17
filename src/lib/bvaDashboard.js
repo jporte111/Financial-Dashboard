@@ -128,6 +128,7 @@ function reportingLabels(period, elapsedMonths) {
   }
   if (monthIdx == null && period?.month) monthIdx = period.month - 1;
   const displayMonth = monthIdx != null && year ? `${MONTH_NAMES[monthIdx]} ${year}` : period?.label || '';
+  const reportMonth = period?.month && period?.year ? `${MONTH_NAMES[period.month - 1]} ${period.year}` : period?.label || '';
   const monthWord = monthIdx != null ? MONTH_NAMES[monthIdx] : '';
   // finalized_at is cleared to '' (Base44 rejects null for string fields), so test truthiness.
   const isFinal = period?.status === 'final' || !!period?.finalized_at;
@@ -137,8 +138,11 @@ function reportingLabels(period, elapsedMonths) {
     incomeThrough: monthWord ? `Income received through ${monthWord} ${year}` : null,
     expensesThrough: monthWord ? `Expenses through ${monthWord} ${year}` : null,
     cashAsOf: cutoff ? `As of ${fmtDate(cutoff)}` : null,
-    reportHeading: displayMonth ? `${displayMonth} report` : period?.label || '',
+    // Named by the REPORT month (the period: "July 9102 report"); the figures
+    // run through the cutoff ("data through June 30, 9102").
+    reportHeading: reportMonth ? `${reportMonth} report` : period?.label || '',
     dataThrough: cutoff ? `Data through ${fmtDate(cutoff)}` : null,
+    reportLine: [reportMonth ? `${reportMonth} report` : period?.label || '', cutoff ? `data through ${fmtDate(cutoff)}` : ''].filter(Boolean).join(' · '),
     lastUpdated: period?.last_updated ? fmtDate(period.last_updated) : null,
     statusLabel: isFinal ? 'Final' : 'Draft',
     isFinal,

@@ -72,9 +72,9 @@ export default function CategoryTable({ rows, monthMode = false, onSelect }) {
                 <PaceComparison view={c} savings />
               ) : (
                 <>
-                  <p className="tabular-nums"><Variance amount={monthMode ? c.varianceToBudget : c.varianceToPace} cents={false} /></p>
+                  <p className="tabular-nums"><Variance amount={monthMode ? c.varianceToBudget : c.varianceToPace} cents={false} basis={monthMode ? 'month' : 'pace'} /></p>
                   {!monthMode && (
-                    <p className="text-xs tabular-nums"><VariancePct pct={c.variancePct} amount={c.varianceToPace} showLabel={false} /></p>
+                    <p className="text-xs tabular-nums"><VariancePct pct={c.variancePct} amount={c.varianceToPace} /></p>
                   )}
                 </>
               )}

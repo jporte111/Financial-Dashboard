@@ -46,7 +46,7 @@ export default function Reports() {
       </section>
 
       <section>
-        <SectionHeading title="Trends" subtitle="Year to date, month by month, from the published reports (as clients see them)" />
+        <SectionHeading title="Trends" subtitle="Year to date, month by month, from the published reports (as clients see them). Each report is shown at the month its data runs through." />
         {trend === undefined ? <p className="text-sm text-stone-400">Loading…</p> : <TrendsSection trend={trend} />}
       </section>
     </div>

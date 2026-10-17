@@ -60,7 +60,7 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
                   <Stat label="Percent Used" value={fmtPct(pct100(c.percentUsed))} />
                   <Stat label="Expected YTD Budget" value={fmtCurrency(c.expectedYtdBudget)} />
                   <Stat label="Variance to Expected Pace" hint={PACE_VARIANCE_TOOLTIP} value={<Variance amount={c.varianceToPace} />} />
-                  <Stat label="Variance Percentage" value={<VariancePct pct={c.variancePct} amount={c.varianceToPace} showLabel={false} />} />
+                  <Stat label="Gap to Expected Pace" value={<VariancePct pct={c.variancePct} amount={c.varianceToPace} />} />
                   <Stat label="Current Month" value={line.month_actual == null ? '—' : fmtCurrency(line.month_actual)} />
                 </div>
               </>

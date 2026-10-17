@@ -70,7 +70,7 @@ export default function SavingsDistributions() {
   return (
     <div className="space-y-14">
       <section>
-        <SectionHeading title="Savings & Other Spending" subtitle="Extraordinary items funded from accumulated savings — excluded from the personal budget" />
+        <SectionHeading title="Expenses Paid From Savings" subtitle="Extraordinary items funded from accumulated savings — excluded from the personal budget" />
         <div className="grid gap-4 sm:grid-cols-3">
           {[
             ['Savings / Distributions In', savingsIn, SECTION_STATE.NEEDS_REVIEW],

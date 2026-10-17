@@ -1,14 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import { fmtVariance, fmtSignedPct, fmtCurrency, fmtPct } from './finance.js';
 
-describe('fmtVariance wording — "Over Budget" / "Under Budget" / "On pace"', () => {
-  it('a negative variance (spending above expected pace) reads "Over Budget"', () => {
-    expect(fmtVariance(-54321.09)).toBe('$54,321.09 Over Budget');
-    expect(fmtVariance(-4321.09)).toBe('$4,321.09 Over Budget');
+describe('fmtVariance wording — "above expected pace" / "below expected pace" / "On pace"', () => {
+  it('a negative variance (spending above expected pace) reads "above expected pace"', () => {
+    expect(fmtVariance(-54321.09)).toBe('$54,321.09 above expected pace');
+    expect(fmtVariance(-4321.09)).toBe('$4,321.09 above expected pace');
   });
 
-  it('a positive variance (spending below expected pace) reads "Under Budget"', () => {
-    expect(fmtVariance(54321.09)).toBe('$54,321.09 Under Budget');
+  it('a positive variance (spending below expected pace) reads "below expected pace"', () => {
+    expect(fmtVariance(54321.09)).toBe('$54,321.09 below expected pace');
+  });
+
+  it('never says Under/Over Budget for pace', () => {
+    for (const v of [-100, -1, 1, 100]) expect(fmtVariance(v)).not.toMatch(/Under Budget|Over Budget/);
+  });
+
+  it('the current month against its monthly budget says so', () => {
+    expect(fmtVariance(-120, { basis: 'month' })).toBe('$120.00 above monthly budget');
+    expect(fmtVariance(80, { basis: 'month' })).toBe('$80.00 below monthly budget');
+    expect(fmtVariance(0, { basis: 'month' })).toBe('On budget');
   });
 
   it('a zero variance reads "On pace"', () => {
@@ -23,7 +33,7 @@ describe('fmtVariance wording — "Over Budget" / "Under Budget" / "On pace"', (
   });
 
   it('respects the cents option', () => {
-    expect(fmtVariance(-54321.09, { cents: false })).toBe('$54,321 Over Budget');
+    expect(fmtVariance(-54321.09, { cents: false })).toBe('$54,321 above expected pace');
   });
 });
 
