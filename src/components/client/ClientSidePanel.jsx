@@ -1,17 +1,18 @@
 import React from 'react';
 import { fmtCurrency, fmtPct, pct100 } from '@/lib/finance';
 import BudgetBar from '@/components/BudgetBar';
+import { LABEL, NOT_PROVIDED } from '@/lib/reportText';
 
 const CARD = 'rounded-2xl border border-stone-300 bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)]';
-const LABEL = 'text-xs uppercase tracking-[0.14em] text-stone-500';
+const LABEL_CLASS = 'text-xs uppercase tracking-[0.14em] text-stone-500';
 
-function Stat({ label, value, missingText = '—' }) {
+// A missing figure is "—", with a quiet caption when it was not provided.
+function Stat({ label, value, missingNote = null }) {
   return (
     <div>
-      <p className={LABEL}>{label}</p>
-      <p className="mt-1 font-display text-2xl tracking-tight tabular-nums">
-        {value == null ? missingText : fmtCurrency(value)}
-      </p>
+      <p className={LABEL_CLASS}>{label}</p>
+      <p className="mt-1 font-display text-2xl tracking-tight tabular-nums">{fmtCurrency(value)}</p>
+      {value == null && missingNote && <p className="text-xs text-stone-400">{missingNote}</p>}
     </div>
   );
 }
@@ -26,8 +27,8 @@ export default function ClientSidePanel({ vm }) {
   return (
     <aside className="space-y-6 lg:sticky lg:top-32">
       <div className={CARD}>
-        <p className={LABEL}>Cash Reserves</p>
-        <p className="mt-2 font-display text-2xl tracking-tight tabular-nums">{fmtCurrency(cash.total)}</p>
+        {/* The total is the hero's Total Cash; here it closes the account list. */}
+        <p className={LABEL_CLASS}>Cash Accounts</p>
         {vm.labels.cashAsOf && <p className="mt-1 text-xs text-stone-400">{vm.labels.cashAsOf}</p>}
         {cash.accounts.length > 0 && (
           <div className="mt-4 divide-y divide-stone-100">
@@ -42,15 +43,19 @@ export default function ClientSidePanel({ vm }) {
             ))}
           </div>
         )}
+        <div className="mt-1 flex items-center justify-between gap-3 border-t border-stone-200 pt-2.5" data-testid="cash-total">
+          <p className="text-sm font-medium">{LABEL.totalCash}</p>
+          <p className="shrink-0 text-sm font-medium tabular-nums">{fmtCurrency(cash.total)}</p>
+        </div>
       </div>
 
       <div className={`${CARD} space-y-5`}>
-        <p className={LABEL}>Savings Allocation</p>
+        <p className={LABEL_CLASS}>Savings Allocation</p>
         <div className="grid grid-cols-2 gap-4">
-          <Stat label="Distributions In" value={sd.savingsIn} missingText="Not provided" />
-          <Stat label="Net Savings" value={sd.netSavings} missingText="Not provided" />
-          <Stat label="Expenses From Savings" value={sd.savingsSpend} missingText="Not provided" />
-          <Stat label="Distributions YTD" value={sd.distributionsYtd} />
+          <Stat label={LABEL.savingsIn} value={sd.savingsIn} missingNote={NOT_PROVIDED} />
+          <Stat label={LABEL.netSavings} value={sd.netSavings} missingNote={NOT_PROVIDED} />
+          <Stat label={LABEL.savingsSpend} value={sd.savingsSpend} missingNote={NOT_PROVIDED} />
+          <Stat label={LABEL.distributionsYtd} value={sd.distributionsYtd} />
         </div>
         {retainedPct != null && (
           <div>
@@ -75,7 +80,7 @@ export default function ClientSidePanel({ vm }) {
 
       {vm.distributions.entities.length > 0 && (
         <div className={CARD}>
-          <p className={LABEL}>Distributions by Entity</p>
+          <p className={LABEL_CLASS}>Distributions by Entity</p>
           <div className="mt-3 divide-y divide-stone-100">
             {vm.distributions.entities.map((e) => (
               <div key={e.id} className="flex items-center justify-between gap-3 py-2.5">
@@ -89,7 +94,7 @@ export default function ClientSidePanel({ vm }) {
 
       {vm.transfers.items.length > 0 && (
         <div className={CARD}>
-          <p className={LABEL}>Recurring Transfers</p>
+          <p className={LABEL_CLASS}>Recurring Transfers</p>
           <div className="mt-3 divide-y divide-stone-100">
             {vm.transfers.items.map((t) => (
               <div key={t.id} className="flex items-center justify-between gap-3 py-2.5">

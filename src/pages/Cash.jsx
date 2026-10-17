@@ -3,7 +3,7 @@ import { usePeriodContext } from '@/lib/usePeriod';
 import { useEntityByPeriod } from '@/lib/usePeriodEntities';
 import SectionHeading from '@/components/SectionHeading';
 import CashCard from '@/components/CashCard';
-import { fmtCurrency, isMissingNumber } from '@/lib/finance';
+import { fmtCurrency, isMissingNumber, formatDateOnly } from '@/lib/finance';
 import { effectiveRecord } from '../../base44/shared/sourceMissing.ts';
 
 export default function Cash() {
@@ -23,7 +23,10 @@ export default function Cash() {
 
   return (
     <div className="space-y-10">
-      <SectionHeading title="Cash" subtitle={`Balances as of ${period.label}`} />
+      <SectionHeading
+        title="Cash"
+        subtitle={period?.reporting_cutoff_date ? `${period.label} report · balances as of ${formatDateOnly(period.reporting_cutoff_date)}` : `${period.label} report`}
+      />
       <CashCard total={totalCash} reportedTotal={period?.printed_totals === true ? totalCash : null} accounts={list} defaultOpen />
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="rounded-2xl border border-stone-200 bg-white p-6">

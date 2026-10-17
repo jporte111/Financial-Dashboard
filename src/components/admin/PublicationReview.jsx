@@ -119,8 +119,9 @@ export function CauseList({ causes, bucket, extra = [] }) {
 
 // Blockers, needs review, warnings and completed checks. With `review.causes`
 // each bucket lists root causes (several findings read once); without it (an
-// older server), every finding is listed on its own.
-export function ReviewGroups({ review, comparedWith }) {
+// older server), every finding is listed on its own. With `onShowWarnings`
+// the warnings live in their own tab: here they are only counted, with a link.
+export function ReviewGroups({ review, comparedWith, onShowWarnings = null }) {
   if (!review) return null;
   const causes = Array.isArray(review.causes) ? review.causes : null;
   return (
@@ -130,6 +131,20 @@ export function ReviewGroups({ review, comparedWith }) {
         const byCause = causes ? causes.filter((c) => c.bucket === key) : null;
         const count = byCause ? byCause.length + checklist.length : review[key].length;
         const findings = byCause ? byCause.reduce((n, c) => n + c.members.length, 0) + checklist.length : count;
+        if (key === 'warnings' && onShowWarnings) {
+          return (
+            <div key={key} className="rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm" data-testid="review-warnings-pointer">
+              <p className="text-stone-700">
+                {count ? `${count === 1 ? '1 warning — it never blocks' : `${count} warnings — they never block`} finalizing or publishing.` : 'No warnings.'}{' '}
+                {count > 0 && (
+                  <button type="button" onClick={onShowWarnings} className="font-medium text-stone-900 underline decoration-stone-300 underline-offset-4 hover:decoration-stone-600">
+                    See Validation Warnings
+                  </button>
+                )}
+              </p>
+            </div>
+          );
+        }
         return (
           <div key={key} className={`rounded-xl border p-4 text-sm ${style}`} data-testid={`review-${key}`}>
             <p className="text-xs uppercase tracking-[0.12em] text-stone-600">

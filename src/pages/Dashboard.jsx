@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useBvaDashboard } from '@/lib/useBvaDashboard';
 import { fmtCurrency, fmtPct, FLAG_TEXT, pct100 } from '@/lib/finance';
 import PaceComparison from '@/components/PaceComparison';
-import WarningStatusPanel from '@/components/WarningStatusPanel';
+import { LABEL, NOT_PROVIDED } from '@/lib/reportText';
 import { SECTION_STATE, SECTION_STATE_TEXT } from '@/lib/bvaDashboard';
 import SnapshotCards from '@/components/SnapshotCards';
 import GroupOverview from '@/components/GroupOverview';
@@ -41,7 +41,7 @@ function StateNote({ state, className = '' }) {
 }
 
 export default function Dashboard() {
-  const { vm, loading, periodId, period } = useBvaDashboard();
+  const { vm, loading, periodId } = useBvaDashboard();
   const [selected, setSelected] = useState(null);
   const [detailFilter, setDetailFilter] = useState('all');
 
@@ -74,12 +74,19 @@ export default function Dashboard() {
         </div>
       )}
 
-      {vm.warnings.list.length > 0 && <WarningStatusPanel warnings={vm.warnings} period={period} />}
+      {vm.warnings.list.length > 0 && (
+        <p className="rounded-xl border border-stone-200 bg-white p-4 text-sm text-stone-600" data-testid="warnings-pointer">
+          {vm.warnings.list.length} validation warning{vm.warnings.list.length === 1 ? '' : 's'} for this report. Warnings never block publishing.{' '}
+          <Link to="/admin?tab=warnings" className="font-medium text-stone-800 underline decoration-stone-300 underline-offset-4 hover:decoration-stone-600">
+            See Validation Warnings
+          </Link>
+        </p>
+      )}
 
       <section>
         <SectionHeading
           title="Financial Snapshot"
-          subtitle={`${vm.labels.reportHeading}${vm.labels.dataThrough ? ` · ${vm.labels.dataThrough}` : ''} · ${
+          subtitle={`${vm.labels.reportLine} · ${
             vm.provenance.isBvaValidated ? 'BVA-validated' : vm.provenance.isLegacy ? 'Legacy — not BVA-validated' : 'Draft BVA import'
           }`}
         />
@@ -99,7 +106,7 @@ export default function Dashboard() {
 
       {!monthMode && vm.attention.length > 0 && (
         <section>
-          <SectionHeading title="Categories Needing Attention" subtitle="Flagged from validated BVA detail · largest Over Budget variance first" />
+          <SectionHeading title="Categories Needing Attention" subtitle="Flagged from validated BVA detail · furthest above expected pace first" />
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {vm.attention.map((d) => (
               <button
@@ -160,17 +167,15 @@ export default function Dashboard() {
         )}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
-            ['Distributions YTD', vm.savingsDistributions.distributionsYtd, 'Calculated from quarterly distributions', SECTION_STATE.MISSING],
-            ['Savings / Distributions In', vm.savingsDistributions.savingsIn, 'Not in the BVA workbook — enter and confirm in Admin', SECTION_STATE.NEEDS_REVIEW],
-            ['Expenses Paid From Savings', vm.savingsDistributions.savingsSpend, 'Not in the BVA workbook — enter and confirm in Admin', SECTION_STATE.NEEDS_REVIEW],
-            ['Net Savings', vm.savingsDistributions.netSavings, 'Savings In − Expenses From Savings', SECTION_STATE.MISSING],
-          ].map(([label, value, note, missingState]) => (
+            [LABEL.distributionsYtd, vm.savingsDistributions.distributionsYtd, 'Calculated from quarterly distributions'],
+            [LABEL.savingsIn, vm.savingsDistributions.savingsIn, 'Not in the BVA workbook — entered in Admin'],
+            [LABEL.savingsSpend, vm.savingsDistributions.savingsSpend, 'Not in the BVA workbook — entered in Admin'],
+            [LABEL.netSavings, vm.savingsDistributions.netSavings, 'Savings In − Expenses Paid From Savings'],
+          ].map(([label, value, note]) => (
             <div key={label} className="rounded-2xl border border-stone-200 bg-white p-6">
               <p className="text-xs uppercase tracking-[0.14em] text-stone-500">{label}</p>
-              <p className={`mt-3 font-display tracking-tight tabular-nums ${value == null ? 'text-lg text-stone-400' : 'text-2xl'}`}>
-                {value == null ? 'Not provided' : fmtCurrency(value)}
-              </p>
-              {note && <p className="mt-2 text-xs text-stone-400">{note}</p>}
+              <p className="mt-3 font-display text-2xl tracking-tight tabular-nums">{fmtCurrency(value)}</p>
+              <p className="mt-2 text-xs text-stone-400">{value == null ? `${NOT_PROVIDED}. ` : ''}{note}</p>
             </div>
           ))}
         </div>

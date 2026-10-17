@@ -86,7 +86,7 @@ export default function SnapshotCards({ vm }) {
         )}
       </Card>
 
-      <Card label="YTD Income" value={fmtCurrency(s.ytdIncome)} subtitle={vm.labels.incomeThrough}>
+      <Card label="Total Income (YTD)" value={fmtCurrency(s.ytdIncome)} subtitle={vm.labels.incomeThrough}>
         <DoesNotAddUp shown={s.ytdIncome} calc={s.incomeCalculatedYtd} rows="income lines" />
       </Card>
       <Card
@@ -98,7 +98,7 @@ export default function SnapshotCards({ vm }) {
       </Card>
       <Card label="Remaining Income Budget" value={fmtCurrency(s.remainingIncomeBudget)} />
 
-      <Card label="YTD Expenses" value={fmtCurrency(s.ytdExpenses)} subtitle={vm.labels.expensesThrough}>
+      <Card label="Total Expenses (YTD)" value={fmtCurrency(s.ytdExpenses)} subtitle={vm.labels.expensesThrough}>
         <DoesNotAddUp shown={s.ytdExpenses} calc={s.expensesCalculatedYtd} rows="expense groups" />
       </Card>
       <Card

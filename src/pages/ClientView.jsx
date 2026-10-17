@@ -56,6 +56,7 @@ export default function ClientView() {
           </div>
         ) : (
           <>
+            <p className="mt-6 text-sm text-stone-500 sm:mt-8" data-testid="report-line">{vm.labels.reportLine}</p>
             <HeroMetrics vm={vm} />
 
             <div className="mt-12 grid gap-8 lg:grid-cols-12">
@@ -64,7 +65,7 @@ export default function ClientView() {
                   <div>
                     <h2 className="font-display text-xl tracking-tight">Budget vs Actuals</h2>
                     <p className="mt-1 text-sm text-stone-500">
-                      Year-to-date performance against expected pace · click a category for its transactions
+                      Year to date against expected pace · open a group or category for its transactions
                     </p>
                   </div>
                 </div>
@@ -85,13 +86,12 @@ export default function ClientView() {
 
             <section className="mt-14">
               <h2 className="font-display text-xl tracking-tight">Trends</h2>
-              <p className="mt-1 mb-5 text-sm text-stone-500">Year to date, month by month, from your published reports</p>
+              <p className="mt-1 mb-5 text-sm text-stone-500">Year to date, month by month, from your published reports. Each report is shown at the month its data runs through.</p>
               <TrendsSection trend={trend} />
             </section>
 
             <footer className="mt-16 border-t border-stone-200 py-8 text-xs text-stone-400">
-              Prepared by Namaste Financial Management · {vm.labels.reportHeading}
-              {vm.labels.dataThrough ? ` · ${vm.labels.dataThrough}` : ''}
+              Prepared by Namaste Financial Management · {vm.labels.reportLine}
             </footer>
           </>
         )}

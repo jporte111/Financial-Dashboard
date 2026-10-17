@@ -68,7 +68,7 @@ describe('favorable / unfavorable sign convention (requirements 11, 12)', () => 
     expect(c.varianceToPace).toBeGreaterThan(0);
     expect(isFavorable(c.varianceToPace)).toBe(true);
     expect(c.status).toBe(STATUS.UNDER);
-    expect(STATUS_TEXT[c.status]).toBe('Under Expected Pace');
+    expect(STATUS_TEXT[c.status]).toBe('Below Expected Pace');
   });
   it('negative variance is unfavorable', () => {
     // expected 140000, actual 175000 -> -35000
@@ -76,7 +76,7 @@ describe('favorable / unfavorable sign convention (requirements 11, 12)', () => 
     expect(c.varianceToPace).toBeLessThan(0);
     expect(isUnfavorable(c.varianceToPace)).toBe(true);
     expect(c.status).toBe(STATUS.OVER);
-    expect(STATUS_TEXT[c.status]).toBe('Over Expected Pace');
+    expect(STATUS_TEXT[c.status]).toBe('Above Expected Pace');
   });
   it('exact pace is On Pace', () => {
     const c = computeYtd({ actualYtd: 70000, annualBudget: 120000 }, 7); // 120000 * 7/12 = 70000
