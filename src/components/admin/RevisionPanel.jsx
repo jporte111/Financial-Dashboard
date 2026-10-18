@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { periodTransition } from '@/lib/periodTransition';
-import { monthState, monthKey, versionLabel, isRevision, isSuperseded, isOpenRevision, isFinal } from '../../../base44/shared/periodVersions.ts';
+import { monthState, monthKey, versionLabel, isRevision, isSuperseded, isOpenRevision, isFinal, revisionNumber } from '../../../base44/shared/periodVersions.ts';
+import { StateChip } from '@/components/ContextBar';
 
 const btn = 'rounded-full border px-3 py-1.5 text-xs font-medium uppercase tracking-[0.14em] disabled:opacity-50 disabled:cursor-not-allowed';
 const btnPrimary = `${btn} border-stone-900 bg-stone-900 text-white hover:bg-stone-700`;
@@ -95,11 +96,12 @@ export default function RevisionPanel({ period, periods, reload, onOpen }) {
           .slice()
           .sort((a, b) => (Number(b.revision_number) || 1) - (Number(a.revision_number) || 1))
           .map((v) => (
-            <li key={v.id}>
-              <button type="button" className={`underline-offset-4 hover:underline ${v.id === period.id ? 'font-semibold' : ''}`} onClick={() => onOpen?.(v.id)}>
-                {versionLabel(v)}
+            <li key={v.id} className="flex flex-wrap items-center gap-2">
+              <button type="button" className={`underline-offset-4 hover:underline ${v.id === period.id ? 'font-semibold' : ''}`} onClick={() => onOpen?.(v.id)} aria-current={v.id === period.id ? 'true' : undefined}>
+                {v.label} · revision {revisionNumber(v)}
               </button>
-              {current?.id === v.id && <span className="ml-2 text-xs text-emerald-700">clients see this version</span>}
+              <StateChip period={v} />
+              {current?.id === v.id && <span className="text-xs text-emerald-700">clients see this version</span>}
             </li>
           ))}
       </ul>
@@ -148,10 +150,10 @@ export default function RevisionPanel({ period, periods, reload, onOpen }) {
               <button type="button" className={btnPrimary} disabled={busy} onClick={continueCopy}>Continue copy</button>
             )}
             {!confirmDiscard ? (
-              <button type="button" className={btnGhost} disabled={busy} onClick={() => setConfirmDiscard(true)}>Discard revision…</button>
+              <button type="button" className={btnGhost} disabled={busy} onClick={() => setConfirmDiscard(true)}>Discard this draft correction…</button>
             ) : (
               <>
-                <button type="button" className={`${btn} border-rose-700 bg-rose-700 text-white`} disabled={busy} onClick={discard}>Discard this revision</button>
+                <button type="button" className={`${btn} border-rose-700 bg-rose-700 text-white`} disabled={busy} onClick={discard}>Discard the {period.label} draft correction</button>
                 <button type="button" className={btnGhost} onClick={() => setConfirmDiscard(false)}>Cancel</button>
               </>
             )}
@@ -185,7 +187,7 @@ export default function RevisionPanel({ period, periods, reload, onOpen }) {
             onChange={(e) => setReason(e.target.value)}
           />
           <button type="button" className={`${btnPrimary} mt-2`} disabled={busy || reason.trim().length < MIN_REASON} onClick={create}>
-            {busy ? 'Copying…' : 'Create revision'}
+            {busy ? 'Copying…' : `Create a correction of ${period.label}`}
           </button>
         </div>
       )}

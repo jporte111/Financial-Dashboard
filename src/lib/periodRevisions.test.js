@@ -9,6 +9,7 @@ import { buildPublicDashboard } from '../../base44/shared/publicDashboardCore.ts
 import { transactionsForCategory } from '../../base44/shared/categoryTransactionsCore.ts';
 import { handlePublicCategoryRequest } from '../../base44/shared/publicDashboardCore.ts';
 import { monthState } from '../../base44/shared/periodVersions.ts';
+import { withPublishExpect } from './__fixtures__/publishExpect.js';
 import { planBvaImport, importTarget } from './bvaImport.js';
 import { validateBva } from './bvaValidation.js';
 import { cleanParsed, SAMPLE_CUTOFF } from './__fixtures__/bvaSample.js';
@@ -50,7 +51,7 @@ function seed({ published = true, transactions = 30 } = {}) {
     Account: [{ id: 'acct1', account_name: cats[0], top_level_group: 'fixed', source: 'quickbooks' }],
   };
 }
-const t = (db, action, periodId, extra = {}, user = ADMIN, now = NOW) => handlePeriodTransition(db.base44, { action, period_id: periodId, ...extra }, user, now);
+const t = async (db, action, periodId, extra = {}, user = ADMIN, now = NOW) => handlePeriodTransition(db.base44, await withPublishExpect(db.base44.asServiceRole.entities, { action, period_id: periodId, ...extra }), user, now);
 const rowsOf = (db, entity, pid) => db.rows(entity).filter((r) => r.period_id === pid);
 const ENTS = ['BudgetLine', 'CashAccount', 'Distribution', 'RecurringTransfer', 'SavingsSpend', 'Transaction'];
 async function revise(db, source = 'orig') {

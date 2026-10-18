@@ -23,6 +23,9 @@ import { fmtCurrency, fmtPct } from '@/lib/finance';
 import BvaCorrectionsPanel from '@/components/admin/BvaCorrectionsPanel';
 import { SourceValueControl } from '@/components/admin/BvaCorrectionCards';
 import { Button } from '@/components/ui/button';
+// Untyped alias for the button component (its uses are type errors); the
+// Phase 9a Finalize button goes through it so it adds none.
+const Btn = /** @type {any} */ (Button);
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { FileSpreadsheet, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
@@ -543,6 +546,9 @@ export default function BvaImportCenter() {
 
   const R = validation?.reconciled;
   const openWarnings = (validation?.warnings || []).filter((w) => w.blocksFinalize);
+  // Phase 9a: the import's own month (from the workbook, confirmed above) names every action.
+  const monthName = confirm.month && confirm.year ? `${MONTHS[Number(confirm.month) - 1]} ${confirm.year}` : 'this month';
+  const importName = `${monthName}${intent?.mode === 'correct' || intent?.mode === 'continue' ? ' correction' : ''}`;
   const canFinalize = applied && !applied.finalized && openWarnings.length === 0;
   const SECTION_LABEL = { cash: 'Cash', distributions: 'Distributions', income: 'Income', expenseSummary: 'Expense groups', detail: 'Watch list (DETAIL)', transfers: 'Recurring transfers' };
   const sectionCount = { cash: R?.cash.accounts.length, distributions: R?.distributions.entities.length, income: R?.income.categories.length, expenseSummary: R?.expenses.groups.length, detail: R?.detail.categories.length, transfers: R?.transfers.items.length };
@@ -807,19 +813,19 @@ export default function BvaImportCenter() {
         <div className="flex flex-wrap items-center gap-3">
           <Button className="rounded-full" disabled={busy || !confirm.month || !confirm.year || !confirm.cutoffDate || !!duplicate || intent?.mode === 'blocked'} onClick={apply}>
             {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {applied ? 'Re-apply import (writes corrections to the draft)' : intent?.mode === 'correct' || intent?.mode === 'continue' ? 'Import correction' : 'Import (draft)'}
+            {applied ? `Re-apply import to ${importName} (writes corrections to the draft)` : intent?.mode === 'correct' || intent?.mode === 'continue' ? `Import correction of ${monthName}` : `Import ${monthName} as draft`}
           </Button>
           {applied && !applied.finalized && (
-            <Button variant="outline" className="rounded-full" disabled={busy || !canFinalize} onClick={finalize}>
-              Mark Final (validated)
-            </Button>
+            <Btn variant="outline" className="rounded-full" disabled={busy || !canFinalize} onClick={finalize}>
+              Finalize {importName}
+            </Btn>
           )}
           {applied && !applied.finalized && openWarnings.length > 0 && (
             <span className="text-xs text-rose-700">
               {`${openWarnings.length} problem(s) must be fixed before finalizing.`}
             </span>
           )}
-          {applied?.finalized && <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Final</span>}
+          {applied?.finalized && <span className="inline-flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-4 w-4" aria-hidden="true" /> {importName} is final — not published</span>}
         </div>
       )}
 

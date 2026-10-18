@@ -120,3 +120,24 @@ export function versionLabel(p: any) {
   const state = isDiscarded(p) ? 'discarded' : isSuperseded(p) ? 'superseded' : p.published ? 'published' : isFinal(p) ? 'final' : 'draft';
   return n > 1 || isSuperseded(p) ? `${p.label} · revision ${n} (${state})` : p.label;
 }
+
+// Phase 9a (B1, owner 2026-10-18): the server publishes only the version the
+// admin confirmed in the publish dialog -- the same record, month, year and
+// revision, replacing the same version (null for a first publication).
+export const publishExpectation = (p: any) => ({
+  period_id: p?.id || null,
+  month: Number(p?.month) || null,
+  year: Number(p?.year) || null,
+  revision_number: revisionNumber(p),
+  replaces: p?.supersedes || null,
+});
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const describeExpectation = (e: any) => `${MONTH_NAMES[Number(e?.month) - 1] || 'an unknown month'} ${e?.year || ''}${Number(e?.revision_number) > 1 ? ` revision ${e.revision_number}` : ''}`.trim();
+// null when `expect` names exactly this version; otherwise why not.
+export function publishTargetMismatch(p: any, expect: any): string | null {
+  if (!expect || typeof expect !== 'object') return 'missing';
+  const want = publishExpectation(p);
+  const same = String(expect.period_id || '') === String(want.period_id) && Number(expect.month) === want.month && Number(expect.year) === want.year
+    && Number(expect.revision_number) === want.revision_number && String(expect.replaces || '') === String(want.replaces || '');
+  return same ? null : `confirmed ${describeExpectation(expect)}, but this is ${versionLabel(p) || describeExpectation(want)}`;
+}

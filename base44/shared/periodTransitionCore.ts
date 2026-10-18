@@ -15,7 +15,8 @@
 //   check       evaluate finalize and publish rules (including the cross-period
 //               checks, returned with their warnings); writes nothing
 //   finalize    draft -> final (records override / exclusion reasons); NOT published
-//   publish     final -> published
+//   publish     final -> published; only with `expect` naming exactly this
+//               record, month, year, revision and replaced version (B1)
 //   reopen      EXCEPTIONAL: published or final -> draft (unpublishes; figures
 //               untouched). Requires a written reason; for a published period
 //               also the exact period label as confirmation. Every reopen is
@@ -46,7 +47,7 @@
 // Superseded and discarded versions are read-only: every state change is refused.
 
 import { evaluateFinalize, evaluatePublish, recordedOverrides, hasInitializedState, dataWarnings } from './publishGate.ts';
-import { monthState, isRevision, isSuperseded, isDiscarded, isFinal, revisionNumber } from './periodVersions.ts';
+import { monthState, isRevision, isSuperseded, isDiscarded, isFinal, revisionNumber, publishTargetMismatch } from './periodVersions.ts';
 import { REVISION_FIELDS, REQUIRED_REVISION_FIELDS, SchemaOutOfDate, revisionRecord, copyStep, discardStep } from './periodRevisionCore.ts';
 import { alignedPrevious, alignedNext, crossPeriodChecks, laterMonthChecks, UNAVAILABLE } from './crossPeriod.ts';
 import { CHECKLIST_ITEMS, CHECKLIST_KEYS, partHashes, warningCodes, checklistStatus, confirmationRecord, itemMessage, isDataBlocker, buildReview } from './checklistCore.ts';
@@ -594,6 +595,10 @@ export async function handlePeriodTransition(base44, body = {}, user, now = new 
   }
 
   if (action === 'publish') {
+    // B1 (Phase 9a): only the month and version confirmed in the publish dialog.
+    const mismatch = publishTargetMismatch(period, body.expect);
+    if (mismatch === 'missing') return refuse('publish_unconfirmed', 'Publishing needs the month and version you confirmed. Nothing was published: reload, then use "Publish to client page" again.');
+    if (mismatch) return refuse('publish_target_mismatch', `Nothing was published: you ${mismatch}. Reload and check which month you are working on.`);
     const state = monthState(await monthVersions());
     // A version replaced by a published newer one (awaiting cleanup) is never
     // published again.

@@ -16,6 +16,7 @@ import TransactionsEditor from '@/components/admin/TransactionsEditor';
 import AccountHierarchyManager from '@/components/admin/AccountHierarchyManager';
 import ImportHub from '@/components/admin/ImportHub';
 import ValidationWarnings from '@/components/admin/ValidationWarnings';
+import { periodState } from '@/lib/periodState';
 
 // The tabs component is untyped (every use is a type error); the new tab uses
 // these untyped aliases so it adds none.
@@ -31,10 +32,18 @@ export default function Admin() {
   const dists = useEntityByPeriod('Distribution', periodId);
   const transfers = useEntityByPeriod('RecurringTransfer', periodId);
   const savings = useEntityByPeriod('SavingsSpend', periodId);
-  // Controlled so the Periods list can open a period's Monthly Data.
-  // ?tab=warnings (from the Dashboard's warnings link) opens that tab.
-  const [params] = useSearchParams();
-  const [tab, setTab] = useState(() => (TABS.includes(params.get('tab')) ? params.get('tab') : period ? 'data' : 'import'));
+  // Phase 9a: the tab lives in the URL (?tab=), so reload and back/forward
+  // keep it; ?tab=warnings (from the Dashboard's warnings link) opens that tab.
+  const [params, setParams] = useSearchParams();
+  const [fallbackTab] = useState(() => (period ? 'data' : 'import'));
+  const tab = TABS.includes(params.get('tab')) ? params.get('tab') : fallbackTab;
+  const setTab = (next) => setParams((prev) => {
+    if (prev.get('tab') === next) return prev;
+    const q = new URLSearchParams(prev);
+    q.set('tab', next);
+    return q;
+  }, { replace: true });
+  // The Periods list opens a period's Monthly Data.
   const openPeriod = (id) => {
     setPeriodId(id);
     setTab('data'); // read-only there when the period is published or final
@@ -54,7 +63,7 @@ export default function Admin() {
           </>
         ) : (
           <>
-            <strong>{period.label}</strong> is {period.published ? 'published' : 'final'} and read-only here. If you receive an updated BVA
+            <strong>{period.label}</strong> ({periodState(period).label}) is read-only here. If you receive an updated BVA
             workbook, upload it on the <strong>Import</strong> tab
             {period.published
               ? ' — clients keep seeing this report until you publish the correction.'
@@ -163,7 +172,7 @@ export default function Admin() {
       </TabsContent>
 
       <TabsContent value="review" className="space-y-5">
-        <PublishPanel period={period} reload={reload} onShowWarnings={() => setTab('warnings')} />
+        <PublishPanel period={period} periods={periods} reload={reload} onShowWarnings={() => setTab('warnings')} />
         {/* Versions are for audit and exceptional recovery; a corrected BVA is
             simply uploaded on the Import tab. Opens by itself when the month
             needs attention (conflicting versions, an unfinished replacement). */}

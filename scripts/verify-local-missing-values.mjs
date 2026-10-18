@@ -21,6 +21,7 @@ import { parseBvaWorkbook } from '../src/lib/bvaParser.js';
 import { validateBva } from '../src/lib/bvaValidation.js';
 import { planBvaImport, groupMapFromLines } from '../src/lib/bvaImport.js';
 import { totalsWrite } from '../src/lib/periodTotals.js';
+import { withPublishExpect } from '../src/lib/__fixtures__/publishExpect.js';
 
 const SERVER = process.env.SERVER || '';
 const APP = process.env.SONIA_APP_ID || '6a80ccf1dac2259ae9870f29';
@@ -46,7 +47,8 @@ const admin = mk(login?.access_token || login?.token);
 check('admin session', (await admin.auth.me())?.role === 'admin');
 const E = admin.entities;
 const transition = async (action, periodId, extra = {}) => {
-  const r = await attempt(() => admin.functions.invoke('periodTransition', { action, period_id: periodId, ...extra }));
+  const body = await withPublishExpect(admin.entities, { action, period_id: periodId, ...extra });
+  const r = await attempt(() => admin.functions.invoke('periodTransition', body));
   return r.ok ? { status: 200, body: r.value?.data ?? r.value } : { status: r.status, body: r.data };
 };
 

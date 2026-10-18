@@ -9,6 +9,8 @@ import {
 } from '../../../base44/shared/detailReport.ts';
 import { attachRefusal } from '../../../base44/shared/detailServer.ts';
 import { plainLabel } from '../../../base44/shared/periodVersions.ts';
+import { reportName } from '@/lib/periodState';
+import { StateChip } from '@/components/ContextBar';
 import { CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
 
 // Phase 5b: attach the QuickBooks Transaction Report (Excel) to the selected
@@ -97,7 +99,7 @@ export default function TransactionDetailImport() {
   return (
     <div className="space-y-5" data-testid="detail-import">
       <div className="rounded-2xl border border-stone-200 bg-white p-6">
-        <p className="font-display text-lg">Transaction Detail — {plainLabel(period)}</p>
+        <p className="flex flex-wrap items-center gap-2 font-display text-lg">Transaction Detail — {period.label} <StateChip period={period} /></p>
         <p className="mt-1 text-sm text-stone-600">
           Attach the QuickBooks <span className="font-medium">Transaction Report</span> (exported to Excel) to this report as drill-down detail.
           The report figures stay exactly as the BVA has them; differences are shown as warnings and never block publishing.
@@ -185,7 +187,7 @@ export default function TransactionDetailImport() {
 
           <div className="flex flex-wrap items-center gap-3">
             <button type="button" className="rounded-full bg-stone-900 px-5 py-2 text-sm font-medium text-white disabled:opacity-50" disabled={busy || !!refusal || built.issues.length > 0} onClick={attach} data-testid="detail-attach">
-              {busy ? <Loader2 className="mr-1 inline h-4 w-4 animate-spin" /> : null}{di ? 'Replace the attached detail' : 'Attach to this report'}
+              {busy ? <Loader2 className="mr-1 inline h-4 w-4 animate-spin" /> : null}{di ? `Replace the detail attached to ${reportName(period)}` : `Attach to ${reportName(period)}`}
             </button>
             {progress && <span className="text-sm text-stone-500">{progress}</span>}
           </div>

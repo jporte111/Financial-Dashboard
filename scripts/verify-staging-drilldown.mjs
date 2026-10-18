@@ -15,6 +15,7 @@ import { planBvaImport } from '../src/lib/bvaImport.js';
 import { validateBva } from '../src/lib/bvaValidation.js';
 import { cleanParsed } from '../src/lib/__fixtures__/bvaSample.js';
 import { PUBLISH_CHECKLIST } from '../base44/shared/publishGate.ts';
+import { withPublishExpect } from '../src/lib/__fixtures__/publishExpect.js';
 
 const STAGING = '6ac5040ff86172a58191d35a';
 const PRODUCTION = '6a80ccf1dac2259ae9870f29';
@@ -44,7 +45,7 @@ async function steady(client, fn, body) {
   }
   return call(client, fn, body);
 }
-const transition = (action, period_id, extra = {}) => call(admin, 'periodTransition', { action, period_id, ...extra });
+const transition = async (action, period_id, extra = {}) => call(admin, 'periodTransition', await withPublishExpect(admin.entities, { action, period_id, ...extra }));
 const privileged = (code) => execFileSync('npx', ['base44', 'exec', '--privileged'], { input: `if (Deno.env.get('BASE44_APP_ID') !== '${STAGING}') throw new Error('not staging');\n${code}`, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
 const canon = (x) => (Array.isArray(x) ? x.map(canon).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) : x && typeof x === 'object' ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, canon(x[k])])) : x);
 const hash = (x) => crypto.createHash('sha256').update(JSON.stringify(canon(x))).digest('hex');

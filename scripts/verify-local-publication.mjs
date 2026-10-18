@@ -20,6 +20,7 @@
 // Refuses any server that is not localhost. Prints PASS/FAIL, HTTP statuses
 // and field names only -- never tokens or codes.
 import { createClient } from '@base44/sdk';
+import { withPublishExpect } from '../src/lib/__fixtures__/publishExpect.js';
 
 const SERVER = process.env.SERVER || '';
 const APP = process.env.SONIA_APP_ID || '6a80ccf1dac2259ae9870f29';
@@ -52,7 +53,8 @@ const BL = admin.entities.BudgetLine;
 const PROTECTED = ['status', 'published', 'bva_import_status', 'finalized_at', 'finalized_by', 'bva_overrides', 'reopen_log'];
 const CHECKLIST = ['categories_reviewed', 'classes_reviewed', 'refunds_reviewed', 'income_reviewed', 'cash_confirmed', 'distributions_confirmed', 'budget_report_reviewed'];
 const transition = async (action, periodId, extra = {}) => {
-  const r = await attempt(() => admin.functions.invoke('periodTransition', { action, period_id: periodId, ...extra }));
+  const body = await withPublishExpect(admin.entities, { action, period_id: periodId, ...extra });
+  const r = await attempt(() => admin.functions.invoke('periodTransition', body));
   return r.ok ? { status: 200, body: r.value?.data ?? r.value } : { status: r.status, body: r.data };
 };
 const snapshot = async (id) => { const { updated_date, ...rest } = await RP.get(id); return JSON.stringify(rest); };

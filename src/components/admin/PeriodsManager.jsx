@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { versionLabel, isSuperseded, isRevision } from '../../../base44/shared/periodVersions.ts';
+import { isRevision, isSuperseded, revisionNumber } from '../../../base44/shared/periodVersions.ts';
+import { StateChip } from '@/components/ContextBar';
 import { periodTransition } from '@/lib/periodTransition';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -66,13 +67,14 @@ export default function PeriodsManager({ periods, selectedId, reload, onOpen }) 
             data-testid={`period-row-${p.id}`}
           >
             <div>
-              <p className="font-medium">
-                {versionLabel(p)}
-                {selected && <span className="ml-2 rounded-full bg-stone-900 px-2 py-0.5 text-[10px] font-normal uppercase tracking-wide text-white">Selected</span>}
+              <p className="flex flex-wrap items-center gap-2 font-medium">
+                {p.label}
+                {revisionNumber(p) > 1 && <span className="text-xs font-normal text-stone-500">revision {revisionNumber(p)}</span>}
+                <StateChip period={p} />
+                {selected && <span className="rounded-full bg-stone-900 px-2 py-0.5 text-[10px] font-normal uppercase tracking-wide text-white">Selected</span>}
               </p>
               <p className="text-xs text-stone-500">
-                {p.status ? p.status.replace(/_/g, ' ') : 'not initialized (cannot be finalized)'}{p.published ? ' · published' : ' · not published'}
-                {isSuperseded(p) ? ' · superseded (kept, not shown to clients)' : ''}
+                Review stage: {p.status ? p.status.replace(/_/g, ' ') : 'not initialized (cannot be finalized)'}
                 {isRevision(p) && p.copy_status !== 'verified' ? ` · copy ${p.copy_status || 'unverified'}` : ''}
               </p>
             </div>

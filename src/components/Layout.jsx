@@ -3,6 +3,8 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { base44 } from '@/api/base44Client';
 import { PeriodProvider, usePeriodData } from '@/lib/usePeriod';
 import PeriodSelector from '@/components/PeriodSelector';
+import ContextBar from '@/components/ContextBar';
+import { PERIOD_URL_PARAM } from '@/lib/usePeriod';
 import { Eye, LogOut } from 'lucide-react';
 import { formatDateOnly } from '@/lib/finance';
 
@@ -34,15 +36,15 @@ export default function Layout() {
                 {ctx.period && (
                   <p className="mt-2 text-xs uppercase tracking-[0.14em] text-stone-500">
                     Last Updated {ctx.period.last_updated ? formatDateOnly(ctx.period.last_updated) : '—'}
-                    <span className="mx-2 text-stone-300">|</span>
-                    Reporting Status: {ctx.period.status === 'final' ? 'Final' : 'Preliminary'}
                   </p>
                 )}
               </div>
               <div className="flex items-center gap-3">
                 {ctx.period && (
                   <button
+                    type="button"
                     onClick={() => ctx.setYtdMode(!ctx.ytdMode)}
+                    aria-pressed={ctx.ytdMode}
                     className={`hidden sm:inline-flex items-center rounded-full border px-3 py-2 text-xs font-medium uppercase tracking-[0.14em] transition ${
                       ctx.ytdMode
                         ? 'border-stone-900 bg-stone-900 text-white'
@@ -63,21 +65,24 @@ export default function Layout() {
                   <span className="hidden md:inline">Client View</span>
                 </Link>
                 <button
+                  type="button"
                   onClick={() => base44.auth.logout('/login')}
                   className="rounded-full p-2.5 text-stone-400 transition hover:bg-stone-100 hover:text-stone-700"
                   title="Sign out"
+                  aria-label="Sign out"
                 >
-                  <LogOut className="h-4 w-4" />
+                  <LogOut className="h-4 w-4" aria-hidden="true" />
                 </button>
               </div>
             </div>
-            <nav className="mt-6 flex gap-1 overflow-x-auto">
+            <nav className="mt-6 flex gap-1 overflow-x-auto" aria-label="Main">
               {nav.map((n) => {
                 const active = n.to === '/' ? pathname === '/' : pathname.startsWith(n.to);
                 return (
                   <Link
                     key={n.to}
-                    to={n.to}
+                    to={ctx.periodId ? `${n.to}?${PERIOD_URL_PARAM}=${encodeURIComponent(ctx.periodId)}` : n.to}
+                    aria-current={active ? 'page' : undefined}
                     className={`whitespace-nowrap rounded-full px-4 py-2 text-sm transition ${
                       active ? 'bg-stone-900 text-white' : 'text-stone-600 hover:bg-stone-100'
                     }`}
@@ -89,6 +94,7 @@ export default function Layout() {
             </nav>
           </div>
         </header>
+        {ctx.isAdmin && !ctx.loading && <ContextBar periods={ctx.periods} period={ctx.period} onSwitch={ctx.setPeriodId} />}
         <main className="mx-auto max-w-6xl px-6 py-10">
           {ctx.loading ? (
             <div className="py-32 text-center text-sm text-stone-400">Loading…</div>

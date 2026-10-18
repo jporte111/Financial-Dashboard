@@ -18,6 +18,7 @@ import { validateBva } from '../src/lib/bvaValidation.js';
 import { cleanParsed } from '../src/lib/__fixtures__/bvaSample.js';
 import { PUBLISH_CHECKLIST } from '../base44/shared/publishGate.ts';
 import { monthState } from '../base44/shared/periodVersions.ts';
+import { withPublishExpect } from '../src/lib/__fixtures__/publishExpect.js';
 
 const STAGING = '6ac5040ff86172a58191d35a';
 const PRODUCTION = '6a80ccf1dac2259ae9870f29';
@@ -36,8 +37,9 @@ const admin = createClient({ appId: STAGING, token: env.STAGING_TOKEN, requiresA
 const E = admin.entities;
 const calls = { transition: 0 };
 const transition = async (action, period_id, extra = {}) => {
+  const body = await withPublishExpect(admin.entities, { action, period_id, ...extra });
   calls.transition += 1;
-  const r = await attempt(() => admin.functions.invoke('periodTransition', { action, period_id, ...extra }));
+  const r = await attempt(() => admin.functions.invoke('periodTransition', body));
   return r.ok ? { status: 200, body: r.value?.data ?? r.value } : { status: r.status, body: r.data || {} };
 };
 const served = async () => {

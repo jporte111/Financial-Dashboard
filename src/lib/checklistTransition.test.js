@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { handlePeriodTransition } from '../../base44/shared/periodTransitionCore.ts';
 import { CHECKLIST_KEYS } from '../../base44/shared/checklistCore.ts';
 import { fakeService } from './__fixtures__/fakeService.js';
+import { withPublishExpect } from './__fixtures__/publishExpect.js';
 import { confirmAll } from './__fixtures__/checklist.js';
 
 const ADMIN = { role: 'admin', email: 'admin@example.invalid', full_name: 'Admin' };
@@ -35,7 +36,7 @@ function seed(periods) {
   }
   return s;
 }
-const call = (db, action, period_id, extra = {}) => handlePeriodTransition(db.base44, { action, period_id, ...extra }, ADMIN, NOW);
+const call = async (db, action, period_id, extra = {}) => handlePeriodTransition(db.base44, await withPublishExpect(db.base44.asServiceRole.entities, { action, period_id, ...extra }), ADMIN, NOW);
 const itemStates = async (db, pid) => Object.fromEntries((await call(db, 'check', pid)).body.checklist.items.map((s) => [s.key, s.state]));
 const notConfirmed = (st) => Object.keys(st).filter((k) => st[k] !== 'confirmed').sort();
 

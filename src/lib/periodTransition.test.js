@@ -10,6 +10,8 @@ import { validateBva } from './bvaValidation.js';
 import { cleanParsed, workbookLikeParsed, SAMPLE_CUTOFF } from './__fixtures__/bvaSample.js';
 import { PUBLISH_CHECKLIST } from '../../base44/shared/publishGate.ts';
 import { confirmedChecklist } from './__fixtures__/checklist.js';
+import { withPublishExpect } from './__fixtures__/publishExpect.js';
+import { publishExpectation, publishTargetMismatch } from '../../base44/shared/periodVersions.ts';
 
 const ADMIN = { role: 'admin', email: 'admin@example.invalid', full_name: 'Admin' };
 const STATE_AND_AUDIT = new Set([
@@ -80,9 +82,10 @@ function fake({ period, lines = [], others = [] }, { failUpdate = false, dropOnC
   return { base44: { asServiceRole: svc }, writes, store };
 }
 
-const run = (fx, body, user = ADMIN, opts) => {
+const run = async (fx, body, user = ADMIN, opts) => {
   const f = fake(fx, opts);
-  return handlePeriodTransition(f.base44, body, user, NOW).then((res) => ({ ...res, writes: f.writes }));
+  const b = await withPublishExpect(f.base44.asServiceRole.entities, body);
+  return handlePeriodTransition(f.base44, b, user, NOW).then((res) => ({ ...res, writes: f.writes }));
 };
 
 function expectOnlyStateWrite(writes) {
@@ -191,8 +194,47 @@ describe('publish', () => {
     const fx = finalFx();
     Object.assign(fx.period, confirmedChecklist(fx.period, fx.lines));
     const f = fake(fx, { failUpdate: true });
-    await expect(handlePeriodTransition(f.base44, { action: 'publish', period_id: 'p1' }, ADMIN, NOW)).rejects.toThrow('network');
+    await expect(handlePeriodTransition(f.base44, { action: 'publish', period_id: 'p1', expect: publishExpectation(fx.period) }, ADMIN, NOW)).rejects.toThrow('network');
     expect(f.writes).toHaveLength(1);
+  });
+});
+
+describe('publish guard (B1): only the confirmed month and version', () => {
+  const finalFx = () => {
+    const fx = draftFixture();
+    fx.period = { ...fx.period, status: 'final', bva_import_status: 'final', finalized_at: '2026-08-04T00:00:00Z' };
+    Object.assign(fx.period, confirmedChecklist(fx.period, fx.lines));
+    return fx;
+  };
+  it('without the confirmed month and version: refused, nothing written', async () => {
+    const r = await run(finalFx(), { action: 'publish', period_id: 'p1', expect: undefined });
+    expect(r.status).toBe(409);
+    expect(r.body.blockers[0]).toMatchObject({ code: 'publish_unconfirmed', overridable: false });
+    expect(r.writes).toEqual([]);
+  });
+  it('a different month, year, revision, record or replaced version: refused, nothing written', async () => {
+    const fx = finalFx();
+    const good = publishExpectation(fx.period);
+    for (const bad of [{ month: good.month === 12 ? 1 : good.month + 1 }, { year: good.year + 1 }, { revision_number: 2 }, { period_id: 'other' }, { replaces: 'some-version' }]) {
+      const r = await run(finalFx(), { action: 'publish', period_id: 'p1', expect: { ...good, ...bad } });
+      expect(r.status, JSON.stringify(bad)).toBe(409);
+      expect(r.body.blockers[0].code).toBe('publish_target_mismatch');
+      expect(r.body.blockers[0].message).toMatch(/^Nothing was published: you confirmed /);
+      expect(r.writes).toEqual([]);
+    }
+  });
+  it('the exact version publishes (numbers given as strings are fine)', async () => {
+    const fx = finalFx();
+    const e = publishExpectation(fx.period);
+    const r = await run(fx, { action: 'publish', period_id: 'p1', expect: { ...e, month: String(e.month), year: String(e.year) } });
+    expect(r.status).toBe(200);
+    expectOnlyStateWrite(r.writes);
+  });
+  it('the mismatch names both versions in months', () => {
+    const p = { id: 'r2', label: 'September 9102', month: 9, year: 9102, revision_number: 2, supersedes: 'r1' };
+    expect(publishTargetMismatch(p, publishExpectation(p))).toBeNull();
+    expect(publishTargetMismatch(p, { ...publishExpectation(p), month: 10, period_id: 'x', revision_number: 1, replaces: null })).toBe('confirmed October 9102, but this is September 9102 · revision 2 (draft)');
+    expect(publishTargetMismatch(p, null)).toBe('missing');
   });
 });
 

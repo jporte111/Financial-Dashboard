@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import { createClient } from '@base44/sdk';
 import { PUBLISH_CHECKLIST } from '../base44/shared/publishGate.ts';
+import { withPublishExpect } from '../src/lib/__fixtures__/publishExpect.js';
 
 const STAGING = '6ac5040ff86172a58191d35a';
 const PRODUCTION = '6a80ccf1dac2259ae9870f29';
@@ -21,8 +22,9 @@ const check = (name, ok, detail = '') => { results.push(ok); log(`${ok ? 'PASS' 
 const KEYS = PUBLISH_CHECKLIST.map(([k]) => k);
 
 async function transition(action, period_id, extra = {}) {
+  const body = await withPublishExpect(admin.entities, { action, period_id, ...extra });
   for (let i = 0; ; i++) {
-    try { const r = await admin.functions.invoke('periodTransition', { action, period_id, ...extra }); return { status: 200, body: r?.data ?? r }; } catch (e) {
+    try { const r = await admin.functions.invoke('periodTransition', body); return { status: 200, body: r?.data ?? r }; } catch (e) {
       const status = e?.response?.status ?? e?.status; const body = e?.response?.data ?? e?.data ?? {};
       if ((status === undefined || status === 429 || status >= 500) && i < 4) { await sleep(1000 * (i + 1)); continue; }
       return { status, body };

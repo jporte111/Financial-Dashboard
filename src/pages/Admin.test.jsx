@@ -167,7 +167,7 @@ describe('Periods list: View for published / final periods, Edit for drafts', ()
     fireEvent.click(screen.getByRole('button', { name: 'View September 2026' }));
     await waitFor(() => expect(screen.getByRole('tab', { name: /Monthly Data/i }).getAttribute('aria-selected')).toBe('true'));
     expect(screen.getByText(/Monthly Totals — September 2026/i)).toBeTruthy();
-    expect(screen.getByText(/is published and read-only/i)).toBeTruthy();
+    expect(screen.getByText(/\(Published\) is read-only here/i)).toBeTruthy();
     expect(editors().disabled).toBe(true);
   });
 
@@ -176,7 +176,7 @@ describe('Periods list: View for published / final periods, Edit for drafts', ()
     await openPeriods();
     fireEvent.click(screen.getByRole('button', { name: 'View August 2026' }));
     await waitFor(() => expect(screen.getByText(/Monthly Totals — August 2026/i)).toBeTruthy());
-    expect(screen.getByText(/is final and read-only/i)).toBeTruthy();
+    expect(screen.getByText(/\(Final — not published\) is read-only here/i)).toBeTruthy();
     expect(editors().disabled).toBe(true);
   });
 

@@ -18,6 +18,7 @@ import { planBvaImport } from '../src/lib/bvaImport.js';
 import { validateBva } from '../src/lib/bvaValidation.js';
 import { cleanParsed, SAMPLE_CUTOFF } from '../src/lib/__fixtures__/bvaSample.js';
 import { PUBLISH_CHECKLIST } from '../base44/shared/publishGate.ts';
+import { withPublishExpect } from '../src/lib/__fixtures__/publishExpect.js';
 
 const SERVER = process.env.SERVER || '';
 if (!/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(SERVER)) { console.error('SERVER must be a localhost URL.'); process.exit(2); }
@@ -37,7 +38,7 @@ const fn = async (name, body) => {
   const r = await attempt(() => admin.functions.invoke(name, body));
   return r.ok ? { status: 200, body: r.value?.data ?? r.value } : { status: r.status, body: r.data || {} };
 };
-const transition = (action, period_id, extra = {}) => fn('periodTransition', { action, period_id, ...extra });
+const transition = async (action, period_id, extra = {}) => fn('periodTransition', await withPublishExpect(admin.entities, { action, period_id, ...extra }));
 const served = async () => {
   const r = await attempt(() => anon.functions.invoke('publicDashboard', {}));
   return r.ok ? (r.value?.data ?? r.value) : null;
