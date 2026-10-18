@@ -24,6 +24,7 @@
 
 import { n, round2, expectedPacePct, computeYtd, elapsedMonthsFromCutoff } from './bva.js';
 import { isHardValidation, CLIENT_ONLY_HARD } from '../../base44/shared/hardRules.ts';
+import { detailGroupKey } from './bvaCorrections.js';
 
 export const SEVERITY = { ERROR: 'error', WARNING: 'warning' };
 
@@ -518,7 +519,8 @@ export function validateBva(parsed, opts = {}) {
   // are not imported by the parser).
   missingIn('detail', 'Watch-list categories', detailRaw.filter((d) => (d.actualYtd == null) !== (d.annualBudget == null)), ['actualYtd', 'annualBudget']);
   const detailCategories = detailRaw.map((d) => {
-    const mapped = d.code ? groupMap[String(d.code).trim().toLowerCase().replace(/\s+/g, ' ')] || null : null;
+    const key = detailGroupKey(d.code, d.name);
+    const mapped = key ? groupMap[key] || null : null;
     return {
       code: d.code || null,
       name: d.name,

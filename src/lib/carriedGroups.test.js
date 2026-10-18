@@ -28,7 +28,7 @@ describe('carriedGroupMap', () => {
   it('unconfirmed or unassigned groups last month, and summary lines, are never carried', () => {
     expect(carriedGroupMap(PREV, [{ code: '9005', name: 'Test Travel' }, { code: '9006', name: 'Test Unassigned' }, { code: '9007', name: 'FIXED' }])).toEqual({});
   });
-  it('rows without a code are never carried', () => {
+  it('a row without a code never takes the group of a coded row with the same name', () => {
     expect(carriedGroupMap(PREV, [{ code: '', name: 'Test Gardening' }])).toEqual({});
   });
   it('the import uses a carried group as a confirmed group (no hand entry needed)', () => {

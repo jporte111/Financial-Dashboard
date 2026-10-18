@@ -158,6 +158,18 @@ Fixed/Variable/Discretionary filters until confirmed, and must never affect the
 authoritative Fixed/Variable/Discretionary summary totals — those come only from the BVA
 expense-summary block, never from summing DETAIL watch-list rows.
 
+A DETAIL row the workbook gives no account code (an account without a QuickBooks number
+of its own) is keyed by its exact normalized name instead (`detailGroupKey` in
+`src/lib/bvaCorrections.js`, `name:<name>`): its confirmed group is carried from last
+month only when a code-less row with exactly that name was confirmed, it can be mapped in
+the Import Center, and it never takes the group of a coded row with the same name. In
+the Phase 5b drill-down (`base44/shared/detailReport.ts`) such a line matches only the
+confirmed number-less account (DetailAccountMap) whose client-facing name is exactly the
+line's name, in the line's cost group, child accounts included; never a partial or fuzzy
+match. Never add a DETAIL line the BVA does not have, and never reclassify transactions
+in the app: expenses belong to a DETAIL line only when QuickBooks posts them to that
+account or its sub-accounts.
+
 ## Legacy vs. BVA-validated periods
 
 A reporting period is "BVA-validated" only when `bva_import_status === 'final'`. For a

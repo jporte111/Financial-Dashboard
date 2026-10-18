@@ -10,6 +10,7 @@
 import { round2, n, elapsedMonthsFromCutoff } from './bva.js';
 import { monthState, isDiscarded, isSuperseded, isRevision, versionLabel } from '../../base44/shared/periodVersions.ts';
 import { withoutNulls, nextMissingList, MISSING_MARKER } from '../../base44/shared/sourceMissing.ts';
+import { detailGroupKey } from './bvaCorrections.js';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -192,9 +193,11 @@ export function planBvaImport(args) {
   }
   for (const d of R.detail.categories) {
     // Never guess a group. Re-use a prior CONFIRMED mapping keyed by the
-    // normalized account number; otherwise the row is 'unassigned' and stays
+    // normalized account number (or, for a row without a code, its exact
+    // name: detailGroupKey); otherwise the row is 'unassigned' and stays
     // unconfirmed until an admin sets it. There is no discretionary fallback.
-    const mapped = d.code ? groupMap[normKey(d.code)] : null;
+    const key = detailGroupKey(d.code, d.name);
+    const mapped = key ? groupMap[key] || null : null;
     desiredLines.push({
       category: d.name,
       qb_code: d.code || '',
@@ -297,7 +300,8 @@ export function importPreflight(match) {
 // Derive a prior category-number -> group map from existing BudgetLine rows so
 // re-imports and new months keep human-confirmed detail groupings.
 // Confirmed watch-list groups carried forward from the previous month's report:
-// only for rows whose account code AND category name are unchanged, and only
+// only for rows whose account code AND category name are unchanged (a row
+// without a code: the same exact name, also without a code), and only
 // confirmed groups (Fixed / Variable / Discretionary / Savings). A new or
 // renamed row is not carried -- it stays unassigned until an admin sets it.
 const CARRY_GROUPS = ['fixed', 'variable', 'discretionary', 'savings'];
@@ -305,11 +309,12 @@ const normName = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' '
 export function carriedGroupMap(previousLines, detailRows) {
   const prev = new Map();
   for (const l of previousLines || []) {
-    if (l.bva_detail && l.group_confirmed && l.qb_code && CARRY_GROUPS.includes(l.budget_group)) prev.set(normKey(l.qb_code), l);
+    const key = l.bva_detail ? detailGroupKey(l.qb_code, l.category) : '';
+    if (key && l.group_confirmed && CARRY_GROUPS.includes(l.budget_group)) prev.set(key, l);
   }
   const out = {};
   for (const d of detailRows || []) {
-    const key = normKey(d.code || '');
+    const key = detailGroupKey(d.code, d.name);
     const p = key ? prev.get(key) : null;
     if (p && normName(p.category) === normName(d.name)) out[key] = p.budget_group;
   }
@@ -320,7 +325,7 @@ export function groupMapFromLines(lines) {
   const map = {};
   for (const l of lines || []) {
     if (!l.group_confirmed) continue;
-    const key = normKey(l.qb_code || '');
+    const key = l.bva_detail ? detailGroupKey(l.qb_code, l.category) : normKey(l.qb_code || '');
     if (key && ['fixed', 'variable', 'discretionary'].includes(l.budget_group)) map[key] = l.budget_group;
   }
   return map;

@@ -515,7 +515,7 @@ export function parseBvaWorkbook(data) {
         pushWarn(`detail_row_blank:${r + 1}`, 'detail', `Watch-list category "${name}" has no figures in the workbook; it was not imported.`);
         continue;
       }
-      if (!code) pushWarn(`detail_code_missing:${r + 1}`, 'detail', `Detail row "${name}" has no account code, so a confirmed group cannot be carried over.`);
+      if (!code) pushWarn(`detail_code_missing:${r + 1}`, 'detail', `Detail row "${name}" has no account code, so its confirmed group is carried over only by its exact name.`);
       categories.push(detailRow(s, r, map, code, name));
       claim(s, r, 0, rowSpan);
     }
@@ -550,7 +550,7 @@ export function parseBvaWorkbook(data) {
       if (!code) {
         if (map.month != null && isTextCell(row[map.month])) break; // transfers start here
         if (figures < 2) break;
-        pushWarn(`detail_code_missing:${r + 1}`, 'detail', `Detail row "${name}" has no account code, so a confirmed group cannot be carried over.`);
+        pushWarn(`detail_code_missing:${r + 1}`, 'detail', `Detail row "${name}" has no account code, so its confirmed group is carried over only by its exact name.`);
       }
       categories.push(detailRow(s, r, map, code, name));
       claim(s, r, 0, span);
