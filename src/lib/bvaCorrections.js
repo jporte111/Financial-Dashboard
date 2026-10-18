@@ -24,6 +24,12 @@ const MISSING_MARKER = 'source_missing_fields';
 
 const normCode = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
+// The key a watch-list (DETAIL) row's confirmed group is stored and looked up
+// by: its normalized account code, or -- for a row the workbook gives no code
+// (an account without a QuickBooks number of its own) -- its exact normalized
+// name, prefixed so it can never collide with a code (owner, 2026-10-18).
+export const detailGroupKey = (code, name) => (normCode(code) ? normCode(code) : normCode(name) ? `name:${normCode(name)}` : '');
+
 // Which workbook value a mismatch warning can be corrected against.
 export const WARNING_SOURCE_PATHS = {
   cash_total_mismatch: 'cash.reportedTotal',

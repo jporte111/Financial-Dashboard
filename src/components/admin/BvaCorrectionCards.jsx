@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { fmtCurrency } from '@/lib/finance';
 import { Input as UiInput } from '@/components/ui/input';
 import { Button as UiButton } from '@/components/ui/button';
-import { SAVINGS_FIELDS } from '@/lib/bvaCorrections';
+import { SAVINGS_FIELDS, detailGroupKey } from '@/lib/bvaCorrections';
 
 // The shared ui primitives are untyped forwardRef components; these typed
 // wrappers state the props this file passes so the typecheck verifies them.
@@ -65,7 +65,6 @@ export function SavingsCard({ corrections = [], onSave, onRemove, by }) {
   );
 }
 
-const normCode = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const GROUP_LABEL = { fixed: 'Fixed', variable: 'Variable', discretionary: 'Discretionary', savings: 'Savings', unassigned: 'Unassigned' };
 
 export function GroupMappingCard({ validation, corrections = [], onSave, onRemove, by, carried = null }) {
@@ -77,7 +76,7 @@ export function GroupMappingCard({ validation, corrections = [], onSave, onRemov
   return (
     <Card title="Category groups" subtitle={`Fixed / Variable / Discretionary mapping for every watch-list (DETAIL) category. ${unmapped ? `${unmapped} still unassigned.` : 'All mapped.'}`}>
       {cats.map((cat) => {
-        const key = normCode(cat.code);
+        const key = detailGroupKey(cat.code, cat.name);
         const correction = correctionFor(key);
         const value = correction ? correction.value : cat.group || 'unassigned';
         return (
@@ -87,9 +86,9 @@ export function GroupMappingCard({ validation, corrections = [], onSave, onRemov
             <select
               className="rounded-md border border-stone-200 bg-white px-2 py-1 text-xs"
               value={value}
-              disabled={!cat.code}
+              disabled={!key}
               onChange={(e) => {
-                if (!cat.code) return;
+                if (!key) return;
                 if (e.target.value === 'unassigned') {
                   if (correction) onRemove(correction);
                   return;
@@ -106,7 +105,7 @@ export function GroupMappingCard({ validation, corrections = [], onSave, onRemov
                 ? `differs from ${from} (${GROUP_LABEL[carriedMap[key]] || carriedMap[key]}) — shown as a warning`
                 : carriedMap[key] && !correction
                   ? `carried from ${from}`
-                  : correction ? 'adjusted here' : cat.groupConfirmed ? 'confirmed on the draft' : cat.code && !carriedMap[key] ? 'unassigned (new or renamed row)' : 'unassigned'}
+                  : correction ? 'adjusted here' : cat.groupConfirmed ? 'confirmed on the draft' : key && !carriedMap[key] ? 'unassigned (new or renamed row)' : 'unassigned'}
             </span>
           </div>
         );

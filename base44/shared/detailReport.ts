@@ -16,6 +16,11 @@
 //   number of its own counts toward a watch line, and is shown to the client,
 //   only once its full path is confirmed (DetailAccountMap). Anything outside
 //   the three cost groups is "unmapped": kept internal, never dropped.
+// - A watch-list (DETAIL) line the BVA gives no account number (owner,
+//   2026-10-18) matches by name: the confirmed accounts without a number of
+//   their own whose client-facing name is exactly the line's name (whitespace
+//   and case aside), in the line's cost group, child accounts included. Never
+//   a partial or fuzzy match; with no such account the line has no detail.
 
 export const DETAIL_HEADERS = ['Transaction date', 'Transaction type', 'Num', 'Name', 'Description', 'Account Name', 'Item split account', 'Amount', 'Balance'];
 export const CHUNK_ROWS = 250; // rows per TransactionDetailChunk record
@@ -207,6 +212,19 @@ export function buildDetailRows(read: any, { cutoff, year }: { cutoff: string; y
 // own number only when confirmed (row.ok).
 const countsForWatch = (row: any, code: string) => row.ns.includes(code) && (row.n ? true : row.ok);
 
+// A line without an account number: the confirmed number-less accounts named
+// exactly like the line (in its cost group when it has one), and their children.
+const nameKey = (s: any) => normSegment(s).toLowerCase();
+const underAny = (p: string, anchors: string[]) => anchors.some((a) => p === a || p.startsWith(`${a}:`));
+function namedAccounts(rows: any[], line: any) {
+  const want = nameKey(line.category);
+  const group = ['fixed', 'variable', 'discretionary'].includes(line.budget_group) ? line.budget_group : null;
+  if (!want) return [];
+  return [...new Set(rows.filter((r) => r.ok && !r.n && r.g && (!group || r.g === group) && nameKey(r.ac) === want).map((r) => r.p))].sort();
+}
+const countsForNamed = (row: any, anchors: string[]) => underAny(row.p, anchors) && (row.n ? true : row.ok);
+const inLine = (row: any, entry: any) => (entry.code ? countsForWatch(row, entry.code) : countsForNamed(row, entry.accounts || []));
+
 // ---- reconciliation ----------------------------------------------------------------
 // lines: the version's BudgetLines (the BVA, authoritative). Per line:
 //   { key, kind: 'group'|'watch', line_id, label, group, code, bva_total,
@@ -231,12 +249,21 @@ export function reconcileDetail(rows: any[], lines: any[]) {
   }
   for (const l of lines.filter(isDetailLine)) {
     const code = segmentNumber(String(l.qb_code || '')) || segmentNumber(String(l.category || ''));
-    if (!code) continue;
     const bva = toCents(l.ytd_actual);
-    const mine = rows.filter((r) => countsForWatch(r, code));
+    if (code) {
+      const mine = rows.filter((r) => countsForWatch(r, code));
+      const detail = mine.reduce((s, r) => s + r.a, 0);
+      const withheld = rows.filter((r) => r.ns.includes(code) && !r.n && !r.ok).length;
+      out.push({ key: `watch:${l.id}`, kind: 'watch', line_id: l.id, label: l.category, group: l.budget_group || null, code,
+        bva_total: bva, detail_total: detail, listed_total: detail, difference: bva == null ? null : detail - bva, status: statusOf(bva, detail, mine.length), rows: mine.length, withheld });
+      continue;
+    }
+    // No account number: match by exact name (see the rules above).
+    const accounts = namedAccounts(rows, l);
+    const mine = rows.filter((r) => countsForNamed(r, accounts));
     const detail = mine.reduce((s, r) => s + r.a, 0);
-    const withheld = rows.filter((r) => r.ns.includes(code) && !r.n && !r.ok).length;
-    out.push({ key: `watch:${l.id}`, kind: 'watch', line_id: l.id, label: l.category, group: l.budget_group || null, code,
+    const withheld = rows.filter((r) => !r.ok && !r.n && r.g && nameKey(plainAccountName(r.p)) === nameKey(l.category)).length;
+    out.push({ key: `watch:${l.id}`, kind: 'watch', line_id: l.id, label: l.category, group: l.budget_group || null, code: null, accounts,
       bva_total: bva, detail_total: detail, listed_total: detail, difference: bva == null ? null : detail - bva, status: statusOf(bva, detail, mine.length), rows: mine.length, withheld });
   }
   const unmapped = rows.filter((r) => !r.g);
@@ -255,7 +282,7 @@ export function reconcileDetail(rows: any[], lines: any[]) {
 export function rowsForLine(rows: any[], entry: any) {
   if (!entry) return [];
   if (entry.kind === 'group') return rows.filter((r) => r.g === entry.group);
-  return rows.filter((r) => countsForWatch(r, entry.code));
+  return rows.filter((r) => inLine(r, entry));
 }
 
 // What a client may see for one line (decisions B and C, 2026-10-17):
@@ -285,7 +312,7 @@ export function detailWarnings(reconciliation: any) {
   const out: any[] = [];
   for (const e of reconciliation.lines || []) {
     if (e.status === 'difference') out.push({ code: `detail_difference:${e.key}`, message: `${e.label}: the transaction detail totals ${fmt(e.detail_total)}, the report ${fmt(e.bva_total)} (difference ${fmt(e.difference)}).${e.kind === 'watch' ? ' Its transactions are not shown to the client.' : ''}` });
-    if (e.status === 'no_detail' && e.bva_total) out.push({ code: `detail_difference:${e.key}`, message: `${e.label}: no transactions in the detail for a report figure of ${fmt(e.bva_total)}.` });
+    if (e.status === 'no_detail' && e.bva_total) out.push({ code: `detail_difference:${e.key}`, message: `${e.label}: no transactions in the detail for a report figure of ${fmt(e.bva_total)}.${e.kind === 'watch' && !e.code ? ` This line has no account number, so it matches only a confirmed account named exactly "${e.label}"${e.withheld ? ` (one with that name is not confirmed yet)` : ''}.` : ''}` });
   }
   const u = reconciliation.unmapped;
   if (u?.count) out.push({ code: 'detail_unmapped', message: `${u.count} transaction(s) (${fmt(u.cents)}) are outside the three cost groups (${u.accounts.map((a: any) => a.path).join(', ')}); they are kept internal.` });
