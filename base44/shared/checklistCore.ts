@@ -266,7 +266,7 @@ export const CATALOGUE: Record<string, { title: string; action: string; where: s
   cutoff_date_conflict: { title: 'The workbook shows conflicting cutoff dates', action: 'Confirm the correct cutoff date.', where: IMPORT },
   cutoff_date_missing: { title: 'The workbook has no cutoff date', action: 'Confirm the cutoff date on the import screen.', where: IMPORT },
   detail_row_blank: { title: 'A watch-list row has no figures', action: 'It was not imported. Check the workbook if it should have figures.', where: IMPORT },
-  detail_code_missing: { title: 'A watch-list row has no account code', action: 'Its confirmed group cannot be carried over; classify it again, or add the code in the workbook.', where: IMPORT },
+  detail_code_missing: { title: 'A watch-list row has no account code', action: 'Its confirmed group carries forward when last month had a confirmed row with the same name; if the name changed or there is no confirmed group yet, review and classify it.', where: IMPORT },
   detail_orphan_row: { title: 'A watch-list row could not be matched', action: 'Check the watch-list block in the workbook.', where: WORKBOOK },
   expense_total_row_missing: { title: 'The total expenses row was not found', action: 'Check the workbook layout; nothing is required to publish.', where: WORKBOOK },
   income_total_row_missing: { title: 'The total income row was not found', action: 'Check the workbook layout; nothing is required to publish.', where: WORKBOOK },
