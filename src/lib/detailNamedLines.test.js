@@ -38,7 +38,7 @@ describe('Phase 5b: a DETAIL line without an account number', () => {
   it('the client sees its rows (four fields) under the account name, and the matching note', () => {
     const rows = rowsWith('Example Wedding');
     const c = clientDetail(rows, entryOf(reconcileDetail(rows, LINES), 'w-wed'));
-    expect(c.transactions.map((t) => Object.keys(t).sort())).toEqual(Array(3).fill(['account', 'amount', 'date', 'payee']));
+    expect(c.transactions.map((t) => Object.keys(t).sort())).toEqual(Array(3).fill(['account', 'amount', 'date', 'payee', 'tree']));
     expect(c.transactions.map((t) => t.account)).toEqual(['Example Wedding', 'Example Wedding – Flowers', 'Venue']);
     expect(c.note).toBe('Listed transactions total $5,500.00, matching the report.');
   });
