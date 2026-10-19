@@ -696,13 +696,13 @@ export default function BvaImportCenter() {
           <div className="rounded-2xl border border-stone-200 bg-white p-6">
             <p className="text-xs uppercase tracking-[0.14em] text-stone-500">Extracted &amp; independently validated</p>
             <div className="mt-3 divide-y divide-stone-100">
-              <Line label="Elapsed months / expected pace" value={`${validation.elapsedMonths ?? "missing"} / ${validation.elapsedMonths == null ? "—" : fmtPct(validation.pacePct * 100)}`} />
+              <Line label="Elapsed months / Budget" value={`${validation.elapsedMonths ?? "missing"} / ${validation.elapsedMonths == null ? "—" : fmtPct(validation.pacePct * 100)}`} />
               <Line label="Total Cash" value={money(R.cash.total)} />
               <Line label="YTD Income" value={money(R.income.actualTotal)} />
               <Line label="Annual Budgeted Income" value={money(R.income.budgetTotal)} sub={R.income.workbookBudgetTotal != null && R.income.workbookBudgetTotal !== R.income.budgetTotal ? `workbook ${money(R.income.workbookBudgetTotal)}` : ''} />
               <Line label="YTD Expenses" value={money(R.expenses.actualTotal)} />
               <Line label="Annual Budgeted Expenses" value={money(R.expenses.budgetTotal)} />
-              <Line label="Overall variance to expected pace" value={`${money(R.expenses.overall.varianceToPace)} (${R.expenses.overall.variancePct == null ? "—" : fmtPct(R.expenses.overall.variancePct * 100)})`} />
+              <Line label="Overall variance to Budget" value={`${money(R.expenses.overall.varianceToPace)} (${R.expenses.overall.variancePct == null ? "—" : fmtPct(R.expenses.overall.variancePct * 100)})`} />
               <Line
                 label="Distributions YTD (calculated from quarterly distributions)"
                 value={money(R.distributions.entitySum)}

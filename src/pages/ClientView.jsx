@@ -65,7 +65,7 @@ export default function ClientView() {
                   <div>
                     <h2 className="font-display text-xl tracking-tight">Budget vs Actuals</h2>
                     <p className="mt-1 text-sm text-stone-500">
-                      Year to date against expected pace · open a group or category for its transactions
+                      Year to date against budget · open a group or category for its transactions
                     </p>
                   </div>
                 </div>

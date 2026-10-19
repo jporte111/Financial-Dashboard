@@ -109,12 +109,12 @@ export default function SnapshotCards({ vm }) {
         <DoesNotAddUp shown={s.annualExpenseBudget} calc={s.expensesCalculatedBudget} rows="expense groups' budgets" />
       </Card>
       <Card label="Remaining Annual Expense Budget" value={fmtCurrency(s.remainingAnnualBudget)} />
-      <Card label="Expected Pace" value={fmtPct(pct100(s.expectedPacePct))} subtitle={vm.labels.elapsedLabel} />
+      <Card label="Budget" value={fmtPct(pct100(s.expectedPacePct))} subtitle={vm.labels.elapsedLabel} />
 
       <div className="rounded-2xl border border-stone-200 bg-white p-6 sm:col-span-2 lg:col-span-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs uppercase tracking-[0.14em] text-stone-500 inline-flex items-center gap-1.5">
-            Overall Variance to Expected Pace
+            Overall Variance to Budget
             <InfoHint text={PACE_VARIANCE_TOOLTIP} />
           </p>
           <StatusPill status={s.status} />

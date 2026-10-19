@@ -73,7 +73,7 @@ export default function Dashboard() {
       <section>
         <SectionHeading
           title="Budget Overview"
-          subtitle={monthMode ? 'Current month against expected monthly allocation' : 'Year-to-date performance against expected pace'}
+          subtitle={monthMode ? 'Current month against expected monthly allocation' : 'Year-to-date performance against budget'}
         />
         <StateNote state={vm.states.groups} className="mb-4" />
         {vm.states.groups !== SECTION_STATE.NOT_IMPORTED && (
@@ -83,7 +83,7 @@ export default function Dashboard() {
 
       {!monthMode && vm.attention.length > 0 && (
         <section>
-          <SectionHeading title="Categories Needing Attention" subtitle="Flagged from validated BVA detail · furthest above expected pace first" />
+          <SectionHeading title="Categories Needing Attention" subtitle="Flagged from validated BVA detail · furthest above budget first" />
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {vm.attention.map((d) => (
               <button

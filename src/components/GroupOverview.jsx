@@ -54,9 +54,9 @@ export default function GroupOverview({ groups, monthMode, expectedPacePct }) {
                   <Row label="Annual Budget" value={fmtCurrency(c.annual)} />
                   <Row label="Remaining" value={fmtCurrency(c.remaining)} />
                   <Row label="Percent Used" value={fmtPct(pct100(c.percentUsed))} />
-                  <Row label="Expected Pace" value={fmtPct(pct100(expectedPacePct ?? c.pacePct))} />
-                  <Row label="Variance to Expected Pace" hint={PACE_VARIANCE_TOOLTIP} value={<Variance amount={c.varianceToPace} />} />
-                  <Row label="Gap to Expected Pace" value={<VariancePct pct={c.variancePct} amount={c.varianceToPace} />} />
+                  <Row label="Budget" value={fmtPct(pct100(expectedPacePct ?? c.pacePct))} />
+                  <Row label="Variance to Budget" hint={PACE_VARIANCE_TOOLTIP} value={<Variance amount={c.varianceToPace} />} />
+                  <Row label="Gap to Budget" value={<VariancePct pct={c.variancePct} amount={c.varianceToPace} />} />
                 </>
               )}
             </div>

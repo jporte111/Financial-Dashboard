@@ -59,9 +59,9 @@ export function fmtVariance(amount, { cents = true, basis = 'pace' } = {}) {
   if (isMissingNumber(amount)) return MISSING_TEXT;
   const v = Number(amount);
   const rounded = Math.round(v * 100) / 100;
-  if (rounded === 0) return basis === 'month' ? 'On budget' : 'On pace';
+  if (rounded === 0) return 'On budget';
   const side = rounded > 0 ? 'below' : 'above';
-  return `${fmtCurrency(Math.abs(rounded), { cents })} ${side} ${basis === 'month' ? 'monthly budget' : 'expected pace'}`;
+  return `${fmtCurrency(Math.abs(rounded), { cents })} ${side} ${basis === 'month' ? 'monthly budget' : 'budget'}`;
 }
 
 // "+2.91%" / "-0.65%" with an explicit sign

@@ -27,7 +27,7 @@ export function heroTakeaway(vm) {
   const v = s.overallVarianceAmount;
   if (!isMissingNumber(v)) {
     const r = Math.round(Number(v) * 100) / 100; // "on pace" exactly when the card says so
-    parts.push(r === 0 ? 'spending is on expected pace' : `spending is ${fmtCurrency(Math.abs(r), { cents: false })} ${r > 0 ? 'below' : 'above'} expected pace`);
+    parts.push(r === 0 ? 'spending is on budget' : `spending is ${fmtCurrency(Math.abs(r), { cents: false })} ${r > 0 ? 'below' : 'above'} budget`);
   }
   if (!isMissingNumber(s.incomeBudgetUsedPct) && !isMissingNumber(vm.pacePct)) {
     parts.push(`income is at ${fmtPct(pct100(s.incomeBudgetUsedPct))} of its annual budget (${fmtPct(pct100(vm.pacePct))} expected by now)`);

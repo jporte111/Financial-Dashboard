@@ -51,8 +51,8 @@ export const STATUS = {
 };
 
 export const STATUS_TEXT = {
-  [STATUS.UNDER]: 'Below Expected Pace',
-  [STATUS.OVER]: 'Above Expected Pace',
+  [STATUS.UNDER]: 'Below Budget',
+  [STATUS.OVER]: 'Above Budget',
   [STATUS.ON]: 'On Pace',
   [STATUS.EXCEEDED]: 'Annual Budget Exceeded',
 };
