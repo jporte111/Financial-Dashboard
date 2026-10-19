@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Carlito:wght@400;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -80,6 +82,14 @@
 }
 
 
+
+/* Numbers (currency figures, percentages) render in Calibri where the
+   viewer's machine has it, with metric-compatible Carlito as the web
+   fallback. Every numeric display in the app carries the tabular-nums
+   class, so this single rule restyles them all. */
+.tabular-nums {
+  font-family: 'Calibri', 'Carlito', 'Inter', ui-sans-serif, system-ui, sans-serif;
+}
 
 @layer base {
   * {
