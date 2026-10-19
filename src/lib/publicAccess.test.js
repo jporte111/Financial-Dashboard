@@ -185,7 +185,7 @@ describe('publicCategoryTransactions: server-side publication and line checks', 
   });
 
   it('the client field allowlist is exactly the approved four and can never include internal fields', () => {
-    expect(PUBLIC_TRANSACTION_FIELDS).toEqual(['date', 'payee', 'amount', 'account']); // owner, Phase 5b (2026-10-17)
+    expect(PUBLIC_TRANSACTION_FIELDS).toEqual(['date', 'payee', 'amount', 'account', 'tree']); // owner, Phase 5b (2026-10-17); tree = cleaned display names only (no account numbers), 2026-10-19
     expect(PUBLIC_TRANSACTION_FIELDS.filter((f) => NEVER_CLIENT_TRANSACTION_FIELDS.includes(f))).toEqual([]);
     for (const f of ['internal_notes', 'review_status', 'review_flags', 'reviewed_by', 'qb_transaction_id', 'qb_account', 'account_id', 'full_account_path', 'copied_from', 'source', 'treatment', 'id', 'memo', 'description', 'payment_account', 'qb_type', 'qb_num', 'account_number']) {
       expect(NEVER_CLIENT_TRANSACTION_FIELDS).toContain(f);

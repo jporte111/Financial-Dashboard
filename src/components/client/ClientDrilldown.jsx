@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useDrilldownTransactions } from '@/lib/useDrilldownTransactions';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
@@ -6,6 +6,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { bvaComputeYtd, bvaSavingsStatus, fmtCurrency, fmtPct, PACE_VARIANCE_TOOLTIP, pct100 } from '@/lib/finance';
 import StatusPill from '@/components/StatusPill';
 import InfoHint from '@/components/InfoHint';
+import AccountTreeGroups from '@/components/AccountTreeGroups';
 import Variance, { VariancePct } from '@/components/Variance';
 import { format } from 'date-fns';
 
@@ -93,17 +94,6 @@ function DrilldownDetail({ detail }) {
 const monthName = (ym) => (ym ? format(new Date(`${ym}-15T00:00:00Z`), 'MMMM yyyy') : '');
 function DetailList({ rows, note, dataMonth, span, setSpan }) {
   const shown = span === 'month' && dataMonth ? rows.filter((t) => String(t.date).startsWith(dataMonth)) : rows;
-  const groups = useMemo(() => {
-    const m = new Map();
-    for (const t of shown) {
-      const k = t.account || 'Other';
-      if (!m.has(k)) m.set(k, []);
-      m.get(k).push(t);
-    }
-    return [...m].map(([account, list]) => ({ account, list: list.sort((a, b) => String(b.date).localeCompare(String(a.date))), total: list.reduce((s, t) => s + Number(t.amount || 0), 0) }))
-      .sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
-  }, [shown]);
-  const many = shown.length > 40;
   const tab = (k, label) => (
     <button type="button" onClick={() => setSpan(k)} aria-pressed={span === k}
       className={`rounded-full px-3 py-1 text-xs font-medium ${span === k ? 'bg-stone-900 text-white' : 'text-stone-600 hover:bg-stone-100'}`}>{label}</button>
@@ -121,26 +111,21 @@ function DetailList({ rows, note, dataMonth, span, setSpan }) {
         <p className="py-4 text-sm text-stone-500">No transactions in {monthName(dataMonth)}.</p>
       ) : (
         <div className="overflow-hidden rounded-xl border border-stone-200">
-          {groups.map((g, gi) => (
-            <details key={g.account} open={!many} className={gi ? 'border-t border-stone-200' : ''} data-testid="drilldown-account">
-              <summary className="flex cursor-pointer items-center justify-between gap-3 bg-stone-50 px-4 py-2.5 text-sm">
-                <span className="min-w-0 truncate font-medium">{g.account} <span className="font-normal text-stone-400">· {g.list.length}</span></span>
-                <span className="shrink-0 tabular-nums">{fmtCurrency(g.total)}</span>
-              </summary>
-              {g.list.map((t, i) => (
-                <div key={i} className="flex items-start justify-between gap-4 border-t border-stone-100 px-4 py-2.5">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm">{t.payee || '—'}</p>
-                    <p className="text-xs text-stone-500">{t.date ? format(new Date(`${t.date}T00:00:00`), 'MMM d, yyyy') : ''}</p>
-                  </div>
-                  <p className={`shrink-0 text-right text-sm tabular-nums ${t.amount < 0 ? 'text-emerald-700' : ''}`}>
-                    {fmtCurrency(t.amount)}
-                    {t.amount < 0 && <span className="block text-[11px] text-emerald-700">Refund/Credit</span>}
-                  </p>
+          <AccountTreeGroups
+            rows={shown}
+            renderTxn={(t, i) => (
+              <div key={i} className="flex items-start justify-between gap-4 border-t border-stone-100 px-4 py-2.5">
+                <div className="min-w-0">
+                  <p className="truncate text-sm">{t.payee || '—'}</p>
+                  <p className="text-xs text-stone-500">{t.date ? format(new Date(`${t.date}T00:00:00`), 'MMM d, yyyy') : ''}</p>
                 </div>
-              ))}
-            </details>
-          ))}
+                <p className={`shrink-0 text-right text-sm tabular-nums ${t.amount < 0 ? 'text-emerald-700' : ''}`}>
+                  {fmtCurrency(t.amount)}
+                  {t.amount < 0 && <span className="block text-[11px] text-emerald-700">Refund/Credit</span>}
+                </p>
+              </div>
+            )}
+          />
         </div>
       )}
     </div>

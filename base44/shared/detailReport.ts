@@ -67,6 +67,16 @@ export function plainAccountName(p: string, confirmedName: string | null = null)
 }
 const topGroupOf = (seg: string) => Object.values(GROUPS).some((re) => re.test(normSegment(seg)));
 
+// The client-safe account hierarchy: the path's display names (account numbers
+// and "(deleted)" markers stripped, top cost group removed), e.g.
+// "3. DISCRETIONARY COSTS:7100 - Travel:7145 - Lodging" -> ["Travel", "Lodging"].
+// This is the only path information a client sees -- no account numbers.
+export function clientTree(p: string): string[] {
+  const s = segments(p);
+  const rest = s.length && topGroupOf(s[0]) ? s.slice(1) : s;
+  return rest.map(cleanName).filter(Boolean);
+}
+
 // ---- reading the sheet model ------------------------------------------------------
 // The browser parser (src/lib/detailWorkbook.js) turns the Excel sheet into
 //   { rows: [{ r, A, B, C, D, E, F, G, H, I, J }], formulas: { [r]: number[] } }
@@ -288,12 +298,12 @@ export function rowsForLine(rows: any[], entry: any) {
 // What a client may see for one line (decisions B and C, 2026-10-17):
 //   group line: the confirmed rows, with a neutral note when the totals differ;
 //   watch line: rows only when it reconciles; otherwise no rows, a neutral note.
-export const PUBLIC_DETAIL_FIELDS = ['date', 'payee', 'amount', 'account'];
+export const PUBLIC_DETAIL_FIELDS = ['date', 'payee', 'amount', 'account', 'tree'];
 export function clientDetail(rows: any[], entry: any) {
   if (!entry) return { transactions: [], note: null, listed_total: null };
   const listed = rowsForLine(rows, entry).filter((r) => r.ok);
   const listedCents = listed.reduce((s, r) => s + r.a, 0);
-  const asClient = listed.map((r) => ({ date: r.d, payee: r.py || '', amount: r.a / 100, account: r.ac || '' }));
+  const asClient = listed.map((r) => ({ date: r.d, payee: r.py || '', amount: r.a / 100, account: r.ac || '', tree: clientTree(r.p) }));
   const matches = entry.status === 'reconciled' && listedCents === entry.bva_total;
   if (entry.kind === 'watch' && !matches) {
     return { transactions: [], listed_total: null, note: 'Transaction detail isn\'t shown for this category in this report: the transaction ledger and the report figure don\'t match. The report figure is the one used on this dashboard.' };

@@ -258,7 +258,7 @@ const reply = (status, body) => ({ status, body });
 // come only from the version's attached detail (TransactionDetailChunk) --
 // never from legacy Transaction records -- and only for accounts confirmed in
 // a cost group; a watch-list line that does not reconcile shows no rows.
-export const PUBLIC_TRANSACTION_FIELDS: string[] = ['date', 'payee', 'amount', 'account'];
+export const PUBLIC_TRANSACTION_FIELDS: string[] = ['date', 'payee', 'amount', 'account', 'tree'];
 // Never client-visible, whatever is approved later.
 export const NEVER_CLIENT_TRANSACTION_FIELDS = [
   'id', 'period_id', 'internal_notes', 'review_status', 'review_flags', 'reviewed_by',
