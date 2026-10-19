@@ -1,11 +1,11 @@
 import React from 'react';
+import SubAccountGroups from '@/components/SubAccountGroups';
 import { useDrilldownTransactions } from '@/lib/useDrilldownTransactions';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { bvaComputeYtd, bvaSavingsStatus, fmtCurrency, fmtPct, PACE_VARIANCE_TOOLTIP, pct100 } from '@/lib/finance';
 import StatusPill from '@/components/StatusPill';
 import InfoHint from '@/components/InfoHint';
 import Variance, { VariancePct } from '@/components/Variance';
-import { format } from 'date-fns';
 
 function Stat({ label, value, hint = null }) {
   return (
@@ -94,29 +94,8 @@ export default function CategoryDrilldown({ line, periodId, monthsElapsed, onClo
                 No stored transactions match this category. BVA figures come from the monthly workbook, not from transaction-level data.
               </p>
             ) : (
-              <div className="mt-3 max-h-[40vh] overflow-y-auto rounded-xl border border-stone-200">
-                {txns.map((t, i) => {
-                  const sub = t.full_account_path ? t.full_account_path.split(':').pop().replace(/^\d+\s*[-:]?\s*/, '').trim() : '';
-                  return (
-                    <div key={t.id || i} className={`flex items-start justify-between gap-4 px-4 py-3 ${i ? 'border-t border-stone-100' : ''}`}>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{t.vendor || t.description || '—'}</p>
-                        <p className="text-xs text-stone-500 truncate">
-                          {t.date ? format(new Date(t.date), 'MMM d, yyyy') : ''}
-                          {t.description && t.vendor ? ` · ${t.description}` : ''}
-                          {sub ? ` · ${sub}` : ''}
-                        </p>
-                        {t.source === 'detail_report' && (
-                          <p className="truncate text-[11px] text-stone-400" data-testid="internal-row">
-                            {t.full_account_path}{t.payment_account ? ` · ${t.payment_account}` : ''}{t.qb_type ? ` · ${t.qb_type}` : ''}{t.qb_num ? ` #${t.qb_num}` : ''}
-                            {t.client_visible ? '' : ' · not shown to the client (account not confirmed or outside the cost groups)'}
-                          </p>
-                        )}
-                      </div>
-                      <p className={`shrink-0 text-sm tabular-nums ${t.amount < 0 ? 'text-emerald-700' : ''}`}>{fmtCurrency(t.amount)}</p>
-                    </div>
-                  );
-                })}
+              <div className="mt-3 max-h-[40vh] overflow-y-auto">
+                <SubAccountGroups txns={txns} />
               </div>
             )}
           </>
