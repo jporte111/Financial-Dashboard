@@ -60,20 +60,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-14">
-      {vm.provenance.label && (
-        <div
-          className={`flex items-start gap-2 rounded-xl border p-4 text-sm ${
-            vm.provenance.isLegacy ? 'border-stone-300 bg-stone-100 text-stone-700' : 'border-amber-300 bg-amber-50 text-amber-900'
-          }`}
-        >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <p>
-            {vm.provenance.label}. Figures below are shown from this period's stored values and have not passed the BVA
-            import validation.
-          </p>
-        </div>
-      )}
-
       {vm.warnings.list.length > 0 && (
         <p className="rounded-xl border border-stone-200 bg-white p-4 text-sm text-stone-600" data-testid="warnings-pointer">
           {vm.warnings.list.length} validation warning{vm.warnings.list.length === 1 ? '' : 's'} for this report. Warnings never block publishing.{' '}
