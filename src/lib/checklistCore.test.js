@@ -1,6 +1,7 @@
 // The checklist (base44/shared/checklistCore.ts). Fictional data only.
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
+import process from 'node:process';
 import {
   CHECKLIST_ITEMS, CHECKLIST_KEYS, PARTS, CATALOGUE, partHashes, checklistStatus, confirmationRecord, warningCodes, buildReview, explain, itemMessage,
 } from '../../base44/shared/checklistCore.ts';
@@ -152,7 +153,7 @@ describe('four groups', () => {
 });
 
 describe('plain language for every code the system can produce', () => {
-  const src = (f) => fs.readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8');
+  const src = (f) => fs.readFileSync(process.cwd() + '/' + f, 'utf8');
   const found = new Set();
   // Routing prefixes (open_reconciliation:<code>, cross_period:<code>) are not codes.
   const add = (s) => { const f = s.split(/[:$]/)[0]; if (f && !f.startsWith('{') && !['open_reconciliation', 'cross_period'].includes(f)) found.add(f); };

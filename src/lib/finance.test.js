@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { fmtVariance, fmtSignedPct, fmtCurrency, fmtPct } from './finance.js';
 
-describe('fmtVariance wording — "above expected pace" / "below expected pace" / "On pace"', () => {
-  it('a negative variance (spending above expected pace) reads "above expected pace"', () => {
-    expect(fmtVariance(-54321.09)).toBe('$54,321.09 above expected pace');
-    expect(fmtVariance(-4321.09)).toBe('$4,321.09 above expected pace');
+describe('fmtVariance wording — "above budget" / "below budget" / "On budget"', () => {
+  it('a negative variance (spending above budget) reads "above budget"', () => {
+    expect(fmtVariance(-54321.09)).toBe('$54,321.09 above budget');
+    expect(fmtVariance(-4321.09)).toBe('$4,321.09 above budget');
   });
 
-  it('a positive variance (spending below expected pace) reads "below expected pace"', () => {
-    expect(fmtVariance(54321.09)).toBe('$54,321.09 below expected pace');
+  it('a positive variance (spending below budget) reads "below budget"', () => {
+    expect(fmtVariance(54321.09)).toBe('$54,321.09 below budget');
   });
 
   it('never says Under/Over Budget for pace', () => {
