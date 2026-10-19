@@ -17,7 +17,9 @@ const NAV = [
 export default function Layout() {
   const ctx = usePeriodData();
   const { pathname } = useLocation();
-  const nav = ctx.isAdmin ? [...NAV, { to: '/admin', label: 'Admin' }] : NAV;
+  const nav = ctx.isAdmin
+    ? [...NAV, { to: '/admin', label: 'Admin' }, { to: '/admin?tab=warnings', label: 'Validation Warnings' }]
+    : NAV;
   // Admin (and the BVA Import workflow inside it) must stay reachable even
   // before any reporting period exists — that is where the first period gets
   // created. Every other page still needs a period to show anything useful.
@@ -73,7 +75,11 @@ export default function Layout() {
             </div>
             <nav className="mt-6 flex gap-1 overflow-x-auto">
               {nav.map((n) => {
-                const active = n.to === '/' ? pathname === '/' : pathname.startsWith(n.to);
+                const [nPath, nQuery] = n.to.split('?');
+                const active =
+                  n.to === '/'
+                    ? pathname === '/'
+                    : pathname.startsWith(nPath) && (nQuery ? window.location.search.includes(nQuery) : !window.location.search.includes('tab=warnings'));
                 return (
                   <Link
                     key={n.to}

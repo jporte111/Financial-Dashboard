@@ -60,15 +60,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-14">
-      {vm.warnings.list.length > 0 && (
-        <p className="rounded-xl border border-stone-200 bg-white p-4 text-sm text-stone-600" data-testid="warnings-pointer">
-          {vm.warnings.list.length} validation warning{vm.warnings.list.length === 1 ? '' : 's'} for this report. Warnings never block publishing.{' '}
-          <Link to="/admin?tab=warnings" className="font-medium text-stone-800 underline decoration-stone-300 underline-offset-4 hover:decoration-stone-600">
-            See Validation Warnings
-          </Link>
-        </p>
-      )}
-
       <section>
         <SectionHeading
           title="Financial Snapshot"
