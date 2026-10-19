@@ -78,7 +78,7 @@ export const fmtPacePoints = (pct) => {
   if (isMissingNumber(pct)) return MISSING_TEXT;
   const v = Math.round(Number(pct) * 10000) / 100;
   if (v === 0) return 'On pace';
-  return `${Math.abs(v).toFixed(2)} pts ${v > 0 ? 'below' : 'above'} pace`;
+  return `${Math.abs(v).toFixed(2)}% ${v > 0 ? 'below' : 'above'} pace`;
 };
 
 export const GROUP_LABELS = {
